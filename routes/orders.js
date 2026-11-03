@@ -51,6 +51,7 @@ router.post("/", async (req, res) => {
         const transaction_id = req.body.transaction_id || req.body.transactionId || req.body.utr || "";
         const payment_proof = req.body.payment_proof || req.body.paymentProof || req.body.proof || "";
         const user_id = req.body.user_id || req.body.userId || null;
+        const order_type = req.body.order_type || (req.body.is_pickup ? "pickup" : "delivery");
 
         let subtotal = 0;
         if (Array.isArray(items)) {
@@ -58,7 +59,7 @@ router.post("/", async (req, res) => {
                 subtotal += Number(item.price || 0) * Number(item.quantity || 1);
             }
         }
-        const delivery = subtotal >= 299 ? 0 : 30;
+        const delivery = order_type === "pickup" ? 0 : (subtotal >= 299 ? 0 : 30);
         const total = subtotal + delivery;
 
         const savedProof = saveBase64Image(payment_proof);
@@ -73,10 +74,12 @@ router.post("/", async (req, res) => {
             customerPhone: customer_phone,
             customer_email: customer_email,
             customerEmail: customer_email,
-            address: address || "Doorstep Address",
-            city: city || "Chennai",
+            order_type: order_type,
+            is_pickup: order_type === "pickup",
+            address: address || (order_type === "pickup" ? "THULIRVA Farm Store Pickup" : "Doorstep Address"),
+            city: city || (order_type === "pickup" ? "Kanchipuram" : "Chennai"),
             state: state || "Tamil Nadu",
-            pincode: pincode || "600001",
+            pincode: pincode || (order_type === "pickup" ? "631601" : "600001"),
             subtotal,
             delivery_charge: delivery,
             total,

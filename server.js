@@ -39,6 +39,9 @@ const {
     checkSubscriptionExpiryScheduler
 } = require("./routes/notifications");
 
+const settingsRoutes =
+    require("./routes/settings");
+
 
 const app = express();
 
@@ -114,6 +117,11 @@ app.use(
 app.use(
     "/api/notifications",
     notificationRoutes
+);
+
+app.use(
+    "/api/settings",
+    settingsRoutes
 );
 
 
