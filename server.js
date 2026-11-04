@@ -42,6 +42,15 @@ const {
 const settingsRoutes =
     require("./routes/settings");
 
+const pickupRoutes =
+    require("./routes/pickup");
+
+const bannerRoutes =
+    require("./routes/banners");
+
+const offerRoutes =
+    require("./routes/offers");
+
 
 const app = express();
 
@@ -122,6 +131,21 @@ app.use(
 app.use(
     "/api/settings",
     settingsRoutes
+);
+
+app.use(
+    "/api/pickup",
+    pickupRoutes
+);
+
+app.use(
+    "/api/banners",
+    bannerRoutes
+);
+
+app.use(
+    "/api/offers",
+    offerRoutes
 );
 
 

@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { pool } = require("../config/database");
 const { authenticateToken, adminOnly } = require("../middleware/auth");
+const { notifyAdminNewOrder, notifyOrderStatusChange, sendNotification } = require("../services/notificationService");
 
 const router = express.Router();
 
@@ -64,6 +65,10 @@ router.post("/", async (req, res) => {
 
         const savedProof = saveBase64Image(payment_proof);
         const newId = MOCK_ORDERS.length ? Math.max(...MOCK_ORDERS.map(o => o.id)) + 1 : 1001;
+        const pickup_location_id = req.body.pickup_location_id || 1;
+        const pickup_location_name = req.body.pickup_location_name || (order_type === "pickup" ? "THULIRVA Farm Store" : null);
+        const pickup_slot = req.body.pickup_slot || (order_type === "pickup" ? "7:00 AM - 9:00 AM" : null);
+
         const orderData = {
             id: newId,
             user_id: user_id,
@@ -74,9 +79,13 @@ router.post("/", async (req, res) => {
             customerPhone: customer_phone,
             customer_email: customer_email,
             customerEmail: customer_email,
+            delivery_type: order_type,
             order_type: order_type,
             is_pickup: order_type === "pickup",
-            address: address || (order_type === "pickup" ? "THULIRVA Farm Store Pickup" : "Doorstep Address"),
+            pickup_location_id: pickup_location_id,
+            pickup_location_name: pickup_location_name,
+            pickup_slot: pickup_slot,
+            address: address || (order_type === "pickup" ? "THULIRVA Farm Store, Thimmarajampettai, Kanchipuram" : "Doorstep Address"),
             city: city || (order_type === "pickup" ? "Kanchipuram" : "Chennai"),
             state: state || "Tamil Nadu",
             pincode: pincode || (order_type === "pickup" ? "631601" : "600001"),
@@ -85,8 +94,8 @@ router.post("/", async (req, res) => {
             total,
             total_price: total,
             totalPrice: total,
-            payment_method: payment_method || "UPI Direct Payment",
-            payment_status: transaction_id ? "Paid (Verification Pending)" : "Pending",
+            payment_method: payment_method || "UPI QR (7904880944@superyes)",
+            payment_status: transaction_id ? "Verification Pending" : "Awaiting Payment",
             transaction_id: transaction_id,
             transactionId: transaction_id,
             payment_proof: savedProof || "",
@@ -102,14 +111,15 @@ router.post("/", async (req, res) => {
             try {
                 await client.query("BEGIN");
                 await client.query(
-                    `INSERT INTO orders (customer_name, customer_phone, customer_email, address, city, state, pincode, subtotal, delivery_charge, total, payment_method, payment_status, order_status, transaction_id, payment_proof)
-                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+                    `INSERT INTO orders (customer_name, customer_phone, customer_email, address, city, state, pincode, subtotal, delivery_charge, total, payment_method, payment_status, order_status, transaction_id, payment_proof, delivery_type, pickup_location_id, pickup_location_name, pickup_slot)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
                     [
                         orderData.customer_name, orderData.customer_phone, orderData.customer_email,
                         orderData.address, orderData.city, orderData.state, orderData.pincode,
                         orderData.subtotal, orderData.delivery_charge, orderData.total,
                         orderData.payment_method, orderData.payment_status, orderData.order_status,
-                        orderData.transaction_id, orderData.payment_proof
+                        orderData.transaction_id, orderData.payment_proof,
+                        orderData.delivery_type, orderData.pickup_location_id, orderData.pickup_location_name, orderData.pickup_slot
                     ]
                 );
                 await client.query("COMMIT");
@@ -123,6 +133,18 @@ router.post("/", async (req, res) => {
         }
 
         MOCK_ORDERS.unshift(orderData);
+
+        // Dispatch instant notifications to Admin & Customer
+        notifyAdminNewOrder(orderData).catch(() => {});
+        sendNotification({
+            userId: orderData.user_id,
+            title: "Order Placed! 🌾",
+            message: `Your Thulirva order #${orderData.id} worth ₹${Number(orderData.total || 0).toFixed(0)} has been placed successfully.`,
+            type: "order_status",
+            targetId: orderData.id,
+            forAdmin: false
+        }).catch(() => {});
+
         res.json({ success: true, order: orderData });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -189,10 +211,152 @@ const updateOrderStatusHandler = async (req, res) => {
     if (order) {
         if (status) order.order_status = status;
         if (payment_status) order.payment_status = payment_status;
+        if (status) notifyOrderStatusChange(order, status).catch(() => {});
     }
 
     res.json({ success: true, message: "Order updated successfully", order });
 };
+
+/* VERIFY PAYMENT (ADMIN / PAYMENT STAFF) */
+router.put("/:id/verify-payment", async (req, res) => {
+    const id = parseInt(req.params.id);
+    const verifiedBy = req.body.verified_by || req.body.staff_name || "Admin";
+
+    try {
+        await pool.query(
+            `UPDATE orders SET
+                payment_status = 'verified',
+                order_status = CASE WHEN delivery_type = 'pickup' THEN 'preparing' ELSE 'processing' END,
+                verified_at = CURRENT_TIMESTAMP,
+                verified_by = $1
+             WHERE id = $2`,
+            [verifiedBy, id]
+        );
+    } catch {}
+
+    const order = MOCK_ORDERS.find(o => o.id === id);
+    if (order) {
+        order.payment_status = "verified";
+        order.order_status = order.delivery_type === "pickup" ? "preparing" : "processing";
+        order.verified_at = new Date().toISOString();
+        order.verified_by = verifiedBy;
+        notifyOrderStatusChange(order, order.order_status).catch(() => {});
+    }
+
+    res.json({ success: true, message: "Payment verified successfully", order });
+});
+
+/* REJECT PAYMENT (ADMIN / PAYMENT STAFF) */
+router.put("/:id/reject-payment", async (req, res) => {
+    const id = parseInt(req.params.id);
+    const reason = req.body.rejection_reason || req.body.reason || "Payment proof mismatch or invalid transaction reference";
+
+    try {
+        await pool.query(
+            `UPDATE orders SET
+                payment_status = 'rejected',
+                rejection_reason = $1
+             WHERE id = $2`,
+            [reason, id]
+        );
+    } catch {}
+
+    const order = MOCK_ORDERS.find(o => o.id === id);
+    if (order) {
+        order.payment_status = "rejected";
+        order.rejection_reason = reason;
+    }
+
+    res.json({ success: true, message: "Payment rejected", reason, order });
+});
+
+/* MARK PICKUP READY */
+router.put("/:id/ready-pickup", async (req, res) => {
+    const id = parseInt(req.params.id);
+
+    try {
+        await pool.query(
+            `UPDATE orders SET order_status = 'ready_for_pickup' WHERE id = $1`,
+            [id]
+        );
+    } catch {}
+
+    const order = MOCK_ORDERS.find(o => o.id === id);
+    if (order) {
+        order.order_status = "ready_for_pickup";
+        notifyOrderStatusChange(order, "ready_for_pickup").catch(() => {});
+    }
+
+    res.json({
+        success: true,
+        message: "Order marked ready for pickup. Customer notified.",
+        order
+    });
+});
+
+/* MARK PICKUP COLLECTED */
+router.put("/:id/collect-pickup", async (req, res) => {
+    const id = parseInt(req.params.id);
+    const collectedBy = req.body.collected_by || req.body.staff_name || "Farm Store Staff";
+
+    try {
+        await pool.query(
+            `UPDATE orders SET
+                order_status = 'collected',
+                pickup_collected_at = CURRENT_TIMESTAMP,
+                pickup_collected_by = $1
+             WHERE id = $2`,
+            [collectedBy, id]
+        );
+    } catch {}
+
+    const order = MOCK_ORDERS.find(o => o.id === id);
+    if (order) {
+        order.order_status = "collected";
+        order.pickup_collected_at = new Date().toISOString();
+        order.pickup_collected_by = collectedBy;
+    }
+
+    res.json({
+        success: true,
+        message: "Order successfully marked as collected",
+        order
+    });
+});
+
+/* GET PENDING PAYMENT VERIFICATIONS */
+router.get("/admin/verifications", async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT * FROM orders WHERE payment_status IN ('Verification Pending', 'pending', 'Paid (Verification Pending)') ORDER BY created_at DESC`
+        );
+        if (result.rows.length) {
+            return res.json({ success: true, orders: result.rows });
+        }
+    } catch {}
+
+    const pendingList = MOCK_ORDERS.filter(o =>
+        o.payment_status === "Verification Pending" ||
+        o.payment_status === "pending" ||
+        o.payment_status === "Paid (Verification Pending)"
+    );
+    res.json({ success: true, orders: pendingList });
+});
+
+/* GET ALL PICKUP ORDERS */
+router.get("/admin/pickup", async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT * FROM orders WHERE delivery_type = 'pickup' OR is_pickup = true ORDER BY created_at DESC`
+        );
+        if (result.rows.length) {
+            return res.json({ success: true, orders: result.rows });
+        }
+    } catch {}
+
+    const pickupList = MOCK_ORDERS.filter(o => o.delivery_type === "pickup" || o.is_pickup === true);
+    res.json({ success: true, orders: pickupList });
+});
 
 router.put("/:id/status", updateOrderStatusHandler);
 router.patch("/:id/status", updateOrderStatusHandler);
