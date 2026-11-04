@@ -85,3 +85,4 @@ module.exports = {
     validateQuantity,
     validateAddress
 };
+

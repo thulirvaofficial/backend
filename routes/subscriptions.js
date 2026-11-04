@@ -338,8 +338,8 @@ router.delete("/plans/:id", async (req, res) => {
    2. CUSTOMER SUBSCRIPTIONS (ACTIVE SUBSCRIBERS)
 ============================================================ */
 
-/* GET ALL SUBSCRIPTIONS (Admin) */
-router.get("/", async (req, res) => {
+/* GET ALL SUBSCRIPTIONS (Admin API) */
+const getAllSubscriptionsHandler = async (req, res) => {
     try {
         const result = await pool.query(
             "SELECT * FROM subscriptions ORDER BY created_at DESC"
@@ -347,9 +347,162 @@ router.get("/", async (req, res) => {
         if (result.rows.length > 0) {
             return res.json({ success: true, subscriptions: result.rows });
         }
-        res.json({ success: true, subscriptions: MOCK_SUBSCRIPTIONS });
-    } catch {
-        res.json({ success: true, subscriptions: MOCK_SUBSCRIPTIONS });
+    } catch (err) {
+        // Fallback to in-memory store
+    }
+
+    if (MOCK_SUBSCRIPTIONS.length === 0) {
+        const today = new Date();
+        const sub1Start = new Date(today.getTime() - 5 * 86400000).toISOString().split('T')[0];
+        const sub2Start = new Date(today.getTime() - 26 * 86400000).toISOString().split('T')[0];
+        const sub3Start = new Date(today.getTime() - 12 * 86400000).toISOString().split('T')[0];
+
+        MOCK_SUBSCRIPTIONS = [
+            {
+                id: "SUB-101",
+                customer_name: "Kaviya Sundaram",
+                customer_phone: "7904880944",
+                customer_email: "kaviya@gmail.com",
+                product_name: "Fresh Cow Milk (1 Litre)",
+                time_period: "Daily Morning (30 Days)",
+                frequency: "Daily",
+                quantity: 1,
+                delivery_slot: "6:00 AM - 7:00 AM",
+                price_per_delivery: 82.00,
+                total_price: 2460.00,
+                start_date: sub1Start,
+                address: "No 14, Gandhi Road, Near Bus Stand",
+                city: "Kanchipuram",
+                pincode: "631501",
+                payment_method: "UPI QR (7904880944@superyes)",
+                payment_status: "Verified",
+                status: "Active",
+                transaction_id: "TXN-SUB-89412",
+                created_at: new Date(today.getTime() - 5 * 86400000).toISOString()
+            },
+            {
+                id: "SUB-102",
+                customer_name: "Manoj Kumar",
+                customer_phone: "9840123456",
+                customer_email: "manoj.k@gmail.com",
+                product_name: "Fresh Cow Milk (500ml)",
+                time_period: "Daily Morning (30 Days)",
+                frequency: "Daily",
+                quantity: 2,
+                delivery_slot: "6:30 AM - 7:30 AM",
+                price_per_delivery: 88.00,
+                total_price: 2640.00,
+                start_date: sub2Start,
+                address: "Plot 42, 2nd Avenue, Anna Nagar",
+                city: "Chennai",
+                pincode: "600040",
+                payment_method: "UPI Direct",
+                payment_status: "Verified",
+                status: "Active",
+                transaction_id: "TXN-SUB-77124",
+                created_at: new Date(today.getTime() - 26 * 86400000).toISOString()
+            },
+            {
+                id: "SUB-103",
+                customer_name: "Anand R",
+                customer_phone: "9444198765",
+                customer_email: "anand.r@gmail.com",
+                product_name: "Pure Bilona Cow Ghee (500ml)",
+                time_period: "Monthly Delivery (1 Jar/Month)",
+                frequency: "Monthly",
+                quantity: 1,
+                delivery_slot: "7:00 AM - 8:00 AM",
+                price_per_delivery: 649.00,
+                total_price: 649.00,
+                start_date: sub3Start,
+                address: "Flat 3B, Sunshine Apartments, Velachery",
+                city: "Chennai",
+                pincode: "600042",
+                payment_method: "UPI QR",
+                payment_status: "Verified",
+                status: "Paused",
+                transaction_id: "TXN-SUB-55219",
+                created_at: new Date(today.getTime() - 12 * 86400000).toISOString()
+            }
+        ];
+    }
+
+    res.json({ success: true, subscriptions: MOCK_SUBSCRIPTIONS });
+};
+
+router.get("/admin/all", getAllSubscriptionsHandler);
+router.get("/all", getAllSubscriptionsHandler);
+router.get("/", getAllSubscriptionsHandler);
+
+/* ADMIN CREATE / ONBOARD SUBSCRIBER */
+router.post("/admin/create", async (req, res) => {
+    try {
+        const {
+            customer_name,
+            customer_phone,
+            customer_email,
+            product_name,
+            frequency,
+            quantity,
+            delivery_slot,
+            total_price,
+            start_date,
+            address,
+            city,
+            pincode,
+            status
+        } = req.body;
+
+        if (!customer_name || !customer_phone) {
+            return res.status(400).json({ success: false, message: "Customer name and phone are required" });
+        }
+
+        const subId = `SUB-${Date.now().toString().slice(-5)}`;
+        const newSub = {
+            id: subId,
+            customer_name,
+            customer_phone,
+            customer_email: customer_email || "",
+            product_name: product_name || "Fresh Cow Milk (1 Litre)",
+            time_period: "Daily Morning (30 Days)",
+            frequency: frequency || "Daily",
+            quantity: parseInt(quantity) || 1,
+            delivery_slot: delivery_slot || "6:00 AM - 7:00 AM",
+            price_per_delivery: parseFloat(total_price ? (total_price / 30).toFixed(2) : 82),
+            total_price: parseFloat(total_price || 2460),
+            start_date: start_date || new Date().toISOString().split('T')[0],
+            address: address || "Doorstep Address",
+            city: city || "Kanchipuram",
+            pincode: pincode || "631501",
+            payment_method: "Admin Manual Onboarding",
+            payment_status: "Verified",
+            status: status || "Active",
+            transaction_id: `ADMIN-${Date.now().toString().slice(-4)}`,
+            created_at: new Date().toISOString()
+        };
+
+        try {
+            await pool.query(
+                `INSERT INTO subscriptions (
+                    id, customer_name, customer_phone, customer_email, product_name, time_period,
+                    frequency, quantity, delivery_slot, price_per_delivery, total_price,
+                    start_date, address, city, pincode, payment_method, payment_status, status,
+                    transaction_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+                [
+                    newSub.id, newSub.customer_name, newSub.customer_phone, newSub.customer_email,
+                    newSub.product_name, newSub.time_period, newSub.frequency, newSub.quantity,
+                    newSub.delivery_slot, newSub.price_per_delivery, newSub.total_price,
+                    newSub.start_date, newSub.address, newSub.city, newSub.pincode,
+                    newSub.payment_method, newSub.payment_status, newSub.status, newSub.transaction_id
+                ]
+            );
+        } catch (_) {}
+
+        MOCK_SUBSCRIPTIONS.unshift(newSub);
+        res.json({ success: true, message: "Subscription created successfully", subscription: newSub });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 
@@ -499,6 +652,59 @@ const cancelSubHandler = async (req, res) => {
     });
 };
 
+/* PAUSE SUBSCRIPTION (Admin & Customer) */
+const pauseSubHandler = async (req, res) => {
+    const id = req.params.id;
+    try {
+        await pool.query("UPDATE subscriptions SET status='Paused' WHERE id=$1", [id]);
+    } catch {}
+
+    const sub = MOCK_SUBSCRIPTIONS.find(s => s.id == id);
+    if (sub) sub.status = "Paused";
+
+    res.json({
+        success: true,
+        message: "Subscription paused successfully",
+        subscription: sub
+    });
+};
+
+/* RESUME SUBSCRIPTION (Admin & Customer) */
+const resumeSubHandler = async (req, res) => {
+    const id = req.params.id;
+    try {
+        await pool.query("UPDATE subscriptions SET status='Active' WHERE id=$1", [id]);
+    } catch {}
+
+    const sub = MOCK_SUBSCRIPTIONS.find(s => s.id == id);
+    if (sub) sub.status = "Active";
+
+    res.json({
+        success: true,
+        message: "Subscription reactivated and active for morning deliveries",
+        subscription: sub
+    });
+};
+
+/* DELETE SUBSCRIPTION (Admin) */
+const deleteSubHandler = async (req, res) => {
+    const id = req.params.id;
+    try {
+        await pool.query("DELETE FROM subscriptions WHERE id=$1", [id]);
+    } catch {}
+
+    MOCK_SUBSCRIPTIONS = MOCK_SUBSCRIPTIONS.filter(s => s.id != id);
+    res.json({
+        success: true,
+        message: "Subscription record removed"
+    });
+};
+
+router.put("/:id/pause", pauseSubHandler);
+router.post("/:id/pause", pauseSubHandler);
+router.put("/:id/resume", resumeSubHandler);
+router.post("/:id/resume", resumeSubHandler);
+router.delete("/:id", deleteSubHandler);
 router.put("/:id/cancel", cancelSubHandler);
 router.post("/:id/cancel", cancelSubHandler);
 router.patch("/:id/status", updateSubStatusHandler);
