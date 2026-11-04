@@ -1,14 +1,9 @@
-
 name: Thulirva Backend CI/CD
 
 on:
   push:
     branches:
       - main
-    paths:
-      - 'server/**'
-      - 'backend/**'
-      - '.github/workflows/deploy-backend.yml'
 
   workflow_dispatch:
 

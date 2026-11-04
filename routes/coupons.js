@@ -6,73 +6,101 @@ const router = express.Router();
 let MOCK_COUPONS = [
     {
         id: 1,
-        code: "FARM10",
+        code: "THULIRVA10",
         discount_type: "percent",
         discount_value: 10,
         min_order: 0,
         max_discount: 200,
         description: "10% OFF on all fresh farm products & subscriptions",
-        headline: "Pure Farm 10% Discount",
+        headline: "Farm 10% Welcome Offer",
         expiry_date: "2027-12-31",
-        status: "active",
-        usage_count: 34
+        usage_limit: 1000,
+        usage_count: 34,
+        status: "active"
     },
     {
         id: 2,
+        code: "FARM50",
+        discount_type: "flat",
+        discount_value: 50,
+        min_order: 499,
+        max_discount: 50,
+        description: "₹50 flat discount on orders above ₹499",
+        headline: "Flat ₹50 Savings",
+        expiry_date: "2027-12-31",
+        usage_limit: 500,
+        usage_count: 18,
+        status: "active"
+    },
+    {
+        id: 3,
+        code: "FARM10",
+        discount_type: "percent",
+        discount_value: 10,
+        min_order: 0,
+        max_discount: 150,
+        description: "10% Farm discount on dairy essentials",
+        headline: "Pure Farm 10% Off",
+        expiry_date: "2027-12-31",
+        usage_limit: 1000,
+        usage_count: 52,
+        status: "active"
+    },
+    {
+        id: 4,
         code: "THULIRVA50",
         discount_type: "flat",
         discount_value: 50,
         min_order: 299,
         max_discount: 50,
         description: "Flat ₹50 OFF on fresh doorstep orders above ₹299",
-        headline: "Flat ₹50 Savings",
+        headline: "Flat ₹50 Special",
         expiry_date: "2027-12-31",
-        status: "active",
-        usage_count: 18
-    },
-    {
-        id: 3,
-        code: "PUREMILK",
-        discount_type: "flat",
-        discount_value: 100,
-        min_order: 999,
-        max_discount: 100,
-        description: "Flat ₹100 OFF on Monthly Milk Subscriptions",
-        headline: "Monthly Milk ₹100 Special",
-        expiry_date: "2027-12-31",
-        status: "active",
-        usage_count: 27
-    },
-    {
-        id: 4,
-        code: "SUPER20",
-        discount_type: "percent",
-        discount_value: 20,
-        min_order: 500,
-        max_discount: 300,
-        description: "Super 20% OFF on organic oils, ghee & milk",
-        headline: "Mega 20% Farm Deal",
-        expiry_date: "2027-12-31",
-        status: "active",
-        usage_count: 12
+        usage_limit: 500,
+        usage_count: 41,
+        status: "active"
     },
     {
         id: 5,
+        code: "FREESHIP",
+        discount_type: "flat",
+        discount_value: 30,
+        min_order: 250,
+        max_discount: 30,
+        description: "Free doorstep delivery on farm orders",
+        headline: "Free Home Delivery",
+        expiry_date: "2027-12-31",
+        usage_limit: 500,
+        usage_count: 67,
+        status: "active"
+    },
+    {
+        id: 6,
         code: "WELCOME10",
         discount_type: "percent",
         discount_value: 10,
         min_order: 0,
         max_discount: 150,
         description: "Welcome offer: 10% OFF for all registered families",
-        headline: "Welcome 10% OFF",
+        headline: "Welcome Family Discount",
         expiry_date: "2027-12-31",
-        status: "active",
-        usage_count: 42
+        usage_limit: 1000,
+        usage_count: 85,
+        status: "active"
     }
 ];
 
-/* GET ACTIVE COUPONS (Public for offer banner & website) */
-router.get("/", (req, res) => {
+/* GET ACTIVE COUPONS (Public for cart & website) */
+router.get("/", async (req, res) => {
+    try {
+        const result = await pool.query(
+            "SELECT * FROM coupons WHERE status = 'active' ORDER BY id ASC"
+        );
+        if (result.rows.length) {
+            return res.json({ success: true, coupons: result.rows });
+        }
+    } catch {}
+
     const activeCoupons = MOCK_COUPONS.filter(c => c.status === "active");
     res.json({
         success: true,
@@ -81,7 +109,14 @@ router.get("/", (req, res) => {
 });
 
 /* GET ALL COUPONS (Admin view) */
-router.get("/admin", (req, res) => {
+router.get("/admin", async (req, res) => {
+    try {
+        const result = await pool.query("SELECT * FROM coupons ORDER BY id ASC");
+        if (result.rows.length) {
+            return res.json({ success: true, coupons: result.rows });
+        }
+    } catch {}
+
     res.json({
         success: true,
         coupons: MOCK_COUPONS
@@ -89,44 +124,88 @@ router.get("/admin", (req, res) => {
 });
 
 /* VALIDATE & APPLY COUPON */
-router.post("/validate", (req, res) => {
+router.post("/validate", async (req, res) => {
     const { code, total, order_amount, amount } = req.body;
-    if (!code) {
+    if (!code || typeof code !== 'string') {
         return res.status(400).json({
             success: false,
             valid: false,
-            message: "Please enter a promo code"
+            message: "Please enter a valid coupon code"
         });
     }
 
     const cleanCode = code.trim().toUpperCase();
-    const coupon = MOCK_COUPONS.find(c => c.code.toUpperCase() === cleanCode && c.status === "active");
+    let coupon = null;
+
+    // Check DB
+    try {
+        const result = await pool.query(
+            "SELECT * FROM coupons WHERE UPPER(code) = $1 AND status = 'active' LIMIT 1",
+            [cleanCode]
+        );
+        if (result.rows.length) {
+            coupon = result.rows[0];
+        }
+    } catch {}
+
+    if (!coupon) {
+        coupon = MOCK_COUPONS.find(c => c.code.toUpperCase() === cleanCode && c.status === "active");
+    }
 
     if (!coupon) {
         return res.status(404).json({
             success: false,
             valid: false,
-            message: `Promo code "${cleanCode}" is invalid or expired`
+            message: `Coupon code "${cleanCode}" is invalid or expired`
         });
     }
 
-    const numericTotal = Number(total !== undefined ? total : (order_amount !== undefined ? order_amount : (amount !== undefined ? amount : 0))) || 0;
-    if (coupon.min_order && numericTotal < coupon.min_order) {
+    // 1. Expiry Check
+    if (coupon.expiry_date) {
+        const exp = new Date(coupon.expiry_date);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (exp < today) {
+            return res.status(400).json({
+                success: false,
+                valid: false,
+                message: `Coupon "${coupon.code}" has expired on ${coupon.expiry_date}`
+            });
+        }
+    }
+
+    // 2. Usage Limit Check
+    if (coupon.usage_limit && Number(coupon.usage_count) >= Number(coupon.usage_limit)) {
         return res.status(400).json({
             success: false,
             valid: false,
-            message: `Minimum order of ₹${coupon.min_order} required for coupon ${coupon.code}`
+            message: `Coupon "${coupon.code}" usage limit has been reached.`
         });
     }
 
+    // 3. Minimum Order Check
+    const numericTotal = Number(total !== undefined ? total : (order_amount !== undefined ? order_amount : (amount !== undefined ? amount : 0))) || 0;
+    const minOrd = Number(coupon.min_order || 0);
+    if (minOrd > 0 && numericTotal < minOrd) {
+        return res.status(400).json({
+            success: false,
+            valid: false,
+            message: `Minimum order amount of ₹${minOrd} is required to apply "${coupon.code}"`
+        });
+    }
+
+    // 4. Calculate Discount
     let discount = 0;
+    const dVal = Number(coupon.discount_value || 0);
+    const maxD = Number(coupon.max_discount || 0);
+
     if (coupon.discount_type === "percent") {
-        discount = Math.round((numericTotal * coupon.discount_value) / 100);
-        if (coupon.max_discount && discount > coupon.max_discount) {
-            discount = coupon.max_discount;
+        discount = Math.round((numericTotal * dVal) / 100);
+        if (maxD > 0 && discount > maxD) {
+            discount = maxD;
         }
     } else {
-        discount = Number(coupon.discount_value) || 0;
+        discount = dVal;
     }
 
     if (discount > numericTotal) {
@@ -134,7 +213,13 @@ router.post("/validate", (req, res) => {
     }
 
     const newTotal = Math.max(0, numericTotal - discount);
-    coupon.usage_count = (coupon.usage_count || 0) + 1;
+
+    // Increment usage
+    try {
+        await pool.query("UPDATE coupons SET usage_count = usage_count + 1 WHERE id = $1", [coupon.id]);
+    } catch {
+        coupon.usage_count = (coupon.usage_count || 0) + 1;
+    }
 
     res.json({
         success: true,
@@ -145,83 +230,56 @@ router.post("/validate", (req, res) => {
         discount: discount,
         original_total: numericTotal,
         new_total: newTotal,
-        message: `✓ Promo code ${coupon.code} applied! You saved ₹${discount}.`
+        message: `✓ Coupon ${coupon.code} applied! Saved ₹${discount}.`
     });
 });
 
 /* CREATE NEW COUPON */
-router.post("/", (req, res) => {
-    const { code, discount_type, discount_value, min_order, max_discount, description, headline, expiry_date, status } = req.body;
-    if (!code || !discount_value) {
-        return res.status(400).json({ success: false, message: "Code and discount value are required" });
+router.post("/", async (req, res) => {
+    const { code, discount_type, discount_value, min_order, max_discount, description, headline, expiry_date, usage_limit } = req.body;
+    if (!code || discount_value === undefined) {
+        return res.status(400).json({ success: false, message: "Coupon code and discount value are required" });
     }
 
     const cleanCode = code.trim().toUpperCase();
-    const existing = MOCK_COUPONS.find(c => c.code.toUpperCase() === cleanCode);
-    if (existing) {
-        return res.status(400).json({ success: false, message: `Promo code "${cleanCode}" already exists` });
+
+    try {
+        const result = await pool.query(
+            `INSERT INTO coupons (code, discount_type, discount_value, min_order, max_discount, description, headline, expiry_date, usage_limit, status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active')
+             RETURNING *`,
+            [cleanCode, discount_type || 'percent', Number(discount_value), Number(min_order || 0), Number(max_discount || 200), description || '', headline || '', expiry_date || '2027-12-31', Number(usage_limit || 1000)]
+        );
+        return res.json({ success: true, coupon: result.rows[0] });
+    } catch (err) {
+        const newCoupon = {
+            id: MOCK_COUPONS.length + 1,
+            code: cleanCode,
+            discount_type: discount_type || 'percent',
+            discount_value: Number(discount_value),
+            min_order: Number(min_order || 0),
+            max_discount: Number(max_discount || 200),
+            description: description || '',
+            headline: headline || '',
+            expiry_date: expiry_date || '2027-12-31',
+            usage_limit: Number(usage_limit || 1000),
+            usage_count: 0,
+            status: 'active'
+        };
+        MOCK_COUPONS.push(newCoupon);
+        return res.json({ success: true, coupon: newCoupon });
     }
-
-    const newCoupon = {
-        id: Date.now(),
-        code: cleanCode,
-        discount_type: discount_type === "flat" ? "flat" : "percent",
-        discount_value: Number(discount_value),
-        min_order: Number(min_order) || 0,
-        max_discount: max_discount ? Number(max_discount) : null,
-        description: description || `${cleanCode} special discount`,
-        headline: headline || `${cleanCode} Promo Offer`,
-        expiry_date: expiry_date || "2027-12-31",
-        status: status || "active",
-        usage_count: 0
-    };
-
-    MOCK_COUPONS.unshift(newCoupon);
-    res.json({
-        success: true,
-        coupon: newCoupon,
-        message: `Promo code ${cleanCode} created successfully`
-    });
-});
-
-/* UPDATE COUPON */
-router.put("/:id", (req, res) => {
-    const id = req.params.id;
-    const idx = MOCK_COUPONS.findIndex(c => String(c.id) === String(id));
-    if (idx === -1) {
-        return res.status(404).json({ success: false, message: "Coupon not found" });
-    }
-
-    const { code, discount_type, discount_value, min_order, max_discount, description, headline, expiry_date, status } = req.body;
-    MOCK_COUPONS[idx] = {
-        ...MOCK_COUPONS[idx],
-        code: code ? code.trim().toUpperCase() : MOCK_COUPONS[idx].code,
-        discount_type: discount_type || MOCK_COUPONS[idx].discount_type,
-        discount_value: discount_value !== undefined ? Number(discount_value) : MOCK_COUPONS[idx].discount_value,
-        min_order: min_order !== undefined ? Number(min_order) : MOCK_COUPONS[idx].min_order,
-        max_discount: max_discount !== undefined ? (max_discount ? Number(max_discount) : null) : MOCK_COUPONS[idx].max_discount,
-        description: description !== undefined ? description : MOCK_COUPONS[idx].description,
-        headline: headline !== undefined ? headline : MOCK_COUPONS[idx].headline,
-        expiry_date: expiry_date !== undefined ? expiry_date : MOCK_COUPONS[idx].expiry_date,
-        status: status !== undefined ? status : MOCK_COUPONS[idx].status
-    };
-
-    res.json({
-        success: true,
-        coupon: MOCK_COUPONS[idx],
-        message: `Coupon updated successfully`
-    });
 });
 
 /* DELETE COUPON */
-router.delete("/:id", (req, res) => {
-    const id = req.params.id;
-    MOCK_COUPONS = MOCK_COUPONS.filter(c => String(c.id) !== String(id));
-    res.json({
-        success: true,
-        message: "Promo code deleted successfully"
-    });
+router.delete("/:id", async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+        await pool.query("DELETE FROM coupons WHERE id = $1", [id]);
+    } catch {
+        MOCK_COUPONS = MOCK_COUPONS.filter(c => c.id !== id);
+    }
+    res.json({ success: true, message: "Coupon removed" });
 });
 
 module.exports = router;
-

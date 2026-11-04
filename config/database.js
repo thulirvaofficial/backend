@@ -235,6 +235,11 @@ async function initializeDatabase() {
 
         // ALTER ORDERS FOR PICKUP & VERIFICATION
         await pool.query(`
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_number VARCHAR(50);
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS stock_restored BOOLEAN DEFAULT false;
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_zone VARCHAR(100);
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_code VARCHAR(50);
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(10,2) DEFAULT 0;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_type VARCHAR(50) DEFAULT 'delivery';
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_location_id INTEGER;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_location_name VARCHAR(150);
@@ -245,6 +250,87 @@ async function initializeDatabase() {
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS verified_by VARCHAR(100);
         `).catch(() => {});
+
+        // Add unique constraint on order_number if not already present
+        await pool.query(`
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'orders_order_number_unique'
+                ) THEN
+                    ALTER TABLE orders ADD CONSTRAINT orders_order_number_unique UNIQUE (order_number);
+                END IF;
+            END $$;
+        `).catch(() => {});
+
+        // COUPONS TABLE
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS coupons (
+                id SERIAL PRIMARY KEY,
+                code VARCHAR(50) NOT NULL UNIQUE,
+                discount_type VARCHAR(20) DEFAULT 'percent',
+                discount_value NUMERIC(10,2) NOT NULL DEFAULT 10,
+                min_order NUMERIC(10,2) DEFAULT 0,
+                max_discount NUMERIC(10,2) DEFAULT 200,
+                description TEXT,
+                headline VARCHAR(150),
+                expiry_date VARCHAR(50) DEFAULT '2027-12-31',
+                usage_limit INTEGER DEFAULT 1000,
+                usage_count INTEGER DEFAULT 0,
+                status VARCHAR(20) DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // Seed coupons if empty
+        const coupCheck = await pool.query("SELECT COUNT(*) FROM coupons");
+        if (Number(coupCheck.rows[0].count) === 0) {
+            const seedCoupons = [
+                ['THULIRVA10', 'percent', 10, 0, 200, '10% OFF on all fresh farm products & subscriptions', 'Farm 10% Welcome Offer'],
+                ['FARM50', 'flat', 50, 499, 50, '₹50 flat discount on orders above ₹499', 'Flat ₹50 Savings'],
+                ['FARM10', 'percent', 10, 0, 150, '10% Farm discount on dairy essentials', 'Pure Farm 10% Off'],
+                ['THULIRVA50', 'flat', 50, 299, 50, 'Flat ₹50 OFF on fresh doorstep orders above ₹299', 'Flat ₹50 Special'],
+                ['FREESHIP', 'flat', 30, 250, 30, 'Free doorstep delivery on farm orders', 'Free Home Delivery'],
+                ['WELCOME10', 'percent', 10, 0, 150, 'Welcome offer: 10% OFF for all registered families', 'Welcome Family Discount']
+            ];
+            for (const [code, dtype, dval, minOrd, maxD, desc, head] of seedCoupons) {
+                await pool.query(
+                    `INSERT INTO coupons (code, discount_type, discount_value, min_order, max_discount, description, headline, status)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, 'active') ON CONFLICT (code) DO NOTHING`,
+                    [code, dtype, dval, minOrd, maxD, desc, head]
+                );
+            }
+        }
+
+        // ANNOUNCEMENTS & NEWS TABLE
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS announcements (
+                id SERIAL PRIMARY KEY,
+                title VARCHAR(200) NOT NULL,
+                message TEXT NOT NULL,
+                badge VARCHAR(50) DEFAULT 'Announcement',
+                target_role VARCHAR(50) DEFAULT 'all',
+                is_published BOOLEAN DEFAULT true,
+                created_by VARCHAR(100) DEFAULT 'Admin',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // Seed sample announcement if empty
+        const annCheck = await pool.query("SELECT COUNT(*) FROM announcements");
+        if (Number(annCheck.rows[0].count) === 0) {
+            await pool.query(`
+                INSERT INTO announcements (title, message, badge, target_role, is_published)
+                VALUES (
+                    '🌾 Fresh Morning Milking Dispatched Daily',
+                    'Direct from our Kanchipuram pasture farms to your doorstep every morning by 7:00 AM. 100% pure, unadulterated & chilled A2 milk.',
+                    'Farm Update',
+                    'all',
+                    true
+                )
+            `);
+        }
 
         // PICKUP LOCATIONS TABLE
         await pool.query(`
