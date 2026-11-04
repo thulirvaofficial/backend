@@ -3,59 +3,9 @@ const { pool } = require("../config/database");
 
 const router = express.Router();
 
-// In-memory notifications store fallback
-let MOCK_NOTIFICATIONS = [
-    {
-        id: "NOTIF-1",
-        user_id: 1,
-        type: "order_status",
-        title: "Your order is out for delivery",
-        message: "Order #THU258963 has been dispatched. Estimated delivery by 7:00 AM.",
-        data: { order_id: "THU258963" },
-        is_read: false,
-        created_at: new Date(Date.now() - 2 * 3600000).toISOString()
-    },
-    {
-        id: "NOTIF-2",
-        user_id: 1,
-        type: "order_status",
-        title: "Order confirmed",
-        message: "Thank you for shopping with THULIRVA. Fresh farm produce is being packed.",
-        data: { order_id: "THU258963" },
-        is_read: false,
-        created_at: new Date(Date.now() - 5 * 3600000).toISOString()
-    },
-    {
-        id: "NOTIF-3",
-        user_id: 1,
-        type: "subscription_expiry",
-        title: "Subscription Expiring Soon",
-        message: "Your milk subscription expires in 3 days. Renew now for uninterrupted morning delivery!",
-        data: { subscription_id: "SUB-1001", days_remaining: 3 },
-        is_read: false,
-        created_at: new Date(Date.now() - 24 * 3600000).toISOString()
-    },
-    {
-        id: "NOTIF-4",
-        user_id: 1,
-        type: "promotion",
-        title: "Special Weekend Offer",
-        message: "Get 10% off on Pure Bilona Cow Ghee & artisanal butter this weekend! Use code FARM10.",
-        data: { promo_code: "FARM10" },
-        is_read: true,
-        created_at: new Date(Date.now() - 48 * 3600000).toISOString()
-    },
-    {
-        id: "NOTIF-5",
-        user_id: 1,
-        type: "new_product",
-        title: "New Farm Product",
-        message: "Fresh Salem Turmeric Powder is now available in the store. 100% natural aroma.",
-        data: { product_id: 10 },
-        is_read: true,
-        created_at: new Date(Date.now() - 72 * 3600000).toISOString()
-    }
-];
+// Real notifications store (no predefined fake mock notifications)
+const { IN_APP_NOTIFICATIONS } = require("../services/notificationService");
+let REAL_NOTIFICATIONS = [];
 
 // Registered FCM device push tokens
 let DEVICE_TOKENS = [];
@@ -63,12 +13,12 @@ let DEVICE_TOKENS = [];
 // Log of subscription expiry reminders sent today: key = `${subId}_${dateStr}`
 const SENT_EXPIRY_REMINDERS = new Set();
 
-/* GET USER NOTIFICATIONS */
+/* GET USER NOTIFICATIONS (ONLY REAL NOTIFICATIONS) */
 router.get("/user/:identifier", async (req, res) => {
     const ident = req.params.identifier.trim().toLowerCase();
     try {
         const result = await pool.query(
-            "SELECT * FROM notifications WHERE LOWER(COALESCE(user_id, ''))=$1 ORDER BY created_at DESC",
+            "SELECT * FROM notifications WHERE LOWER(COALESCE(user_id::text, ''))=$1 OR $1='all' ORDER BY created_at DESC",
             [ident]
         );
         if (result.rows && result.rows.length) {
@@ -76,9 +26,11 @@ router.get("/user/:identifier", async (req, res) => {
         }
     } catch {}
 
-    const userNotifs = MOCK_NOTIFICATIONS.filter(n => {
+    const source = (IN_APP_NOTIFICATIONS && IN_APP_NOTIFICATIONS.length) ? IN_APP_NOTIFICATIONS : REAL_NOTIFICATIONS;
+    const userNotifs = source.filter(n => {
+        if (ident === "all") return true;
         const nUid = (n.user_id || "").toString().toLowerCase().trim();
-        return nUid === ident || ident === "all" || ident === "1";
+        return nUid === ident;
     });
 
     res.json({

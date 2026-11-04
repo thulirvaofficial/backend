@@ -480,6 +480,27 @@ const updateSubStatusHandler = async (req, res) => {
     });
 };
 
+/* CANCEL SUBSCRIPTION (Admin & Customer) */
+const cancelSubHandler = async (req, res) => {
+    const id = req.params.id;
+    try {
+        await pool.query("UPDATE subscriptions SET status='Cancelled' WHERE id=$1", [id]);
+    } catch {}
+
+    const sub = MOCK_SUBSCRIPTIONS.find(s => s.id == id);
+    if (sub) {
+        sub.status = "Cancelled";
+    }
+
+    res.json({
+        success: true,
+        message: "Subscription cancelled successfully",
+        subscription: sub
+    });
+};
+
+router.put("/:id/cancel", cancelSubHandler);
+router.post("/:id/cancel", cancelSubHandler);
 router.patch("/:id/status", updateSubStatusHandler);
 router.put("/:id/status", updateSubStatusHandler);
 

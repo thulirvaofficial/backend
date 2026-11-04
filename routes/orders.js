@@ -218,7 +218,7 @@ const updateOrderStatusHandler = async (req, res) => {
 };
 
 /* VERIFY PAYMENT (ADMIN / PAYMENT STAFF) */
-router.put("/:id/verify-payment", async (req, res) => {
+const verifyPaymentHandler = async (req, res) => {
     const id = parseInt(req.params.id);
     const verifiedBy = req.body.verified_by || req.body.staff_name || "Admin";
 
@@ -244,10 +244,12 @@ router.put("/:id/verify-payment", async (req, res) => {
     }
 
     res.json({ success: true, message: "Payment verified successfully", order });
-});
+};
+router.put("/:id/verify-payment", verifyPaymentHandler);
+router.post("/:id/verify-payment", verifyPaymentHandler);
 
 /* REJECT PAYMENT (ADMIN / PAYMENT STAFF) */
-router.put("/:id/reject-payment", async (req, res) => {
+const rejectPaymentHandler = async (req, res) => {
     const id = parseInt(req.params.id);
     const reason = req.body.rejection_reason || req.body.reason || "Payment proof mismatch or invalid transaction reference";
 
@@ -268,7 +270,33 @@ router.put("/:id/reject-payment", async (req, res) => {
     }
 
     res.json({ success: true, message: "Payment rejected", reason, order });
-});
+};
+router.put("/:id/reject-payment", rejectPaymentHandler);
+router.post("/:id/reject-payment", rejectPaymentHandler);
+
+/* CANCEL ORDER (ADMIN & CUSTOMER) */
+const cancelOrderHandler = async (req, res) => {
+    const id = parseInt(req.params.id);
+    const reason = req.body.reason || req.body.cancellation_reason || "Cancelled by customer/admin";
+
+    try {
+        await pool.query(
+            `UPDATE orders SET order_status = 'cancelled', cancellation_reason = $1 WHERE id = $2`,
+            [reason, id]
+        );
+    } catch {}
+
+    const order = MOCK_ORDERS.find(o => o.id === id);
+    if (order) {
+        order.order_status = "cancelled";
+        order.cancellation_reason = reason;
+        notifyOrderStatusChange(order, "cancelled").catch(() => {});
+    }
+
+    res.json({ success: true, message: "Order cancelled successfully", order });
+};
+router.put("/:id/cancel", cancelOrderHandler);
+router.post("/:id/cancel", cancelOrderHandler);
 
 /* MARK PICKUP READY */
 router.put("/:id/ready-pickup", async (req, res) => {
@@ -324,23 +352,18 @@ router.put("/:id/collect-pickup", async (req, res) => {
     });
 });
 
-/* GET PENDING PAYMENT VERIFICATIONS */
+/* GET ALL PAYMENT VERIFICATIONS & PAYMENT RECORDS (ADMIN) */
 router.get("/admin/verifications", async (req, res) => {
     try {
         const result = await pool.query(
-            `SELECT * FROM orders WHERE payment_status IN ('Verification Pending', 'pending', 'Paid (Verification Pending)') ORDER BY created_at DESC`
+            `SELECT * FROM orders ORDER BY created_at DESC`
         );
         if (result.rows.length) {
             return res.json({ success: true, orders: result.rows });
         }
     } catch {}
 
-    const pendingList = MOCK_ORDERS.filter(o =>
-        o.payment_status === "Verification Pending" ||
-        o.payment_status === "pending" ||
-        o.payment_status === "Paid (Verification Pending)"
-    );
-    res.json({ success: true, orders: pendingList });
+    res.json({ success: true, orders: MOCK_ORDERS });
 });
 
 /* GET ALL PICKUP ORDERS */
