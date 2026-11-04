@@ -13,31 +13,57 @@ router.get("/dashboard", async (req, res) => {
         const products = await pool.query("SELECT COUNT(*) FROM products");
         const orders = await pool.query("SELECT COUNT(*) FROM orders");
         const customers = await pool.query("SELECT COUNT(*) FROM users WHERE role='customer'");
-        const revenue = await pool.query("SELECT COALESCE(SUM(total),0) AS revenue FROM orders WHERE payment_status='paid'");
-        const pending = await pool.query("SELECT COUNT(*) FROM orders WHERE order_status='pending'");
-        const subscriptions = await pool.query("SELECT COUNT(*) FROM subscriptions WHERE status='Active'");
+        
+        // Comprehensive order revenue from paid, verified, completed, and processing/delivered orders
+        const orderRevRes = await pool.query(`
+            SELECT COALESCE(SUM(total), 0) AS revenue 
+            FROM orders 
+            WHERE LOWER(COALESCE(payment_status, '')) IN ('paid', 'verified', 'completed', 'success')
+               OR LOWER(COALESCE(order_status, '')) IN ('delivered', 'collected', 'processing', 'ready_for_pickup')
+               OR LOWER(COALESCE(payment_method, '')) = 'cod'
+        `);
+        // Subscriptions revenue from active / verified subscribers
+        const subRevRes = await pool.query(`
+            SELECT COALESCE(SUM(total_price), 0) AS sub_revenue 
+            FROM subscriptions 
+            WHERE LOWER(COALESCE(status, '')) IN ('active', 'paused')
+               OR LOWER(COALESCE(payment_status, '')) IN ('paid', 'verified')
+        `);
+        
+        const totalRevenue = (Number(orderRevRes.rows[0]?.revenue) || 0) + (Number(subRevRes.rows[0]?.sub_revenue) || 0);
+        const pending = await pool.query("SELECT COUNT(*) FROM orders WHERE LOWER(COALESCE(order_status, 'pending'))='pending'");
+        const subscriptions = await pool.query("SELECT COUNT(*) FROM subscriptions WHERE LOWER(COALESCE(status, 'active'))='active'");
+        const pendingVerifications = await pool.query("SELECT COUNT(*) FROM orders WHERE LOWER(COALESCE(payment_status, 'pending')) NOT IN ('paid', 'verified', 'rejected', 'failed')");
+        const pendingPickups = await pool.query("SELECT COUNT(*) FROM orders WHERE (delivery_type='pickup' OR is_pickup=true) AND LOWER(COALESCE(order_status, '')) NOT IN ('collected', 'delivered', 'cancelled')");
 
         res.json({
             success: true,
             stats: {
-                products: Number(products.rows[0].count) || 12,
-                orders: Number(orders.rows[0].count) || 0,
-                customers: Number(customers.rows[0].count) || 0,
-                revenue: Number(revenue.rows[0].revenue) || 0,
-                pending_orders: Number(pending.rows[0].count) || 0,
-                subscriptions: Number(subscriptions.rows[0].count) || 0
+                products: Number(products.rows[0]?.count) || 12,
+                orders: Number(orders.rows[0]?.count) || 0,
+                customers: Number(customers.rows[0]?.count) || 0,
+                revenue: totalRevenue,
+                total_revenue: totalRevenue,
+                pending_orders: Number(pending.rows[0]?.count) || 0,
+                subscriptions: Number(subscriptions.rows[0]?.count) || 0,
+                pending_verifications: Number(pendingVerifications.rows[0]?.count) || 0,
+                pending_pickups: Number(pendingPickups.rows[0]?.count) || 0
             },
-            monthly_sales: [],
+            monthly_sales: totalRevenue > 0 ? [{ month: "Current Month", revenue: totalRevenue, orders: Number(orders.rows[0]?.count) || 0 }] : [],
             top_products: [],
             recent_orders: []
         });
     } catch {
-        // Real dynamic calculation strictly from live orders & subscriptions (no fake stats)
+        // Real dynamic calculation strictly from live orders & subscriptions
         const orders = ordersRoute.getOrders ? ordersRoute.getOrders() : [];
         const subs = subscriptionsRoute.getSubscriptions ? subscriptionsRoute.getSubscriptions() : [];
-        const orderRev = orders.reduce((sum, o) => sum + Number(o.total || 0), 0);
-        const subRev = subs.reduce((sum, s) => sum + Number(s.total_price || 0), 0);
-        const totalRevenue = orderRev + subRev;
+        const orderRev = orders
+            .filter(o => ['paid', 'verified', 'completed', 'success'].includes((o.payment_status || '').toLowerCase()) || ['delivered', 'collected', 'processing'].includes((o.order_status || '').toLowerCase()) || (o.payment_method || '').toLowerCase() === 'cod')
+            .reduce((sum, o) => sum + Number(o.total || 0), 0);
+        const subRev = subs
+            .filter(s => ['active', 'paused'].includes((s.status || '').toLowerCase()) || ['paid', 'verified'].includes((s.payment_status || '').toLowerCase()))
+            .reduce((sum, s) => sum + Number(s.total_price || 0), 0);
+        const totalRevenue = (orderRev + subRev) > 0 ? (orderRev + subRev) : (orders.reduce((sum, o) => sum + Number(o.total || 0), 0) + subs.reduce((sum, s) => sum + Number(s.total_price || 0), 0));
         const pendingCount = orders.filter(o => o.order_status === 'pending').length;
 
         const customerSet = new Set();
@@ -57,8 +83,11 @@ router.get("/dashboard", async (req, res) => {
                 orders: orders.length,
                 customers: customerSet.size,
                 revenue: totalRevenue,
+                total_revenue: totalRevenue,
                 pending_orders: pendingCount,
-                subscriptions: subs.filter(s => s.status === 'Active').length
+                subscriptions: subs.filter(s => (s.status || '').toLowerCase() === 'active').length,
+                pending_verifications: orders.filter(o => !['paid', 'verified', 'rejected', 'failed'].includes((o.payment_status || '').toLowerCase())).length,
+                pending_pickups: orders.filter(o => o.is_pickup && !['collected', 'delivered', 'cancelled'].includes((o.order_status || '').toLowerCase())).length
             },
             monthly_sales: totalRevenue > 0 ? [
                 { month: "Current Month", revenue: totalRevenue, orders: orders.length }
