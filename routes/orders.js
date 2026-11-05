@@ -466,6 +466,14 @@ router.get("/:id", async (req, res) => {
     res.status(404).json({ success: false, message: "Order not found" });
 });
 
+async function getOrderForNotification(id) {
+    try {
+        const res = await pool.query("SELECT * FROM orders WHERE id = $1", [id]);
+        if (res.rows.length) return res.rows[0];
+    } catch {}
+    return MOCK_ORDERS.find(o => o.id === id) || null;
+}
+
 /* UPDATE ORDER STATUS (PUT & PATCH supported) */
 const updateOrderStatusHandler = async (req, res) => {
     const id = parseInt(req.params.id);
@@ -474,23 +482,42 @@ const updateOrderStatusHandler = async (req, res) => {
     const comment = req.body.comment || `Status updated to ${status}`;
 
     try {
+        if (status && payment_status) {
+            await pool.query(
+                `UPDATE orders SET order_status = $1, payment_status = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
+                [status, payment_status, id]
+            );
+        } else if (status) {
+            await pool.query(
+                `UPDATE orders SET order_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+                [status, id]
+            );
+        } else if (payment_status) {
+            await pool.query(
+                `UPDATE orders SET payment_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+                [payment_status, id]
+            );
+        }
+
         if (status) {
-            await pool.query(`UPDATE orders SET order_status=$1 WHERE id=$2`, [status, id]);
             await pool.query(
                 `INSERT INTO order_status_history (order_id, status, comment) VALUES ($1, $2, $3)`,
                 [id, status, comment]
             ).catch(() => {});
         }
-        if (payment_status) {
-            await pool.query(`UPDATE orders SET payment_status=$1 WHERE id=$2`, [payment_status, id]);
-        }
-    } catch {}
+    } catch (err) {
+        console.error("Order status update DB error:", err.message);
+    }
 
-    const order = MOCK_ORDERS.find(o => o.id === id);
+    const order = await getOrderForNotification(id);
     if (order) {
         if (status) order.order_status = status;
         if (payment_status) order.payment_status = payment_status;
-        if (status) notifyOrderStatusChange(order, status).catch(() => {});
+        if (status) {
+            notifyOrderStatusChange(order, status).catch(e => {
+                console.error("[NOTIFY STATUS CHANGE ERROR]", e.message);
+            });
+        }
     }
 
     res.json({ success: true, message: "Order updated successfully", order });
@@ -507,7 +534,8 @@ const verifyPaymentHandler = async (req, res) => {
                 payment_status = 'verified',
                 order_status = CASE WHEN delivery_type = 'pickup' THEN 'ready_for_pickup' ELSE 'processing' END,
                 verified_at = CURRENT_TIMESTAMP,
-                verified_by = $1
+                verified_by = $1,
+                updated_at = CURRENT_TIMESTAMP
              WHERE id = $2`,
             [verifiedBy, id]
         );
@@ -516,15 +544,19 @@ const verifyPaymentHandler = async (req, res) => {
              VALUES ($1, 'payment_verified', $2)`,
             [id, `Payment verified by ${verifiedBy}`]
         ).catch(() => {});
-    } catch {}
+    } catch (err) {
+        console.error("Verify payment DB error:", err.message);
+    }
 
-    const order = MOCK_ORDERS.find(o => o.id === id);
+    const order = await getOrderForNotification(id);
     if (order) {
         order.payment_status = "verified";
         order.order_status = order.delivery_type === "pickup" ? "ready_for_pickup" : "processing";
         order.verified_at = new Date().toISOString();
         order.verified_by = verifiedBy;
-        notifyOrderStatusChange(order, order.order_status).catch(() => {});
+        notifyOrderStatusChange(order, order.order_status).catch(e => {
+            console.error("[NOTIFY PAYMENT VERIFIED ERROR]", e.message);
+        });
     }
 
     res.json({ success: true, message: "Payment verified successfully", order });
@@ -541,7 +573,8 @@ const rejectPaymentHandler = async (req, res) => {
         await pool.query(
             `UPDATE orders SET
                 payment_status = 'rejected',
-                rejection_reason = $1
+                rejection_reason = $1,
+                updated_at = CURRENT_TIMESTAMP
              WHERE id = $2`,
             [reason, id]
         );
@@ -550,13 +583,17 @@ const rejectPaymentHandler = async (req, res) => {
              VALUES ($1, 'payment_rejected', $2)`,
             [id, `Payment rejected: ${reason}`]
         ).catch(() => {});
-    } catch {}
+    } catch (err) {
+        console.error("Reject payment DB error:", err.message);
+    }
 
-    const order = MOCK_ORDERS.find(o => o.id === id);
+    const order = await getOrderForNotification(id);
     if (order) {
         order.payment_status = "rejected";
         order.rejection_reason = reason;
-        notifyOrderStatusChange(order, "payment_rejected").catch(() => {});
+        notifyOrderStatusChange(order, "payment_rejected").catch(e => {
+            console.error("[NOTIFY PAYMENT REJECTED ERROR]", e.message);
+        });
     }
 
     res.json({ success: true, message: "Payment rejected", reason, order });
@@ -590,7 +627,8 @@ const cancelOrderHandler = async (req, res) => {
                 `UPDATE orders SET
                     order_status = 'cancelled',
                     cancellation_reason = $1,
-                    stock_restored = true
+                    stock_restored = true,
+                    updated_at = CURRENT_TIMESTAMP
                  WHERE id = $2`,
                 [reason, id]
             );
@@ -605,12 +643,14 @@ const cancelOrderHandler = async (req, res) => {
         console.error("Cancel order DB error:", err.message);
     }
 
-    const order = MOCK_ORDERS.find(o => o.id === id);
+    const order = await getOrderForNotification(id);
     if (order) {
         order.order_status = "cancelled";
         order.cancellation_reason = reason;
         order.stock_restored = true;
-        notifyOrderStatusChange(order, "cancelled").catch(() => {});
+        notifyOrderStatusChange(order, "cancelled").catch(e => {
+            console.error("[NOTIFY CANCEL ERROR]", e.message);
+        });
     }
 
     res.json({ success: true, message: "Order cancelled successfully and stock restored.", order });
@@ -622,13 +662,15 @@ router.post("/:id/cancel", cancelOrderHandler);
 router.put("/:id/ready-pickup", async (req, res) => {
     const id = parseInt(req.params.id);
     try {
-        await pool.query(`UPDATE orders SET order_status = 'ready_for_pickup' WHERE id = $1`, [id]);
+        await pool.query(`UPDATE orders SET order_status = 'ready_for_pickup', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]);
     } catch {}
 
-    const order = MOCK_ORDERS.find(o => o.id === id);
+    const order = await getOrderForNotification(id);
     if (order) {
         order.order_status = "ready_for_pickup";
-        notifyOrderStatusChange(order, "ready_for_pickup").catch(() => {});
+        notifyOrderStatusChange(order, "ready_for_pickup").catch(e => {
+            console.error("[NOTIFY READY PICKUP ERROR]", e.message);
+        });
     }
 
     res.json({
@@ -648,18 +690,21 @@ router.put("/:id/collect-pickup", async (req, res) => {
             `UPDATE orders SET
                 order_status = 'collected',
                 pickup_collected_at = CURRENT_TIMESTAMP,
-                pickup_collected_by = $1
+                pickup_collected_by = $1,
+                updated_at = CURRENT_TIMESTAMP
              WHERE id = $2`,
             [collectedBy, id]
         );
     } catch {}
 
-    const order = MOCK_ORDERS.find(o => o.id === id);
+    const order = await getOrderForNotification(id);
     if (order) {
         order.order_status = "collected";
         order.pickup_collected_at = new Date().toISOString();
         order.pickup_collected_by = collectedBy;
-        notifyOrderStatusChange(order, "collected").catch(() => {});
+        notifyOrderStatusChange(order, "collected").catch(e => {
+            console.error("[NOTIFY COLLECTED ERROR]", e.message);
+        });
     }
 
     res.json({

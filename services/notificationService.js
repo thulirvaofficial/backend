@@ -1,5 +1,5 @@
 const { pool } = require("../config/database");
-const { initFirebaseAdmin, admin, isInitialized, getMessaging } = require("./firebaseAdmin");
+const { initFirebaseAdmin, admin, isFirebaseInitialized, getMessaging } = require("./firebaseAdmin");
 
 // Initialize Firebase Admin on startup (safe, non-blocking)
 initFirebaseAdmin();
@@ -54,8 +54,8 @@ async function sendNotification({
             tokens = res.rows.map(r => r.token);
         } else if (userId) {
             const res = await pool.query(
-                "SELECT token FROM device_tokens WHERE user_id = $1 AND is_active = true",
-                [userId]
+                "SELECT token FROM device_tokens WHERE user_id::text = $1::text AND is_active = true",
+                [userId.toString()]
             );
             tokens = res.rows.map(r => r.token);
         } else {
@@ -70,9 +70,11 @@ async function sendNotification({
         tokens = [...new Set(tokens.filter(t => t && t.trim().length > 10))];
 
         const messaging = typeof getMessaging === "function" ? getMessaging() : null;
+        const isReady = (typeof isFirebaseInitialized === "function" ? isFirebaseInitialized() : (admin && admin.apps && admin.apps.length > 0)) || (messaging !== null);
 
-        if (tokens.length > 0 && messaging && isInitialized) {
-            console.log(`[FCM DISPATCH] Sending to ${tokens.length} devices [${forAdmin ? 'ADMIN' : 'USER'}]: "${title}" - "${message}"`);
+        if (tokens.length > 0 && messaging && isReady) {
+            const targetChannelId = forAdmin ? "thulirva_admin_channel" : "thulirva_channel";
+            console.log(`[FCM DISPATCH] Sending to ${tokens.length} devices [${forAdmin ? 'ADMIN' : 'USER'}] via channel "${targetChannelId}": "${title}" - "${message}"`);
 
             const fcmPayload = {
                 notification: {
@@ -89,7 +91,7 @@ async function sendNotification({
                 android: {
                     priority: "high",
                     notification: {
-                        channelId: "thulirva_channel",
+                        channelId: targetChannelId,
                         sound: "default",
                         priority: "max",
                         defaultVibrateTimings: true,

@@ -125,6 +125,9 @@ module.exports = {
     cert,
     applicationDefault,
     getMessaging: getMessagingSafe,
+    isFirebaseInitialized() {
+        return getApps().length > 0;
+    },
     get isInitialized() {
         return getApps().length > 0;
     }
