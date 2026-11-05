@@ -1,7 +1,7 @@
 const { pool } = require("../config/database");
-const { initFirebaseAdmin, admin, isInitialized } = require("./firebaseAdmin");
+const { initFirebaseAdmin, admin, isInitialized, getMessaging } = require("./firebaseAdmin");
 
-// Initialize Firebase Admin on startup
+// Initialize Firebase Admin on startup (safe, non-blocking)
 initFirebaseAdmin();
 
 // In-memory notifications fallback
@@ -69,7 +69,9 @@ async function sendNotification({
         // Deduplicate tokens
         tokens = [...new Set(tokens.filter(t => t && t.trim().length > 10))];
 
-        if (tokens.length > 0 && admin.apps.length > 0) {
+        const messaging = typeof getMessaging === "function" ? getMessaging() : null;
+
+        if (tokens.length > 0 && messaging && isInitialized) {
             console.log(`[FCM DISPATCH] Sending to ${tokens.length} devices [${forAdmin ? 'ADMIN' : 'USER'}]: "${title}" - "${message}"`);
 
             const fcmPayload = {
@@ -98,7 +100,7 @@ async function sendNotification({
                 tokens: tokens
             };
 
-            const response = await admin.messaging().sendEachForMulticast(fcmPayload);
+            const response = await messaging.sendEachForMulticast(fcmPayload);
             console.log(`✓ [FCM SUCCESS] Delivered: ${response.successCount}/${tokens.length} messages. Failures: ${response.failureCount}`);
 
             // Remove or deactivate invalid/expired tokens
