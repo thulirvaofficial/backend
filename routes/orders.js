@@ -450,8 +450,10 @@ const updateOrderStatusHandler = async (req, res) => {
 
 /* VERIFY PAYMENT (ADMIN / PAYMENT STAFF) */
 const verifyPaymentHandler = async (req, res) => {
-    const id = parseInt(req.params.id);
-    const verifiedBy = req.body.verified_by || req.body.staff_name || "Admin";
+    const rawId = req.params.id;
+    const numId = parseInt(rawId);
+    const id = isNaN(numId) ? -1 : numId;
+    const verifiedBy = req.body.verified_by || req.body.staff_name || "THULIRVA Operations";
 
     try {
         await pool.query(
@@ -461,19 +463,29 @@ const verifyPaymentHandler = async (req, res) => {
                 verified_at = CURRENT_TIMESTAMP,
                 verified_by = $1,
                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $2`,
-            [verifiedBy, id]
+             WHERE id = $2 OR order_number = $3`,
+            [verifiedBy, id, rawId]
         );
-        await pool.query(
-            `INSERT INTO order_status_history (order_id, status, comment)
-             VALUES ($1, 'payment_verified', $2)`,
-            [id, `Payment verified by ${verifiedBy}`]
-        ).catch(() => {});
+        if (id > 0) {
+            await pool.query(
+                `INSERT INTO order_status_history (order_id, status, comment)
+                 VALUES ($1, 'payment_verified', $2)`,
+                [id, `Payment verified by ${verifiedBy}`]
+            ).catch(() => {});
+        }
     } catch (err) {
         console.error("Verify payment DB error:", err.message);
     }
 
-    const order = await getOrderForNotification(id);
+    const memOrder = MOCK_ORDERS.find(o => o.id == rawId || o.id == id || o.order_number == rawId);
+    if (memOrder) {
+        memOrder.payment_status = "verified";
+        memOrder.order_status = memOrder.delivery_type === "pickup" ? "ready_for_pickup" : "processing";
+        memOrder.verified_at = new Date().toISOString();
+        memOrder.verified_by = verifiedBy;
+    }
+
+    const order = (await getOrderForNotification(id)) || memOrder;
     if (order) {
         order.payment_status = "verified";
         order.order_status = order.delivery_type === "pickup" ? "ready_for_pickup" : "processing";
@@ -491,7 +503,9 @@ router.post("/:id/verify-payment", verifyPaymentHandler);
 
 /* REJECT PAYMENT (ADMIN / PAYMENT STAFF) */
 const rejectPaymentHandler = async (req, res) => {
-    const id = parseInt(req.params.id);
+    const rawId = req.params.id;
+    const numId = parseInt(rawId);
+    const id = isNaN(numId) ? -1 : numId;
     const reason = req.body.rejection_reason || req.body.reason || "Payment proof mismatch or invalid transaction reference";
 
     try {
@@ -500,19 +514,27 @@ const rejectPaymentHandler = async (req, res) => {
                 payment_status = 'rejected',
                 rejection_reason = $1,
                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $2`,
-            [reason, id]
+             WHERE id = $2 OR order_number = $3`,
+            [reason, id, rawId]
         );
-        await pool.query(
-            `INSERT INTO order_status_history (order_id, status, comment)
-             VALUES ($1, 'payment_rejected', $2)`,
-            [id, `Payment rejected: ${reason}`]
-        ).catch(() => {});
+        if (id > 0) {
+            await pool.query(
+                `INSERT INTO order_status_history (order_id, status, comment)
+                 VALUES ($1, 'payment_rejected', $2)`,
+                [id, `Payment rejected: ${reason}`]
+            ).catch(() => {});
+        }
     } catch (err) {
         console.error("Reject payment DB error:", err.message);
     }
 
-    const order = await getOrderForNotification(id);
+    const memOrder = MOCK_ORDERS.find(o => o.id == rawId || o.id == id || o.order_number == rawId);
+    if (memOrder) {
+        memOrder.payment_status = "rejected";
+        memOrder.rejection_reason = reason;
+    }
+
+    const order = (await getOrderForNotification(id)) || memOrder;
     if (order) {
         order.payment_status = "rejected";
         order.rejection_reason = reason;
