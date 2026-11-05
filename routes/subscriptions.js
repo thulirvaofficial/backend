@@ -2,6 +2,7 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const { pool } = require("../config/database");
+const { notifySubscriptionActivated, notifySubscriptionRenewed, notifyAdminNewOrder } = require("../services/notificationService");
 
 const router = express.Router();
 
@@ -500,6 +501,7 @@ router.post("/admin/create", async (req, res) => {
         } catch (_) {}
 
         MOCK_SUBSCRIPTIONS.unshift(newSub);
+        notifySubscriptionRenewed(newSub).catch(() => {});
         res.json({ success: true, message: "Subscription created successfully", subscription: newSub });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
@@ -598,6 +600,16 @@ router.post("/", async (req, res) => {
         }
 
         MOCK_SUBSCRIPTIONS.unshift(subData);
+
+        // Push notifications for new subscription
+        notifySubscriptionActivated(subData).catch(() => {});
+        notifyAdminNewOrder({
+            id: subData.id,
+            customer_name: subData.customer_name,
+            total: subData.total_price,
+            delivery_type: 'subscription'
+        }).catch(() => {});
+
         res.json({
             success: true,
             subscription: subData,

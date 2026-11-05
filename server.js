@@ -7,6 +7,10 @@ const {
     initializeDatabase
 } = require("./config/database");
 
+const {
+    initFirebaseAdmin
+} = require("./services/firebaseAdmin");
+
 const authRoutes =
     require("./routes/auth");
 
@@ -253,6 +257,7 @@ function startServer() {
         }
     );
 
+    initFirebaseAdmin();
     initializeDatabase().catch(() => {});
 
     // Critical: Run subscription expiry scheduler and periodically recheck
