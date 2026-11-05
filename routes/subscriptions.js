@@ -345,90 +345,11 @@ const getAllSubscriptionsHandler = async (req, res) => {
         const result = await pool.query(
             "SELECT * FROM subscriptions ORDER BY created_at DESC"
         );
-        if (result.rows.length > 0) {
-            return res.json({ success: true, subscriptions: result.rows });
-        }
+        return res.json({ success: true, subscriptions: result.rows || [] });
     } catch (err) {
-        // Fallback to in-memory store
+        console.warn("[SUBSCRIPTIONS ADMIN] DB query fallback:", err.message);
+        return res.json({ success: true, subscriptions: MOCK_SUBSCRIPTIONS || [] });
     }
-
-    if (MOCK_SUBSCRIPTIONS.length === 0) {
-        const today = new Date();
-        const sub1Start = new Date(today.getTime() - 5 * 86400000).toISOString().split('T')[0];
-        const sub2Start = new Date(today.getTime() - 26 * 86400000).toISOString().split('T')[0];
-        const sub3Start = new Date(today.getTime() - 12 * 86400000).toISOString().split('T')[0];
-
-        MOCK_SUBSCRIPTIONS = [
-            {
-                id: "SUB-101",
-                customer_name: "Kaviya Sundaram",
-                customer_phone: "7904880944",
-                customer_email: "kaviya@gmail.com",
-                product_name: "Fresh Cow Milk (1 Litre)",
-                time_period: "Daily Morning (30 Days)",
-                frequency: "Daily",
-                quantity: 1,
-                delivery_slot: "6:00 AM - 7:00 AM",
-                price_per_delivery: 82.00,
-                total_price: 2460.00,
-                start_date: sub1Start,
-                address: "No 14, Gandhi Road, Near Bus Stand",
-                city: "Kanchipuram",
-                pincode: "631501",
-                payment_method: "UPI QR (7904880944@superyes)",
-                payment_status: "Verified",
-                status: "Active",
-                transaction_id: "TXN-SUB-89412",
-                created_at: new Date(today.getTime() - 5 * 86400000).toISOString()
-            },
-            {
-                id: "SUB-102",
-                customer_name: "Manoj Kumar",
-                customer_phone: "9840123456",
-                customer_email: "manoj.k@gmail.com",
-                product_name: "Fresh Cow Milk (500ml)",
-                time_period: "Daily Morning (30 Days)",
-                frequency: "Daily",
-                quantity: 2,
-                delivery_slot: "6:30 AM - 7:30 AM",
-                price_per_delivery: 88.00,
-                total_price: 2640.00,
-                start_date: sub2Start,
-                address: "Plot 42, 2nd Avenue, Anna Nagar",
-                city: "Chennai",
-                pincode: "600040",
-                payment_method: "UPI Direct",
-                payment_status: "Verified",
-                status: "Active",
-                transaction_id: "TXN-SUB-77124",
-                created_at: new Date(today.getTime() - 26 * 86400000).toISOString()
-            },
-            {
-                id: "SUB-103",
-                customer_name: "Anand R",
-                customer_phone: "9444198765",
-                customer_email: "anand.r@gmail.com",
-                product_name: "Pure Bilona Cow Ghee (500ml)",
-                time_period: "Monthly Delivery (1 Jar/Month)",
-                frequency: "Monthly",
-                quantity: 1,
-                delivery_slot: "7:00 AM - 8:00 AM",
-                price_per_delivery: 649.00,
-                total_price: 649.00,
-                start_date: sub3Start,
-                address: "Flat 3B, Sunshine Apartments, Velachery",
-                city: "Chennai",
-                pincode: "600042",
-                payment_method: "UPI QR",
-                payment_status: "Verified",
-                status: "Paused",
-                transaction_id: "TXN-SUB-55219",
-                created_at: new Date(today.getTime() - 12 * 86400000).toISOString()
-            }
-        ];
-    }
-
-    res.json({ success: true, subscriptions: MOCK_SUBSCRIPTIONS });
 };
 
 router.get("/admin/all", getAllSubscriptionsHandler);

@@ -187,15 +187,31 @@ router.post("/admin/broadcast", async (req, res) => {
         createdAnnouncement = newAnn;
     }
 
-    // Broadcast in-app notification to all customers
-    await sendNotification({
-        userId: null,
-        title: `📢 ${title}`,
-        message,
-        type: "announcement",
-        targetId: createdAnnouncement.id,
-        forAdmin: false
-    }).catch(() => {});
+    const role = (target_role || 'all').toLowerCase();
+
+    // 1. Broadcast notification to customers
+    if (role === 'all' || role === 'customer') {
+        await sendNotification({
+            userId: null,
+            title: `📢 ${title}`,
+            message,
+            type: "announcement",
+            targetId: createdAnnouncement.id,
+            forAdmin: false
+        }).catch(() => {});
+    }
+
+    // 2. Broadcast alert to admins
+    if (role === 'all' || role === 'admin') {
+        await sendNotification({
+            userId: null,
+            title: `📢 Admin Announcement: ${title}`,
+            message,
+            type: "announcement",
+            targetId: createdAnnouncement.id,
+            forAdmin: true
+        }).catch(() => {});
+    }
 
     res.json({
         success: true,
