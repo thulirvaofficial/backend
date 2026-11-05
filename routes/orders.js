@@ -39,82 +39,7 @@ function generateUniqueOrderNumber() {
     return `THU-${dateStr}-${randomSuffix}`;
 }
 
-let MOCK_ORDERS = [
-    {
-        id: 1001,
-        order_number: "THU-20261104-1001",
-        user_id: 1,
-        userId: 1,
-        customer_name: "Karthik Raja",
-        customerName: "Karthik Raja",
-        customer_phone: "9876543210",
-        customerPhone: "9876543210",
-        customer_email: "karthik@example.com",
-        customerEmail: "karthik@example.com",
-        delivery_type: "delivery",
-        order_type: "delivery",
-        is_pickup: false,
-        delivery_zone: "Kanchipuram",
-        address: "12 Gandhi Road, Ennaikaran, Kanchipuram",
-        city: "Kanchipuram",
-        state: "Tamil Nadu",
-        pincode: "631601",
-        subtotal: 564,
-        delivery_charge: 0,
-        discount_amount: 0,
-        coupon_code: null,
-        total: 564,
-        total_price: 564,
-        payment_method: "UPI QR (7904880944@superyes)",
-        payment_status: "Verification Pending",
-        order_status: "pending",
-        transaction_id: "UPI983712648102",
-        payment_proof: "/assets/images/products/fresh_cow_milk.jpg",
-        created_at: new Date(Date.now() - 3600000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
-        items: [
-            { id: 1, product_id: 1, product_name: "Fresh Cow Milk", name: "Fresh Cow Milk", price: 44, quantity: 1, total: 44, weight: "500 ml" },
-            { id: 2, product_id: 2, product_name: "Pure Bilona Cow Ghee", name: "Pure Bilona Cow Ghee", price: 520, quantity: 1, total: 520, weight: "500 ml" }
-        ]
-    },
-    {
-        id: 1002,
-        order_number: "THU-20261104-1002",
-        user_id: 2,
-        userId: 2,
-        customer_name: "Deepa Sundaram",
-        customerName: "Deepa Sundaram",
-        customer_phone: "9123456780",
-        customerPhone: "9123456780",
-        customer_email: "deepa@example.com",
-        customerEmail: "deepa@example.com",
-        delivery_type: "pickup",
-        order_type: "pickup",
-        is_pickup: true,
-        pickup_location_id: 1,
-        pickup_location_name: "THULIRVA Farm Store",
-        pickup_slot: "7:00 AM - 9:00 AM",
-        delivery_zone: "Farm Store",
-        address: "No 1, Mayana Salai, Thimmarajampettai, Kanchipuram",
-        city: "Kanchipuram",
-        state: "Tamil Nadu",
-        pincode: "631601",
-        subtotal: 82,
-        delivery_charge: 0,
-        discount_amount: 0,
-        coupon_code: null,
-        total: 82,
-        total_price: 82,
-        payment_method: "UPI QR (7904880944@superyes)",
-        payment_status: "Verification Pending",
-        order_status: "pending",
-        transaction_id: "UPI478912356410",
-        payment_proof: "/assets/images/products/fresh_paneer.jpg",
-        created_at: new Date(Date.now() - 7200000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
-        items: [
-            { id: 3, product_id: 3, product_name: "Fresh Artisanal Paneer", name: "Fresh Artisanal Paneer", price: 82, quantity: 1, total: 82, weight: "200 g" }
-        ]
-    }
-];
+let MOCK_ORDERS = [];
 
 router.getOrders = () => MOCK_ORDERS;
 
@@ -398,10 +323,10 @@ router.get("/admin/verifications", async (req, res) => {
 /* GET ALL PICKUP ORDERS */
 router.get("/admin/pickup", async (req, res) => {
     try {
-        const orders = await getOrdersWithItems("WHERE delivery_type = 'pickup' OR is_pickup = true");
-        if (orders.length > 0) {
-            return res.json({ success: true, orders });
-        }
+        const orders = await getOrdersWithItems("WHERE LOWER(COALESCE(delivery_type, '')) = 'pickup'");
+        const dbIds = new Set(orders.map(o => o.id.toString()));
+        const memPickups = MOCK_ORDERS.filter(o => (o.delivery_type === "pickup" || o.is_pickup === true) && !dbIds.has(o.id.toString()));
+        return res.json({ success: true, orders: [...orders, ...memPickups] });
     } catch {}
 
     const pickupList = MOCK_ORDERS.filter(o => o.delivery_type === "pickup" || o.is_pickup === true);

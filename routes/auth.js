@@ -2,6 +2,7 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { pool } = require("../config/database");
+const { sendNotification } = require("../services/notificationService");
 
 const router = express.Router();
 
@@ -61,6 +62,24 @@ router.post("/register", async (req, res) => {
                 process.env.JWT_SECRET || "thulirva_secret_key_2026",
                 { expiresIn: "30d" }
             );
+
+            // Send instant signup alerts to Admin and welcome notification to Customer
+            sendNotification({
+                title: "New Customer Registered! 👤",
+                message: `${cleanName} (${cleanPhone || cleanEmail}) just created an account with Thulirva.`,
+                type: "new_customer",
+                targetId: newUser.id,
+                forAdmin: true
+            }).catch(() => {});
+
+            sendNotification({
+                userId: newUser.id,
+                title: "Welcome to Thulirva! 🌾",
+                message: "We're happy to have you with us. Explore our farm fresh A2 milk, ghee, and groceries!",
+                type: "welcome",
+                targetId: newUser.id,
+                forAdmin: false
+            }).catch(() => {});
 
             return res.json({
                 success: true,

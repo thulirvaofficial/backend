@@ -34,7 +34,8 @@ router.get("/dashboard", async (req, res) => {
         const pending = await pool.query("SELECT COUNT(*) FROM orders WHERE LOWER(COALESCE(order_status, 'pending'))='pending'");
         const subscriptions = await pool.query("SELECT COUNT(*) FROM subscriptions WHERE LOWER(COALESCE(status, 'active'))='active'");
         const pendingVerifications = await pool.query("SELECT COUNT(*) FROM orders WHERE LOWER(COALESCE(payment_status, 'pending')) NOT IN ('paid', 'verified', 'rejected', 'failed')");
-        const pendingPickups = await pool.query("SELECT COUNT(*) FROM orders WHERE (delivery_type='pickup' OR is_pickup=true) AND LOWER(COALESCE(order_status, '')) NOT IN ('collected', 'delivered', 'cancelled')");
+        const pendingPickups = await pool.query("SELECT COUNT(*) FROM orders WHERE LOWER(COALESCE(delivery_type, ''))='pickup' AND LOWER(COALESCE(order_status, '')) NOT IN ('collected', 'delivered', 'cancelled')");
+        const recentOrdersRes = await pool.query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 10");
 
         res.json({
             success: true,
@@ -51,7 +52,7 @@ router.get("/dashboard", async (req, res) => {
             },
             monthly_sales: totalRevenue > 0 ? [{ month: "Current Month", revenue: totalRevenue, orders: Number(orders.rows[0]?.count) || 0 }] : [],
             top_products: [],
-            recent_orders: []
+            recent_orders: recentOrdersRes.rows || []
         });
     } catch {
         // Real dynamic calculation strictly from live orders & subscriptions

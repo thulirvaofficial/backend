@@ -345,7 +345,10 @@ const getAllSubscriptionsHandler = async (req, res) => {
         const result = await pool.query(
             "SELECT * FROM subscriptions ORDER BY created_at DESC"
         );
-        return res.json({ success: true, subscriptions: result.rows || [] });
+        const dbRows = result.rows || [];
+        const dbIds = new Set(dbRows.map(r => r.id.toString()));
+        const memRows = (MOCK_SUBSCRIPTIONS || []).filter(m => !dbIds.has(m.id.toString()));
+        return res.json({ success: true, subscriptions: [...dbRows, ...memRows] });
     } catch (err) {
         console.warn("[SUBSCRIPTIONS ADMIN] DB query fallback:", err.message);
         return res.json({ success: true, subscriptions: MOCK_SUBSCRIPTIONS || [] });
@@ -501,6 +504,25 @@ router.post("/", async (req, res) => {
         };
 
         try {
+            // Validate foreign keys safely before insertion
+            let validUserId = null;
+            if (subData.user_id && !isNaN(Number(subData.user_id))) {
+                const uCheck = await pool.query("SELECT id FROM users WHERE id = $1", [Number(subData.user_id)]).catch(() => ({ rows: [] }));
+                if (uCheck.rows.length > 0) validUserId = Number(subData.user_id);
+            }
+
+            let validPlanId = null;
+            if (subData.plan_id && !isNaN(Number(subData.plan_id))) {
+                const pCheck = await pool.query("SELECT id FROM subscription_plans WHERE id = $1", [Number(subData.plan_id)]).catch(() => ({ rows: [] }));
+                if (pCheck.rows.length > 0) validPlanId = Number(subData.plan_id);
+            }
+
+            let validProductId = null;
+            if (subData.product_id && !isNaN(Number(subData.product_id))) {
+                const prCheck = await pool.query("SELECT id FROM products WHERE id = $1", [Number(subData.product_id)]).catch(() => ({ rows: [] }));
+                if (prCheck.rows.length > 0) validProductId = Number(subData.product_id);
+            }
+
             await pool.query(`
                 INSERT INTO subscriptions (
                     id, user_id, customer_name, customer_phone, customer_email,
@@ -510,14 +532,15 @@ router.post("/", async (req, res) => {
                     transaction_id, payment_proof
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
             `, [
-                subData.id, subData.user_id, subData.customer_name, subData.customer_phone, subData.customer_email,
-                subData.plan_id, subData.product_id, subData.product_name, subData.product_image, subData.time_period,
+                subData.id, validUserId, subData.customer_name, subData.customer_phone, subData.customer_email,
+                validPlanId, validProductId, subData.product_name, subData.product_image, subData.time_period,
                 subData.frequency, subData.quantity, subData.delivery_slot, subData.price_per_delivery, subData.total_price,
                 subData.start_date, subData.address, subData.city, subData.pincode, subData.payment_method, subData.payment_status, subData.status,
                 subData.transaction_id, subData.payment_proof
             ]);
-        } catch {
-            // in-memory fallback
+            console.log(`✓ [SUBSCRIPTION SAVED TO DB] ID: ${subData.id}`);
+        } catch (dbErr) {
+            console.error("[SUBSCRIPTION DB INSERT ERROR]:", dbErr.message);
         }
 
         MOCK_SUBSCRIPTIONS.unshift(subData);

@@ -241,6 +241,7 @@ async function initializeDatabase() {
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_code VARCHAR(50);
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(10,2) DEFAULT 0;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_type VARCHAR(50) DEFAULT 'delivery';
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_pickup BOOLEAN DEFAULT false;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_location_id INTEGER;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_location_name VARCHAR(150);
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_slot VARCHAR(100);
@@ -250,6 +251,24 @@ async function initializeDatabase() {
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP;
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS verified_by VARCHAR(100);
         `).catch(() => {});
+
+        // Seed default subscription plans into database if empty
+        try {
+            const planCheck = await pool.query("SELECT COUNT(*) FROM subscription_plans");
+            if (Number(planCheck.rows[0]?.count || 0) === 0) {
+                await pool.query(`
+                    INSERT INTO subscription_plans (id, product_name, product_image, time_period, frequency, duration_days, price, original_price, discount_percent, description, badge, status)
+                    VALUES 
+                    (1, 'Fresh Cow Milk (500ml)', '/assets/images/products/fresh_cow_milk.jpg', 'Daily Morning (30 Days)', 'Daily', 30, 1320, 1500, 12, 'Pure farm fresh cow milk delivered daily before 7 AM.', 'Most Popular', 'active'),
+                    (2, 'Fresh Cow Milk (1 Litre)', '/assets/images/products/fresh_cow_milk.jpg', 'Daily Morning (30 Days)', 'Daily', 30, 2460, 2700, 9, '1 Litre family pack chilled cow milk delivered every single morning.', 'Family Pack', 'active'),
+                    (3, 'Fresh Cow Milk (500ml)', '/assets/images/products/fresh_cow_milk.jpg', 'Alternate Days (15 Days)', 'Alternate', 30, 660, 750, 12, 'Delivered every alternate day.', 'Flexible Plan', 'active'),
+                    (4, 'Fresh Artisanal Paneer (200g)', '/assets/images/products/fresh_paneer.jpg', 'Twice a Week (8 Deliveries)', 'Twice Weekly', 30, 656, 760, 14, 'Ultra-soft chemical-free cottage cheese.', 'Fresh Batch', 'active'),
+                    (5, 'Pure Bilona Cow Ghee (500ml)', '/assets/images/products/pure_cow_ghee.jpg', 'Monthly Delivery (1 Jar/Month)', 'Monthly', 30, 499, 600, 17, 'A fresh 500ml jar of fragrant Bilona churned golden ghee.', 'Pure Bilona', 'active'),
+                    (6, 'Natural Thick Set Curd (500g)', '/assets/images/products/product_lineup.jpg', 'Daily Morning (30 Days)', 'Daily', 30, 1440, 1650, 13, 'Probiotic rich, smooth thick curd.', 'Probiotic', 'active')
+                    ON CONFLICT (id) DO NOTHING
+                `);
+            }
+        } catch (_) {}
 
         // Add unique constraint on order_number if not already present
         await pool.query(`
