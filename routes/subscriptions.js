@@ -649,27 +649,14 @@ router.get("/user/:identifier", async (req, res) => {
     const cleanPhone = ident.replace(/\D/g, "");
     try {
         const result = await pool.query(
-            "SELECT * FROM subscriptions WHERE LOWER(COALESCE(user_id, ''))=$1 OR LOWER(customer_email)=$1 OR customer_phone=$1 OR ($2 != '' AND REPLACE(customer_phone, ' ', '') LIKE $3) ORDER BY created_at DESC",
+            "SELECT * FROM subscriptions WHERE LOWER(COALESCE(user_id::text, ''))=$1 OR LOWER(COALESCE(customer_email, ''))=$1 OR customer_phone=$1 OR ($2 != '' AND REPLACE(customer_phone, ' ', '') LIKE $3) ORDER BY created_at DESC",
             [ident, cleanPhone, `%${cleanPhone}%`]
         );
-        if (result.rows && result.rows.length > 0) {
-            return res.json({ success: true, subscriptions: result.rows });
-        }
-    } catch {
-        // fallback
+        return res.json({ success: true, subscriptions: result.rows || [] });
+    } catch (err) {
+        console.error("[USER SUBSCRIPTIONS ERROR]", err.message);
+        return res.json({ success: true, subscriptions: [] });
     }
-
-    const filtered = MOCK_SUBSCRIPTIONS.filter(s => {
-        const sUid = (s.user_id || s.userId || "").toString().toLowerCase().trim();
-        const sEmail = (s.customer_email || s.customerEmail || "").toLowerCase().trim();
-        const sPhone = (s.customer_phone || s.customerPhone || "").replace(/\D/g, "");
-        return (
-            (sUid && sUid === ident) ||
-            (sEmail && sEmail === ident) ||
-            (cleanPhone && sPhone && (sPhone === cleanPhone || sPhone.endsWith(cleanPhone) || cleanPhone.endsWith(sPhone)))
-        );
-    });
-    res.json({ success: true, subscriptions: filtered });
 });
 
 /* UPDATE SUBSCRIPTION STATUS (Pause, Resume, Cancel) */
