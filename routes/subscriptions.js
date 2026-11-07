@@ -540,7 +540,17 @@ router.post("/", async (req, res) => {
             ]);
             console.log(`✓ [SUBSCRIPTION SAVED TO DB] ID: ${subData.id}`);
         } catch (dbErr) {
-            console.error("[SUBSCRIPTION DB INSERT ERROR]:", dbErr.message);
+            console.warn("[SUBSCRIPTION DB INSERT ERROR, trying minimal insert]:", dbErr.message);
+            await pool.query(`
+                INSERT INTO subscriptions (
+                    id, customer_name, customer_phone, product_name, frequency,
+                    quantity, total_price, start_date, address, payment_status, status
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            `, [
+                subData.id, subData.customer_name, subData.customer_phone, subData.product_name,
+                subData.frequency, subData.quantity, subData.total_price, subData.start_date,
+                subData.address, subData.payment_status, subData.status
+            ]).catch(e => console.error("Minimal subscription insert error:", e.message));
         }
 
         MOCK_SUBSCRIPTIONS.unshift(subData);
@@ -675,10 +685,25 @@ router.get("/user/:identifier", async (req, res) => {
             "SELECT * FROM subscriptions WHERE LOWER(COALESCE(user_id::text, ''))=$1 OR LOWER(COALESCE(customer_email, ''))=$1 OR customer_phone=$1 OR ($2 != '' AND REPLACE(customer_phone, ' ', '') LIKE $3) ORDER BY created_at DESC",
             [ident, cleanPhone, `%${cleanPhone}%`]
         );
-        return res.json({ success: true, subscriptions: result.rows || [] });
+        const dbRows = result.rows || [];
+        const dbIds = new Set(dbRows.map(r => r.id.toString()));
+        const memRows = (MOCK_SUBSCRIPTIONS || []).filter(m => {
+            if (dbIds.has(m.id.toString())) return false;
+            const mUser = (m.user_id || m.userId || '').toString().toLowerCase();
+            const mEmail = (m.customer_email || m.customerEmail || '').toString().toLowerCase();
+            const mPhone = (m.customer_phone || m.customerPhone || '').toString().replace(/\D/g, "");
+            return mUser === ident || mEmail === ident || (cleanPhone.length >= 7 && mPhone.includes(cleanPhone));
+        });
+        return res.json({ success: true, subscriptions: [...dbRows, ...memRows] });
     } catch (err) {
         console.error("[USER SUBSCRIPTIONS ERROR]", err.message);
-        return res.json({ success: true, subscriptions: [] });
+        const memRows = (MOCK_SUBSCRIPTIONS || []).filter(m => {
+            const mUser = (m.user_id || m.userId || '').toString().toLowerCase();
+            const mEmail = (m.customer_email || m.customerEmail || '').toString().toLowerCase();
+            const mPhone = (m.customer_phone || m.customerPhone || '').toString().replace(/\D/g, "");
+            return mUser === ident || mEmail === ident || (cleanPhone.length >= 7 && mPhone.includes(cleanPhone));
+        });
+        return res.json({ success: true, subscriptions: memRows });
     }
 });
 

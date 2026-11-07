@@ -475,6 +475,15 @@ const verifyPaymentHandler = async (req, res) => {
         }
     } catch (err) {
         console.error("Verify payment DB error:", err.message);
+        await pool.query(
+            `UPDATE orders SET payment_status = 'verified', order_status = 'processing' WHERE id = $1`,
+            [id]
+        ).catch(async () => {
+            await pool.query(
+                `UPDATE orders SET payment_status = 'verified' WHERE id = $1`,
+                [id]
+            ).catch(e => console.error("Verify fallback error:", e.message));
+        });
     }
 
     const memOrder = MOCK_ORDERS.find(o => o.id == rawId || o.id == id || o.order_number == rawId);
@@ -526,6 +535,10 @@ const rejectPaymentHandler = async (req, res) => {
         }
     } catch (err) {
         console.error("Reject payment DB error:", err.message);
+        await pool.query(
+            `UPDATE orders SET payment_status = 'rejected' WHERE id = $1`,
+            [id]
+        ).catch(e => console.error("Reject fallback error:", e.message));
     }
 
     const memOrder = MOCK_ORDERS.find(o => o.id == rawId || o.id == id || o.order_number == rawId);

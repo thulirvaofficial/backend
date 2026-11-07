@@ -123,11 +123,32 @@ async function initializeDatabase() {
             );
         `);
 
-        // Ensure columns exist if table was already created
-        await pool.query(`
-            ALTER TABLE orders ADD COLUMN IF NOT EXISTS transaction_id VARCHAR(150);
-            ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_proof TEXT;
-        `).catch(() => {});
+        // Ensure all required columns exist on orders
+        const orderCols = [
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS transaction_id VARCHAR(150)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_proof TEXT",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS verified_by VARCHAR(150)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS rejection_reason TEXT",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_type VARCHAR(50) DEFAULT 'delivery'",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_number VARCHAR(100)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_location_id INTEGER",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_location_name VARCHAR(150)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_slot VARCHAR(100)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_code VARCHAR(50)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(10,2) DEFAULT 0",
+            `CREATE TABLE IF NOT EXISTS order_status_history (
+                id SERIAL PRIMARY KEY,
+                order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+                status VARCHAR(50),
+                comment TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )`
+        ];
+        for (const sql of orderCols) {
+            await pool.query(sql).catch(e => console.warn("Order migration warn:", e.message));
+        }
 
         await pool.query(`
             CREATE TABLE IF NOT EXISTS order_items (
@@ -192,11 +213,36 @@ async function initializeDatabase() {
             );
         `);
 
-        // Ensure columns exist on subscriptions
-        await pool.query(`
-            ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS transaction_id VARCHAR(150);
-            ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_proof TEXT;
-        `).catch(() => {});
+        // Ensure all required columns exist on subscriptions
+        const subCols = [
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS user_id INTEGER",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS customer_name VARCHAR(150)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS customer_phone VARCHAR(30)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS customer_email VARCHAR(200)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS plan_id INTEGER",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS product_id INTEGER",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS product_name VARCHAR(200)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS product_image VARCHAR(500)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS time_period VARCHAR(100)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS frequency VARCHAR(50)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS delivery_slot VARCHAR(50)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS price_per_delivery NUMERIC(10,2) DEFAULT 0",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS total_price NUMERIC(10,2) DEFAULT 0",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS start_date VARCHAR(50)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS address TEXT",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS city VARCHAR(100)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS pincode VARCHAR(20)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_method VARCHAR(100)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'Pending'",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Active'",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS transaction_id VARCHAR(150)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_proof TEXT",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ];
+        for (const sql of subCols) {
+            await pool.query(sql).catch(e => console.warn("Subscription migration warn:", e.message));
+        }
 
         // DELIVERY LOCATIONS TABLE
         await pool.query(`
