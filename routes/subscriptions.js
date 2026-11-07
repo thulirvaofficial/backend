@@ -2,7 +2,7 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const { pool } = require("../config/database");
-const { notifySubscriptionActivated, notifySubscriptionRenewed, notifyAdminNewOrder } = require("../services/notificationService");
+const { notifySubscriptionActivated, notifySubscriptionRenewed, notifyAdminNewOrder, sendSubscriptionNotification } = require("../services/notificationService");
 
 const router = express.Router();
 
@@ -602,14 +602,17 @@ const updateSubStatusHandler = async (req, res) => {
 /* CANCEL SUBSCRIPTION (Admin & Customer) */
 const cancelSubHandler = async (req, res) => {
     const id = req.params.id;
+    let sub = null;
     try {
-        await pool.query("UPDATE subscriptions SET status='Cancelled' WHERE id=$1", [id]);
+        const result = await pool.query("UPDATE subscriptions SET status='Cancelled' WHERE id=$1 RETURNING *", [id]);
+        if (result.rows.length) sub = result.rows[0];
     } catch {}
 
-    const sub = MOCK_SUBSCRIPTIONS.find(s => s.id == id);
-    if (sub) {
-        sub.status = "Cancelled";
-    }
+    const memSub = MOCK_SUBSCRIPTIONS.find(s => s.id == id);
+    if (memSub) memSub.status = "Cancelled";
+    sub = sub || memSub || { id, status: "Cancelled" };
+
+    sendSubscriptionNotification({ subscription: sub, event: "cancelled" }).catch(() => {});
 
     res.json({
         success: true,
@@ -621,12 +624,17 @@ const cancelSubHandler = async (req, res) => {
 /* PAUSE SUBSCRIPTION (Admin & Customer) */
 const pauseSubHandler = async (req, res) => {
     const id = req.params.id;
+    let sub = null;
     try {
-        await pool.query("UPDATE subscriptions SET status='Paused' WHERE id=$1", [id]);
+        const result = await pool.query("UPDATE subscriptions SET status='Paused' WHERE id=$1 RETURNING *", [id]);
+        if (result.rows.length) sub = result.rows[0];
     } catch {}
 
-    const sub = MOCK_SUBSCRIPTIONS.find(s => s.id == id);
-    if (sub) sub.status = "Paused";
+    const memSub = MOCK_SUBSCRIPTIONS.find(s => s.id == id);
+    if (memSub) memSub.status = "Paused";
+    sub = sub || memSub || { id, status: "Paused" };
+
+    sendSubscriptionNotification({ subscription: sub, event: "paused" }).catch(() => {});
 
     res.json({
         success: true,
@@ -638,12 +646,17 @@ const pauseSubHandler = async (req, res) => {
 /* RESUME SUBSCRIPTION (Admin & Customer) */
 const resumeSubHandler = async (req, res) => {
     const id = req.params.id;
+    let sub = null;
     try {
-        await pool.query("UPDATE subscriptions SET status='Active' WHERE id=$1", [id]);
+        const result = await pool.query("UPDATE subscriptions SET status='Active' WHERE id=$1 RETURNING *", [id]);
+        if (result.rows.length) sub = result.rows[0];
     } catch {}
 
-    const sub = MOCK_SUBSCRIPTIONS.find(s => s.id == id);
-    if (sub) sub.status = "Active";
+    const memSub = MOCK_SUBSCRIPTIONS.find(s => s.id == id);
+    if (memSub) memSub.status = "Active";
+    sub = sub || memSub || { id, status: "Active" };
+
+    sendSubscriptionNotification({ subscription: sub, event: "resumed" }).catch(() => {});
 
     res.json({
         success: true,

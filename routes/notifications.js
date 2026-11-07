@@ -265,13 +265,23 @@ router.delete("/admin/:id", async (req, res) => {
 /* ============================================================
    SUBSCRIPTION EXPIRY SCHEDULER
 ============================================================ */
-function checkSubscriptionExpiryScheduler() {
+async function checkSubscriptionExpiryScheduler() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const dateStr = today.toISOString().split("T")[0];
 
+    let subscriptions = [];
+    try {
+        const res = await pool.query("SELECT * FROM subscriptions WHERE LOWER(status) = 'active'");
+        subscriptions = res.rows || [];
+    } catch (_) {}
+
     const subRoute = require("./subscriptions");
-    const subscriptions = (typeof subRoute.getSubscriptions === "function" ? subRoute.getSubscriptions() : null) || [];
+    const memSubs = (typeof subRoute.getSubscriptions === "function" ? subRoute.getSubscriptions() : null) || [];
+    const dbIds = new Set(subscriptions.map(s => s.id.toString()));
+    for (const m of memSubs) {
+        if (!dbIds.has(m.id.toString())) subscriptions.push(m);
+    }
 
     subscriptions.forEach(sub => {
         if (!sub.status || sub.status.toLowerCase() !== "active") return;

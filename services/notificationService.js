@@ -73,7 +73,18 @@ async function sendNotification({
         const isReady = (typeof isFirebaseInitialized === "function" ? isFirebaseInitialized() : (admin && admin.apps && admin.apps.length > 0)) || (messaging !== null);
 
         if (tokens.length > 0 && messaging && isReady) {
-            const targetChannelId = forAdmin ? "thulirva_admin_channel" : "thulirva_channel";
+            let targetChannelId;
+            if (forAdmin) {
+                if (type.includes("order") || type.includes("pickup")) targetChannelId = "thulirva_admin_orders_channel";
+                else if (type.includes("sub")) targetChannelId = "thulirva_admin_subscriptions_channel";
+                else if (type.includes("pay")) targetChannelId = "thulirva_admin_payments_channel";
+                else targetChannelId = "thulirva_admin_channel";
+            } else {
+                if (type.includes("order")) targetChannelId = "thulirva_orders_channel";
+                else if (type.includes("sub")) targetChannelId = "thulirva_subscriptions_channel";
+                else if (type.includes("pay")) targetChannelId = "thulirva_payments_channel";
+                else targetChannelId = "thulirva_general_channel";
+            }
             console.log(`[FCM DISPATCH] Sending to ${tokens.length} devices [${forAdmin ? 'ADMIN' : 'USER'}] via channel "${targetChannelId}": "${title}" - "${message}"`);
 
             const fcmPayload = {
@@ -147,6 +158,10 @@ async function notifyOrderStatusChange(order, newStatus) {
     let message = `Your order #${order.id} status is now ${newStatus}.`;
 
     switch (newStatus.toLowerCase()) {
+        case "received":
+            title = "Order Placed Successfully 🛍️";
+            message = `We have received your order #${order.id}. Thank you for ordering pure farm goodness!`;
+            break;
         case "confirmed":
         case "processing":
             title = "Order Confirmed ✓";
@@ -179,6 +194,10 @@ async function notifyOrderStatusChange(order, newStatus) {
             title = "Order Cancelled ❌";
             message = `Your order #${order.id} has been cancelled. If any payment was deducted, refund is being processed.`;
             break;
+        case "payment_rejected":
+            title = "Payment Verification Issue ⚠️";
+            message = `Payment proof for order #${order.id} could not be verified: ${order.rejection_reason || 'UTR mismatch'}. Please upload valid receipt.`;
+            break;
     }
 
     const userId = order.user_id || order.userId;
@@ -193,6 +212,21 @@ async function notifyOrderStatusChange(order, newStatus) {
 }
 
 /**
+ * Standardized Module 8 helper: sendCustomerOrderNotification
+ */
+async function sendCustomerOrderNotification({ order, event, status }) {
+    const s = status || event || order.order_status || "confirmed";
+    return notifyOrderStatusChange(order, s);
+}
+
+/**
+ * Standardized Module 8 helper: sendAdminNewOrderNotification
+ */
+async function sendAdminNewOrderNotification({ order }) {
+    return notifyAdminNewOrder(order);
+}
+
+/**
  * Notify admin about a newly placed order (IMMEDIATE ALERT)
  */
 async function notifyAdminNewOrder(order) {
@@ -203,61 +237,188 @@ async function notifyAdminNewOrder(order) {
     return sendNotification({
         title: "New Order Received! 🔔",
         message: `New ${typeLabel} #${order.id} received from ${order.customer_name || 'Customer'} worth ₹${amount}.`,
-        type: "new_order",
+        type: isPickup ? "pickup_order" : "new_order",
         targetId: order.id,
         forAdmin: true
     });
 }
 
 /**
- * Notify customer when a subscription is activated
+ * Standardized Module 8 helper: sendSubscriptionNotification
  */
+async function sendSubscriptionNotification({ subscription, event }) {
+    const userId = subscription.user_id || subscription.userId;
+    const planName = subscription.product_name || subscription.plan_name || "Milk Subscription";
+    const subId = subscription.id;
+
+    let title = "Subscription Update 🥛";
+    let message = `Your subscription #${subId} has been updated.`;
+
+    switch ((event || "").toLowerCase()) {
+        case "created":
+        case "activated":
+            title = "Subscription Activated! 🥛";
+            message = `Your ${planName} subscription is active! Daily fresh morning deliveries start on ${subscription.start_date || 'tomorrow'}.`;
+            // Also notify Admin about new subscription
+            sendNotification({
+                title: "New Subscription Enrolled! 🥛",
+                message: `New subscriber ${subscription.customer_name || 'Customer'} (${subscription.customer_phone || ''}) enrolled in ${planName}.`,
+                type: "new_subscription",
+                targetId: subId,
+                forAdmin: true
+            }).catch(() => {});
+            break;
+        case "paused":
+            title = "Subscription Paused ⏸️";
+            message = `Your ${planName} subscription has been paused. Daily deliveries are on hold until you resume.`;
+            sendNotification({
+                title: "Subscription Paused ⏸️",
+                message: `Subscriber ${subscription.customer_name || 'Customer'} paused subscription #${subId}.`,
+                type: "subscription_paused",
+                targetId: subId,
+                forAdmin: true
+            }).catch(() => {});
+            break;
+        case "resumed":
+            title = "Subscription Resumed! ▶️";
+            message = `Your ${planName} subscription has been resumed! Daily deliveries will continue tomorrow morning.`;
+            sendNotification({
+                title: "Subscription Resumed ▶️",
+                message: `Subscriber ${subscription.customer_name || 'Customer'} resumed subscription #${subId}.`,
+                type: "subscription_resumed",
+                targetId: subId,
+                forAdmin: true
+            }).catch(() => {});
+            break;
+        case "cancelled":
+            title = "Subscription Cancelled ❌";
+            message = `Your ${planName} subscription has been cancelled. Thank you for subscribing with Thulirva.`;
+            sendNotification({
+                title: "Subscription Cancelled ❌",
+                message: `Subscription #${subId} (${subscription.customer_name || 'Customer'}) was cancelled.`,
+                type: "subscription_cancelled",
+                targetId: subId,
+                forAdmin: true
+            }).catch(() => {});
+            break;
+        case "expiring":
+            title = "Subscription Expiring Soon ⏳";
+            message = `Your ${planName} subscription expires in 5 days. Renew now to avoid missing morning deliveries!`;
+            break;
+        case "renewal":
+        case "renewed":
+            title = "Subscription Renewed! 🔄";
+            message = `Your ${planName} subscription has been renewed. Fresh morning milk continues uninterrupted!`;
+            break;
+    }
+
+    return sendNotification({
+        userId,
+        title,
+        message,
+        type: "subscription",
+        targetId: subId,
+        forAdmin: false
+    });
+}
+
+/**
+ * Standardized Module 8 helper: sendPaymentNotification
+ */
+async function sendPaymentNotification({ orderOrSub, status, amount, forAdmin = false, reason = "" }) {
+    const id = orderOrSub?.id || "";
+    const isSub = id.toString().startsWith("SUB") || orderOrSub?.plan_id;
+    const itemType = isSub ? "Subscription" : "Order";
+    const amt = amount || orderOrSub?.total || orderOrSub?.total_price || 0;
+    const userId = orderOrSub?.user_id || orderOrSub?.userId;
+
+    if (forAdmin) {
+        if (status === "verification_required") {
+            return sendNotification({
+                title: "Payment Verification Required 💳",
+                message: `Payment proof uploaded for ${itemType} #${id} (₹${amt}). Please verify in Admin panel.`,
+                type: "payment_verification",
+                targetId: id,
+                forAdmin: true
+            });
+        } else {
+            return sendNotification({
+                title: "Payment Received 💰",
+                message: `Payment of ₹${amt} confirmed for ${itemType} #${id}.`,
+                type: "payment",
+                targetId: id,
+                forAdmin: true
+            });
+        }
+    } else {
+        if (status === "success" || status === "verified" || status === "paid") {
+            return sendNotification({
+                userId,
+                title: "Payment Verified! ✓",
+                message: `Your payment of ₹${amt} for ${itemType} #${id} has been verified and confirmed.`,
+                type: "payment",
+                targetId: id,
+                forAdmin: false
+            });
+        } else if (status === "rejected" || status === "failed") {
+            return sendNotification({
+                userId,
+                title: "Payment Verification Failed ❌",
+                message: `Payment proof for ${itemType} #${id} could not be verified: ${reason || 'Invalid reference'}.`,
+                type: "payment",
+                targetId: id,
+                forAdmin: false
+            });
+        } else {
+            return sendNotification({
+                userId,
+                title: "Payment Pending ⏳",
+                message: `Payment proof for ${itemType} #${id} is undergoing verification.`,
+                type: "payment",
+                targetId: id,
+                forAdmin: false
+            });
+        }
+    }
+}
+
+/**
+ * Standardized Module 8 helper: sendPickupNotification
+ */
+async function sendPickupNotification({ order, event, forAdmin = false }) {
+    const store = order.pickup_location_name || "THULIRVA Farm Store";
+    const slot = order.pickup_slot || "Morning";
+
+    if (forAdmin) {
+        return sendNotification({
+            title: "New Store Pickup Order 🏪",
+            message: `Pickup Order #${order.id} placed for ${store} (${slot}) by ${order.customer_name || 'Customer'}.`,
+            type: "pickup_order",
+            targetId: order.id,
+            forAdmin: true
+        });
+    } else {
+        return sendNotification({
+            userId: order.user_id || order.userId,
+            title: "Pickup Order Ready! 🏪",
+            message: `Your order #${order.id} is ready for collection at ${store} during slot ${slot}.`,
+            type: "order_status",
+            targetId: order.id,
+            forAdmin: false
+        });
+    }
+}
+
 async function notifySubscriptionActivated(subscription) {
-    const userId = subscription.user_id || subscription.userId;
-    const planName = subscription.product_name || subscription.plan_name || "Milk Subscription";
-
-    return sendNotification({
-        userId,
-        title: "Subscription Activated! 🥛",
-        message: `Your ${planName} subscription is active! Daily fresh morning deliveries start on ${subscription.start_date || 'tomorrow'}.`,
-        type: "subscription",
-        targetId: subscription.id,
-        forAdmin: false
-    });
+    return sendSubscriptionNotification({ subscription, event: "activated" });
 }
 
-/**
- * Notify customer when a subscription is renewed
- */
 async function notifySubscriptionRenewed(subscription) {
-    const userId = subscription.user_id || subscription.userId;
-    const planName = subscription.product_name || subscription.plan_name || "Milk Subscription";
-
-    return sendNotification({
-        userId,
-        title: "Subscription Renewed! 🔄",
-        message: `Your ${planName} subscription has been renewed. Fresh morning milk continues uninterrupted!`,
-        type: "subscription",
-        targetId: subscription.id,
-        forAdmin: false
-    });
+    return sendSubscriptionNotification({ subscription, event: "renewed" });
 }
 
-/**
- * Notify customer when a subscription is expiring within 5 days
- */
 async function notifySubscriptionExpiring(subscription, daysLeft = 5) {
-    const userId = subscription.user_id || subscription.userId;
-    const planName = subscription.product_name || subscription.plan_name || "Milk Subscription";
-
-    return sendNotification({
-        userId,
-        title: "Subscription Expiring Soon ⏳",
-        message: `Your ${planName} subscription expires in ${daysLeft} days. Renew now to avoid missing morning deliveries!`,
-        type: "subscription_expiry",
-        targetId: subscription.id,
-        forAdmin: false
-    });
+    return sendSubscriptionNotification({ subscription, event: "expiring" });
 }
 
 module.exports = {
@@ -267,5 +428,10 @@ module.exports = {
     notifySubscriptionActivated,
     notifySubscriptionRenewed,
     notifySubscriptionExpiring,
+    sendCustomerOrderNotification,
+    sendAdminNewOrderNotification,
+    sendSubscriptionNotification,
+    sendPaymentNotification,
+    sendPickupNotification,
     IN_APP_NOTIFICATIONS
 };

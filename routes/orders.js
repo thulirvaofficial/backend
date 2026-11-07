@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { pool } = require("../config/database");
 const { authenticateToken, adminOnly } = require("../middleware/auth");
-const { notifyAdminNewOrder, notifyOrderStatusChange, sendNotification } = require("../services/notificationService");
+const { notifyAdminNewOrder, notifyOrderStatusChange, sendNotification, sendPaymentNotification, sendPickupNotification } = require("../services/notificationService");
 const { validatePhone, validateAddress } = require("../utils/validators");
 
 const router = express.Router();
@@ -503,6 +503,7 @@ const verifyPaymentHandler = async (req, res) => {
         notifyOrderStatusChange(order, order.order_status).catch(e => {
             console.error("[NOTIFY PAYMENT VERIFIED ERROR]", e.message);
         });
+        sendPaymentNotification({ orderOrSub: order, status: "verified", amount: order.total }).catch(() => {});
     }
 
     res.json({ success: true, message: "Payment verified successfully", order });
@@ -554,6 +555,7 @@ const rejectPaymentHandler = async (req, res) => {
         notifyOrderStatusChange(order, "payment_rejected").catch(e => {
             console.error("[NOTIFY PAYMENT REJECTED ERROR]", e.message);
         });
+        sendPaymentNotification({ orderOrSub: order, status: "rejected", amount: order.total, reason }).catch(() => {});
     }
 
     res.json({ success: true, message: "Payment rejected", reason, order });

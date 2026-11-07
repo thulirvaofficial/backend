@@ -31,6 +31,20 @@ async function initializeDatabase() {
             );
         `);
 
+        // Ensure all required columns exist on users
+        const userCols = [
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS alternate_phone VARCHAR(30)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS city VARCHAR(100)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS pincode VARCHAR(20)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo TEXT",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ];
+        for (const sql of userCols) {
+            await pool.query(sql).catch(e => console.warn("User migration warn:", e.message));
+        }
+
         await pool.query(`
             CREATE TABLE IF NOT EXISTS categories (
                 id SERIAL PRIMARY KEY,
