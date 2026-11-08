@@ -53,9 +53,24 @@ async function initializeDatabase() {
                 emoji VARCHAR(20),
                 description TEXT,
                 image VARCHAR(500),
+                website_image VARCHAR(500),
+                mobile_image VARCHAR(500),
+                is_active BOOLEAN DEFAULT true,
+                display_order INTEGER DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
+
+        // Ensure category mobile_image and display_order columns exist
+        const catCols = [
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS website_image VARCHAR(500)",
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS mobile_image VARCHAR(500)",
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true",
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 1"
+        ];
+        for (const sql of catCols) {
+            await pool.query(sql).catch(e => console.warn("Category migration warn:", e.message));
+        }
 
         // Seed categories if empty
         const catCheck = await pool.query("SELECT COUNT(*) FROM categories");

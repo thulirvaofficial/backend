@@ -5,10 +5,40 @@ const path = require("path");
 const fs = require("fs");
 const { pool } = require("../config/database");
 const { sendNotification } = require("../services/notificationService");
+const { validateEmail, validatePhone, validatePassword, validateName, validateAddress } = require("../utils/validators");
 
 const router = express.Router();
 
 const OTP_STORE = new Map(); // phone -> { code, expiresAt }
+
+// Rate Limiter for Login Attempts
+const LOGIN_ATTEMPTS = new Map(); // key -> { count, lockUntil }
+function checkLoginRateLimit(key) {
+    const now = Date.now();
+    const record = LOGIN_ATTEMPTS.get(key);
+    if (!record) return { allowed: true };
+    if (record.lockUntil && record.lockUntil > now) {
+        const remainingMinutes = Math.ceil((record.lockUntil - now) / 60000);
+        return { allowed: false, message: `Too many failed login attempts. Please try again in ${remainingMinutes} minute(s).` };
+    }
+    if (record.lockUntil && record.lockUntil <= now) {
+        LOGIN_ATTEMPTS.delete(key);
+        return { allowed: true };
+    }
+    return { allowed: true };
+}
+function recordFailedLogin(key) {
+    const now = Date.now();
+    const record = LOGIN_ATTEMPTS.get(key) || { count: 0 };
+    record.count += 1;
+    if (record.count >= 5) {
+        record.lockUntil = now + (15 * 60 * 1000); // 15 min lockout
+    }
+    LOGIN_ATTEMPTS.set(key, record);
+}
+function clearLoginAttempts(key) {
+    LOGIN_ATTEMPTS.delete(key);
+}
 
 function extractUserId(req) {
     const authHeader = req.headers.authorization;
@@ -42,16 +72,36 @@ router.post("/register", async (req, res) => {
     try {
         const { name, email, password, phone, address } = req.body;
 
-        if (!name || !email || !password) {
+        const nameVal = validateName(name);
+        if (!nameVal.valid) {
+            return res.status(400).json({ success: false, message: nameVal.message });
+        }
+
+        const emailVal = validateEmail(email);
+        if (!emailVal.valid) {
+            return res.status(400).json({ success: false, message: emailVal.message });
+        }
+
+        const passVal = validatePassword(password);
+        if (!passVal.valid) {
             return res.status(400).json({
                 success: false,
-                message: "Name, email, and password are required"
+                message: passVal.message,
+                missingRequirements: passVal.missingRequirements
             });
         }
 
-        const cleanEmail = email.trim().toLowerCase();
-        const cleanName = name.trim();
-        const cleanPhone = phone ? phone.trim() : "";
+        let cleanPhone = "";
+        if (phone) {
+            const phoneVal = validatePhone(phone);
+            if (!phoneVal.valid) {
+                return res.status(400).json({ success: false, message: phoneVal.message });
+            }
+            cleanPhone = phoneVal.cleanPhone;
+        }
+
+        const cleanEmail = emailVal.cleanEmail;
+        const cleanName = nameVal.cleanName;
         const cleanAddress = address ? address.trim() : "";
 
         // 1. Try PostgreSQL database first
@@ -161,19 +211,31 @@ router.post("/register", async (req, res) => {
 ============================================================ */
 router.post("/login", async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const identifier = (req.body.email || req.body.identifier || req.body.phone || "").trim();
+        const { password } = req.body;
 
-        if (!email || !password) {
+        if (!identifier || !password) {
             return res.status(400).json({
                 success: false,
-                message: "Email and password are required"
+                message: "Email or phone number and password are required"
             });
         }
 
-        const cleanEmail = email.trim().toLowerCase();
+        const cleanIdentifier = identifier.toLowerCase();
+        const phoneDigits = identifier.replace(/\D/g, "");
+
+        // Rate limit check
+        const rateChk = checkLoginRateLimit(cleanIdentifier);
+        if (!rateChk.allowed) {
+            return res.status(429).json({
+                success: false,
+                message: rateChk.message
+            });
+        }
 
         // Admin quick check
-        if (cleanEmail === "admin@thulirva.com" && password === "admin123") {
+        if ((cleanIdentifier === "admin@thulirva.com" || cleanIdentifier === "admin") && password === "admin123") {
+            clearLoginAttempts(cleanIdentifier);
             const token = jwt.sign(
                 { id: 1, email: "admin@thulirva.com", role: "admin" },
                 process.env.JWT_SECRET || "thulirva_secret_key_2026",
@@ -188,17 +250,28 @@ router.post("/login", async (req, res) => {
 
         // 1. Try PostgreSQL database first
         try {
-            const result = await pool.query("SELECT * FROM users WHERE LOWER(email)=$1", [cleanEmail]);
-            if (result.rows.length > 0) {
+            let result;
+            if (phoneDigits.length === 10) {
+                result = await pool.query(
+                    "SELECT * FROM users WHERE LOWER(email)=$1 OR phone=$1 OR REPLACE(phone, ' ', '')=$2", 
+                    [cleanIdentifier, phoneDigits]
+                );
+            } else {
+                result = await pool.query("SELECT * FROM users WHERE LOWER(email)=$1", [cleanIdentifier]);
+            }
+
+            if (result && result.rows.length > 0) {
                 const user = result.rows[0];
                 const valid = await bcrypt.compare(password, user.password);
                 if (!valid) {
+                    recordFailedLogin(cleanIdentifier);
                     return res.status(401).json({
                         success: false,
-                        message: "Invalid email or password"
+                        message: "Invalid credentials"
                     });
                 }
 
+                clearLoginAttempts(cleanIdentifier);
                 const token = jwt.sign(
                     { id: user.id, email: user.email, role: user.role },
                     process.env.JWT_SECRET || "thulirva_secret_key_2026",
@@ -219,14 +292,18 @@ router.post("/login", async (req, res) => {
                 });
             }
         } catch (dbErr) {
-            console.warn("[AUTH] Database unavailable on login, checking fallback store:", dbErr.message);
+            console.warn("[AUTH] Database query error on login, checking fallback store:", dbErr.message);
         }
 
         // 2. Check in-memory store
-        const memUser = IN_MEMORY_USERS.find(u => u.email.toLowerCase() === cleanEmail);
+        const memUser = IN_MEMORY_USERS.find(u => 
+            (u.email && u.email.toLowerCase() === cleanIdentifier) ||
+            (u.phone && (u.phone === cleanIdentifier || (phoneDigits.length === 10 && u.phone.replace(/\D/g, "") === phoneDigits)))
+        );
         if (memUser) {
             const valid = await bcrypt.compare(password, memUser.password);
             if (valid) {
+                clearLoginAttempts(cleanIdentifier);
                 const token = jwt.sign(
                     { id: memUser.id, email: memUser.email, role: memUser.role },
                     process.env.JWT_SECRET || "thulirva_secret_key_2026",
@@ -245,12 +322,19 @@ router.post("/login", async (req, res) => {
                         role: memUser.role
                     }
                 });
+            } else {
+                recordFailedLogin(cleanIdentifier);
+                return res.status(401).json({
+                    success: false,
+                    message: "Invalid credentials"
+                });
             }
         }
 
+        recordFailedLogin(cleanIdentifier);
         return res.status(401).json({
             success: false,
-            message: "Invalid email or password"
+            message: "Invalid credentials"
         });
     } catch (error) {
         console.error("[AUTH LOGIN ERROR]", error);

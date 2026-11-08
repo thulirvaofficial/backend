@@ -43,7 +43,7 @@ router.get("/user/:userId", async (req, res) => {
         }
     } catch {}
 
-    const list = MOCK_ADDRESSES.filter(a => String(a.user_id) === String(userId) || userId === "1" || userId === "all");
+    const list = MOCK_ADDRESSES.filter(a => String(a.user_id) === String(userId) || (userId === "all" && req.user?.role === "admin"));
     res.json({ success: true, addresses: list });
 });
 
@@ -56,7 +56,7 @@ router.post("/", async (req, res) => {
 
     const newAddr = {
         id: Date.now(),
-        user_id: user_id || 1,
+        user_id: user_id || null,
         name,
         phone,
         address,

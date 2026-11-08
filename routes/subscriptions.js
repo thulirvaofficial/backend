@@ -1,6 +1,7 @@
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
+const jwt = require("jsonwebtoken");
 const { pool } = require("../config/database");
 const { notifySubscriptionActivated, notifySubscriptionRenewed, notifyAdminNewOrder, sendSubscriptionNotification } = require("../services/notificationService");
 
@@ -450,7 +451,17 @@ router.post("/", async (req, res) => {
             payment_method
         } = req.body;
 
-        const user_id = req.body.user_id || req.body.userId || null;
+        // Authoritative authenticated user ID from JWT token to prevent subscription impersonation
+        let authenticatedUserId = null;
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+            try {
+                const token = authHeader.substring(7);
+                const decoded = jwt.verify(token, process.env.JWT_SECRET || "thulirva_secret_key_2026");
+                authenticatedUserId = decoded.id;
+            } catch (_) {}
+        }
+        const user_id = authenticatedUserId || req.body.user_id || req.body.userId || null;
         const customer_name = req.body.customer_name || req.body.customerName || "Valued Customer";
         const customer_phone = req.body.customer_phone || req.body.customerPhone || "";
         const customer_email = req.body.customer_email || req.body.customerEmail || "";
@@ -564,6 +575,22 @@ router.post("/", async (req, res) => {
             delivery_type: 'subscription'
         }).catch(() => {});
 
+        // Payment verification required alerts if proof or transaction ID is present
+        if (transaction_id || savedProof) {
+            sendPaymentNotification({
+                orderOrSub: subData,
+                status: "verification_required",
+                amount: subData.total_price,
+                forAdmin: true
+            }).catch(() => {});
+            sendPaymentNotification({
+                orderOrSub: subData,
+                status: "pending",
+                amount: subData.total_price,
+                forAdmin: false
+            }).catch(() => {});
+        }
+
         res.json({
             success: true,
             subscription: subData,
@@ -574,27 +601,37 @@ router.post("/", async (req, res) => {
     }
 });
 
-/* UPDATE SUBSCRIPTION STATUS (Pause, Resume, Cancel) */
+/* UPDATE SUBSCRIPTION STATUS (Pause, Resume, Cancel, Payment) */
 const updateSubStatusHandler = async (req, res) => {
     const id = req.params.id;
-    const { status } = req.body;
+    const { status, payment_status } = req.body;
 
-    if (!status) {
-        return res.status(400).json({ success: false, message: "Status is required" });
+    if (!status && !payment_status) {
+        return res.status(400).json({ success: false, message: "Status or payment_status is required" });
     }
 
     try {
-        await pool.query("UPDATE subscriptions SET status=$1 WHERE id=$2", [status, id]);
+        if (status && payment_status) {
+            await pool.query("UPDATE subscriptions SET status=$1, payment_status=$2 WHERE id=$3", [status, payment_status, id]);
+        } else if (status) {
+            await pool.query("UPDATE subscriptions SET status=$1 WHERE id=$2", [status, id]);
+        } else if (payment_status) {
+            await pool.query("UPDATE subscriptions SET payment_status=$1 WHERE id=$2", [payment_status, id]);
+        }
     } catch {}
 
     const sub = MOCK_SUBSCRIPTIONS.find(s => s.id == id);
     if (sub) {
-        sub.status = status;
+        if (status) sub.status = status;
+        if (payment_status) sub.payment_status = payment_status;
+        if (status) {
+            sendSubscriptionNotification({ subscription: sub, event: status.toLowerCase() }).catch(() => {});
+        }
     }
 
     res.json({
         success: true,
-        message: `Subscription status updated to ${status}`,
+        message: `Subscription updated successfully`,
         subscription: sub
     });
 };
@@ -679,6 +716,83 @@ const deleteSubHandler = async (req, res) => {
     });
 };
 
+/* APPROVE / VERIFY SUBSCRIPTION PAYMENT (Admin) */
+const verifyPaymentHandler = async (req, res) => {
+    const id = req.params.id;
+    let sub = null;
+    try {
+        const result = await pool.query(
+            "UPDATE subscriptions SET payment_status='verified', status='Active', updated_at=NOW() WHERE id=$1 RETURNING *",
+            [id]
+        );
+        if (result.rows.length) sub = result.rows[0];
+    } catch (e) {
+        console.error("[VERIFY SUB PAYMENT DB ERROR]", e.message);
+    }
+
+    const memSub = MOCK_SUBSCRIPTIONS.find(s => s.id == id);
+    if (memSub) {
+        memSub.payment_status = "verified";
+        memSub.status = "Active";
+    }
+    sub = sub || memSub || { id, payment_status: "verified", status: "Active" };
+
+    // Send push notification to customer
+    sendNotification({
+        userId: sub.user_id || sub.userId,
+        title: "Subscription Payment Approved! 🥛",
+        message: `Your payment for ${sub.product_name || 'milk subscription'} has been verified! Daily deliveries are now active.`,
+        type: "subscription_activated",
+        targetId: id
+    }).catch(() => {});
+
+    res.json({
+        success: true,
+        message: "Subscription payment approved and activated successfully!",
+        subscription: sub
+    });
+};
+
+/* REJECT SUBSCRIPTION PAYMENT (Admin) */
+const rejectPaymentHandler = async (req, res) => {
+    const id = req.params.id;
+    const { reason } = req.body || {};
+    const rejectionReason = reason || "Payment verification failed or receipt was invalid";
+    let sub = null;
+    try {
+        const result = await pool.query(
+            "UPDATE subscriptions SET payment_status='rejected', status='Cancelled', notes=COALESCE(notes, '') || ' | Rejected: ' || $1, updated_at=NOW() WHERE id=$2 RETURNING *",
+            [rejectionReason, id]
+        );
+        if (result.rows.length) sub = result.rows[0];
+    } catch (e) {
+        console.error("[REJECT SUB PAYMENT DB ERROR]", e.message);
+    }
+
+    const memSub = MOCK_SUBSCRIPTIONS.find(s => s.id == id);
+    if (memSub) {
+        memSub.payment_status = "rejected";
+        memSub.status = "Cancelled";
+        memSub.notes = (memSub.notes || "") + ` | Rejected: ${rejectionReason}`;
+    }
+    sub = sub || memSub || { id, payment_status: "rejected", status: "Cancelled" };
+
+    // Send push notification to customer
+    sendNotification({
+        userId: sub.user_id || sub.userId,
+        title: "Subscription Payment Rejected ⚠️",
+        message: `Payment for subscription #${id} could not be verified: ${rejectionReason}. Please contact support or update payment.`,
+        type: "subscription_payment_rejected",
+        targetId: id
+    }).catch(() => {});
+
+    res.json({
+        success: true,
+        message: "Subscription payment marked as rejected",
+        subscription: sub
+    });
+};
+
 router.put("/:id/pause", pauseSubHandler);
 router.post("/:id/pause", pauseSubHandler);
 router.put("/:id/resume", resumeSubHandler);
@@ -686,35 +800,70 @@ router.post("/:id/resume", resumeSubHandler);
 router.delete("/:id", deleteSubHandler);
 router.put("/:id/cancel", cancelSubHandler);
 router.post("/:id/cancel", cancelSubHandler);
+router.post("/:id/verify-payment", verifyPaymentHandler);
+router.put("/:id/verify-payment", verifyPaymentHandler);
+router.post("/:id/approve-payment", verifyPaymentHandler);
+router.post("/:id/reject-payment", rejectPaymentHandler);
+router.put("/:id/reject-payment", rejectPaymentHandler);
 router.patch("/:id/status", updateSubStatusHandler);
 router.put("/:id/status", updateSubStatusHandler);
 
-/* GET USER SUBSCRIPTIONS */
+/* GET USER SUBSCRIPTIONS (Strict Customer Isolation) */
 router.get("/user/:identifier", async (req, res) => {
-    const ident = req.params.identifier.trim().toLowerCase();
-    const cleanPhone = ident.replace(/\D/g, "");
+    const rawIdent = req.params.identifier.trim();
+    const ident = rawIdent.toLowerCase();
+    const cleanDigits = rawIdent.replace(/\D/g, "");
+    const isEmail = ident.includes("@");
+    const isPhone = cleanDigits.length === 10 && /^[6-9]\d{9}$/.test(cleanDigits);
+    const isNumericId = !isEmail && !isPhone && !isNaN(Number(ident));
+
     try {
+        let whereSql = "";
+        let params = [];
+
+        if (isNumericId) {
+            whereSql = "WHERE user_id = $1 ORDER BY created_at DESC";
+            params = [Number(ident)];
+        } else if (isEmail) {
+            whereSql = "WHERE LOWER(COALESCE(customer_email, '')) = $1 ORDER BY created_at DESC";
+            params = [ident];
+        } else if (isPhone) {
+            whereSql = "WHERE REPLACE(customer_phone, ' ', '') = $1 OR customer_phone = $1 ORDER BY created_at DESC";
+            params = [cleanDigits];
+        } else {
+            whereSql = "WHERE LOWER(COALESCE(user_id::text, '')) = $1 OR LOWER(COALESCE(customer_email, '')) = $1 ORDER BY created_at DESC";
+            params = [ident];
+        }
+
         const result = await pool.query(
-            "SELECT * FROM subscriptions WHERE LOWER(COALESCE(user_id::text, ''))=$1 OR LOWER(COALESCE(customer_email, ''))=$1 OR customer_phone=$1 OR ($2 != '' AND REPLACE(customer_phone, ' ', '') LIKE $3) ORDER BY created_at DESC",
-            [ident, cleanPhone, `%${cleanPhone}%`]
+            `SELECT * FROM subscriptions ${whereSql}`,
+            params
         );
         const dbRows = result.rows || [];
         const dbIds = new Set(dbRows.map(r => r.id.toString()));
         const memRows = (MOCK_SUBSCRIPTIONS || []).filter(m => {
             if (dbIds.has(m.id.toString())) return false;
-            const mUser = (m.user_id || m.userId || '').toString().toLowerCase();
-            const mEmail = (m.customer_email || m.customerEmail || '').toString().toLowerCase();
-            const mPhone = (m.customer_phone || m.customerPhone || '').toString().replace(/\D/g, "");
-            return mUser === ident || mEmail === ident || (cleanPhone.length >= 7 && mPhone.includes(cleanPhone));
+            const mUser = (m.user_id || m.userId || '').toString().trim();
+            const mEmail = (m.customer_email || m.customerEmail || '').toLowerCase().trim();
+            const mPhone = (m.customer_phone || m.customerPhone || '').replace(/\D/g, "");
+
+            if (isNumericId) return mUser === ident;
+            if (isEmail) return mEmail === ident;
+            if (isPhone) return mPhone === cleanDigits;
+            return mUser === ident || mEmail === ident;
         });
         return res.json({ success: true, subscriptions: [...dbRows, ...memRows] });
     } catch (err) {
         console.error("[USER SUBSCRIPTIONS ERROR]", err.message);
         const memRows = (MOCK_SUBSCRIPTIONS || []).filter(m => {
-            const mUser = (m.user_id || m.userId || '').toString().toLowerCase();
-            const mEmail = (m.customer_email || m.customerEmail || '').toString().toLowerCase();
-            const mPhone = (m.customer_phone || m.customerPhone || '').toString().replace(/\D/g, "");
-            return mUser === ident || mEmail === ident || (cleanPhone.length >= 7 && mPhone.includes(cleanPhone));
+            const mUser = (m.user_id || m.userId || '').toString().trim();
+            const mEmail = (m.customer_email || m.customerEmail || '').toLowerCase().trim();
+            const mPhone = (m.customer_phone || m.customerPhone || '').replace(/\D/g, "");
+
+            if (isNumericId) return mUser === ident;
+            if (isEmail) return mEmail === ident;
+            if (isPhone) return mPhone === cleanDigits;
+            return mUser === ident || mEmail === ident;
         });
         return res.json({ success: true, subscriptions: memRows });
     }

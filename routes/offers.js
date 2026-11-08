@@ -1,5 +1,6 @@
 const express = require("express");
 const { pool } = require("../config/database");
+const { sendNotification } = require("../services/notificationService");
 
 const router = express.Router();
 
@@ -39,15 +40,15 @@ router.post("/", async (req, res) => {
             [title, description, code, discount_percent || 0, discount_amount || 0, banner_image, is_active !== false, is_published !== false, expires_at]
         );
 
-        // If published, also record an offer notification in notifications system
+        // If published, also record and broadcast offer notification
         if (is_published !== false) {
-            try {
-                await pool.query(
-                    `INSERT INTO notifications (user_id, title, message, type)
-                     VALUES (NULL, $1, $2, 'offer')`,
-                    [title, description]
-                );
-            } catch {}
+            sendNotification({
+                title: `Special Offer: ${title} 🎉`,
+                message: description || `Special Offer! Use code ${code || ''} for farm discounts.`,
+                type: "offer",
+                targetId: result.rows[0]?.id ? result.rows[0].id.toString() : "",
+                forAdmin: false
+            }).catch(() => {});
         }
 
         res.json({ success: true, offer: result.rows[0] });

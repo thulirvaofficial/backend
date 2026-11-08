@@ -1,5 +1,6 @@
 const express = require("express");
 const { pool } = require("../config/database");
+const { sendNotification } = require("../services/notificationService");
 
 const router = express.Router();
 
@@ -214,13 +215,6 @@ router.post("/validate", async (req, res) => {
 
     const newTotal = Math.max(0, numericTotal - discount);
 
-    // Increment usage
-    try {
-        await pool.query("UPDATE coupons SET usage_count = usage_count + 1 WHERE id = $1", [coupon.id]);
-    } catch {
-        coupon.usage_count = (coupon.usage_count || 0) + 1;
-    }
-
     res.json({
         success: true,
         valid: true,
@@ -250,7 +244,15 @@ router.post("/", async (req, res) => {
              RETURNING *`,
             [cleanCode, discount_type || 'percent', Number(discount_value), Number(min_order || 0), Number(max_discount || 200), description || '', headline || '', expiry_date || '2027-12-31', Number(usage_limit || 1000)]
         );
-        return res.json({ success: true, coupon: result.rows[0] });
+        const createdCoupon = result.rows[0];
+        sendNotification({
+            title: `Special Offer: Use Code ${cleanCode} 🎁`,
+            message: headline || description || `Special Offer! Enjoy ${cleanCode} on your pure dairy farm orders.`,
+            type: "coupon",
+            targetId: cleanCode,
+            forAdmin: false
+        }).catch(() => {});
+        return res.json({ success: true, coupon: createdCoupon });
     } catch (err) {
         const newCoupon = {
             id: MOCK_COUPONS.length + 1,
@@ -267,6 +269,13 @@ router.post("/", async (req, res) => {
             status: 'active'
         };
         MOCK_COUPONS.push(newCoupon);
+        sendNotification({
+            title: `Special Offer: Use Code ${cleanCode} 🎁`,
+            message: headline || description || `Special Offer! Enjoy ${cleanCode} on your pure dairy farm orders.`,
+            type: "coupon",
+            targetId: cleanCode,
+            forAdmin: false
+        }).catch(() => {});
         return res.json({ success: true, coupon: newCoupon });
     }
 });

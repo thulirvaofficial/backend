@@ -1,6 +1,7 @@
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
+const jwt = require("jsonwebtoken");
 const { pool } = require("../config/database");
 const { authenticateToken, adminOnly } = require("../middleware/auth");
 const { notifyAdminNewOrder, notifyOrderStatusChange, sendNotification, sendPaymentNotification, sendPickupNotification } = require("../services/notificationService");
@@ -60,7 +61,18 @@ router.post("/", async (req, res) => {
         const customer_email = req.body.customer_email || req.body.customerEmail || "";
         const transaction_id = req.body.transaction_id || req.body.transactionId || req.body.utr || "";
         const payment_proof = req.body.payment_proof || req.body.paymentProof || req.body.proof || "";
-        const user_id = req.body.user_id || req.body.userId || null;
+
+        // Authoritative authenticated user ID from JWT token to prevent account impersonation
+        let authenticatedUserId = null;
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+            try {
+                const token = authHeader.substring(7);
+                const decoded = jwt.verify(token, process.env.JWT_SECRET || "thulirva_secret_key_2026");
+                authenticatedUserId = decoded.id;
+            } catch (_) {}
+        }
+        const user_id = authenticatedUserId || req.body.user_id || req.body.userId || null;
         const order_type = req.body.order_type || (req.body.is_pickup ? "pickup" : "delivery");
         const delivery_zone = req.body.delivery_zone || req.body.deliveryZone || "";
         const coupon_code = req.body.coupon_code || req.body.couponCode || null;
@@ -171,12 +183,22 @@ router.post("/", async (req, res) => {
 
                     // Automatic stock reduction
                     if (prodId) {
-                        await client.query(
+                        const stockRes = await client.query(
                             `UPDATE products 
                              SET stock = GREATEST(0, stock - $1), updated_at = CURRENT_TIMESTAMP 
-                             WHERE id = $2`,
+                             WHERE id = $2
+                             RETURNING id, name, stock`,
                             [qty, prodId]
                         );
+                        if (stockRes.rows.length && Number(stockRes.rows[0].stock) <= 5) {
+                            sendNotification({
+                                title: "Low Stock Alert ⚠️",
+                                message: `"${stockRes.rows[0].name}" stock is low (${stockRes.rows[0].stock} items remaining).`,
+                                type: "low_stock",
+                                targetId: prodId.toString(),
+                                forAdmin: true
+                            }).catch(() => {});
+                        }
                     }
                 }
 
@@ -243,6 +265,11 @@ router.post("/", async (req, res) => {
 
         MOCK_ORDERS.unshift(orderData);
 
+        // Safely increment coupon usage count on successful order placement
+        if (coupon_code) {
+            pool.query("UPDATE coupons SET usage_count = usage_count + 1 WHERE UPPER(code) = UPPER($1)", [coupon_code.trim()]).catch(() => {});
+        }
+
         // Instant admin notification with sound alert & customer notification
         notifyAdminNewOrder(orderData).catch(() => {});
         sendNotification({
@@ -253,6 +280,22 @@ router.post("/", async (req, res) => {
             targetId: orderData.id,
             forAdmin: false
         }).catch(() => {});
+
+        // Payment notifications if proof or transaction ID is present
+        if (transaction_id || savedProof) {
+            sendPaymentNotification({
+                orderOrSub: orderData,
+                status: "verification_required",
+                amount: orderData.total,
+                forAdmin: true
+            }).catch(() => {});
+            sendPaymentNotification({
+                orderOrSub: orderData,
+                status: "pending",
+                amount: orderData.total,
+                forAdmin: false
+            }).catch(() => {});
+        }
 
         res.json({ success: true, order: orderData });
     } catch (error) {
@@ -333,30 +376,58 @@ router.get("/admin/pickup", async (req, res) => {
     res.json({ success: true, orders: pickupList });
 });
 
-/* USER ORDERS */
+/* USER ORDERS (Strict Customer Isolation) */
 router.get("/user/:identifier", async (req, res) => {
-    const ident = req.params.identifier.trim().toLowerCase();
-    const cleanPhone = ident.replace(/\D/g, "");
+    const rawIdent = req.params.identifier.trim();
+    const ident = rawIdent.toLowerCase();
+    const cleanDigits = rawIdent.replace(/\D/g, "");
+    const isEmail = ident.includes("@");
+    const isPhone = cleanDigits.length === 10 && /^[6-9]\d{9}$/.test(cleanDigits);
+    const isNumericId = !isEmail && !isPhone && !isNaN(Number(ident));
+
     try {
-        const orders = await getOrdersWithItems(
-            `WHERE LOWER(COALESCE(user_id::text, ''))=$1 OR LOWER(customer_email)=$1 OR customer_phone=$1 OR ($2 != '' AND REPLACE(customer_phone, ' ', '') LIKE $3)`,
-            [ident, cleanPhone, `%${cleanPhone}%`]
-        );
+        let whereSql = "";
+        let params = [];
+
+        if (isNumericId) {
+            whereSql = "WHERE user_id = $1";
+            params = [Number(ident)];
+        } else if (isEmail) {
+            whereSql = "WHERE LOWER(customer_email) = $1";
+            params = [ident];
+        } else if (isPhone) {
+            whereSql = "WHERE REPLACE(customer_phone, ' ', '') = $1 OR customer_phone = $1";
+            params = [cleanDigits];
+        } else {
+            whereSql = "WHERE LOWER(COALESCE(user_id::text, '')) = $1 OR LOWER(customer_email) = $1";
+            params = [ident];
+        }
+
+        const orders = await getOrdersWithItems(whereSql, params);
         if (orders.length > 0) {
             return res.json({ success: true, orders });
         }
-    } catch {}
+    } catch (err) {
+        console.error("[ORDERS USER QUERY ERROR]", err.message);
+    }
 
     const userOrders = MOCK_ORDERS.filter(o => {
-        const oUid = (o.user_id || o.userId || "").toString().toLowerCase().trim();
+        const oUid = (o.user_id || o.userId || "").toString().trim();
         const oEmail = (o.customer_email || o.customerEmail || "").toLowerCase().trim();
         const oPhone = (o.customer_phone || o.customerPhone || "").replace(/\D/g, "");
-        return (
-            (oUid && oUid === ident) ||
-            (oEmail && oEmail === ident) ||
-            (cleanPhone && oPhone && (oPhone === cleanPhone || oPhone.endsWith(cleanPhone) || cleanPhone.endsWith(oPhone)))
-        );
+
+        if (isNumericId) {
+            return oUid === ident;
+        }
+        if (isEmail) {
+            return oEmail === ident;
+        }
+        if (isPhone) {
+            return oPhone === cleanDigits;
+        }
+        return oUid === ident || oEmail === ident;
     });
+
     res.json({
         success: true,
         orders: userOrders
@@ -613,6 +684,13 @@ const cancelOrderHandler = async (req, res) => {
         notifyOrderStatusChange(order, "cancelled").catch(e => {
             console.error("[NOTIFY CANCEL ERROR]", e.message);
         });
+        sendNotification({
+            title: "Order Cancelled ❌",
+            message: `Order #${order.order_number || order.id} has been cancelled (${reason}).`,
+            type: "order_cancelled",
+            targetId: order.id,
+            forAdmin: true
+        }).catch(() => {});
     }
 
     res.json({ success: true, message: "Order cancelled successfully and stock restored.", order });

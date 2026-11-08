@@ -1,11 +1,14 @@
 const { pool } = require("../config/database");
 const { initFirebaseAdmin, admin, isFirebaseInitialized, getMessaging } = require("./firebaseAdmin");
+const { getDeviceTokens, deactivateToken } = require("./tokenStore");
 
 // Initialize Firebase Admin on startup (safe, non-blocking)
 initFirebaseAdmin();
 
 // In-memory notifications fallback
 const IN_APP_NOTIFICATIONS = [];
+// Persistent in-memory diagnostic logs for admin panel & debugging
+const NOTIFICATION_DISPATCH_LOGS = [];
 
 /**
  * Send and log a notification to a specific user or all admins
@@ -45,29 +48,60 @@ async function sendNotification({
     }
 
     // 2. Fetch active device push tokens
+    const logEntry = {
+        id: payload.id,
+        timestamp: new Date().toISOString(),
+        event: type,
+        title,
+        message,
+        target_id: targetId ? targetId.toString() : null,
+        for_admin: forAdmin,
+        user_id: userId,
+        tokens_targeted: 0,
+        success_count: 0,
+        failure_count: 0,
+        status: "pending",
+        errors: [],
+        fcm_response: null
+    };
+
     try {
         let tokens = [];
-        if (forAdmin) {
-            const res = await pool.query(
-                "SELECT token FROM device_tokens WHERE role = 'admin' AND is_active = true"
-            );
-            tokens = res.rows.map(r => r.token);
-        } else if (userId) {
-            const res = await pool.query(
-                "SELECT token FROM device_tokens WHERE user_id::text = $1::text AND is_active = true",
-                [userId.toString()]
-            );
-            tokens = res.rows.map(r => r.token);
-        } else {
-            // Broadcast to all active customer devices
-            const res = await pool.query(
-                "SELECT token FROM device_tokens WHERE is_active = true AND role != 'admin' LIMIT 500"
-            );
-            tokens = res.rows.map(r => r.token);
+        try {
+            if (forAdmin) {
+                const res = await pool.query(
+                    "SELECT token FROM device_tokens WHERE role = 'admin' AND is_active = true"
+                );
+                tokens = res.rows.map(r => r.token);
+            } else if (userId) {
+                const res = await pool.query(
+                    `SELECT token FROM device_tokens 
+                     WHERE (user_id::text = $1::text 
+                            OR user_id IN (SELECT phone FROM users WHERE id::text = $1::text)
+                            OR user_id IN (SELECT email FROM users WHERE id::text = $1::text))
+                       AND is_active = true`,
+                    [userId.toString()]
+                );
+                tokens = res.rows.map(r => r.token);
+            } else {
+                // Broadcast to all active customer devices
+                const res = await pool.query(
+                    "SELECT token FROM device_tokens WHERE is_active = true AND role != 'admin' LIMIT 500"
+                );
+                tokens = res.rows.map(r => r.token);
+            }
+        } catch (dbErr) {
+            // DB fallback
+        }
+
+        // Fallback to shared in-memory token store if database is offline or empty
+        if (!tokens || tokens.length === 0) {
+            tokens = getDeviceTokens({ forAdmin, userId });
         }
 
         // Deduplicate tokens
         tokens = [...new Set(tokens.filter(t => t && t.trim().length > 10))];
+        logEntry.tokens_targeted = tokens.length;
 
         const messaging = typeof getMessaging === "function" ? getMessaging() : null;
         const isReady = (typeof isFirebaseInitialized === "function" ? isFirebaseInitialized() : (admin && admin.apps && admin.apps.length > 0)) || (messaging !== null);
@@ -116,6 +150,15 @@ async function sendNotification({
             const response = await messaging.sendEachForMulticast(fcmPayload);
             console.log(`✓ [FCM SUCCESS] Delivered: ${response.successCount}/${tokens.length} messages. Failures: ${response.failureCount}`);
 
+            logEntry.success_count = response.successCount;
+            logEntry.failure_count = response.failureCount;
+            logEntry.status = response.successCount > 0 ? "delivered" : "failed";
+            logEntry.fcm_response = response.responses.map(r => ({
+                success: r.success,
+                messageId: r.messageId || null,
+                error: r.error ? { code: r.error.code, message: r.error.message } : null
+            }));
+
             // Remove or deactivate invalid/expired tokens
             if (response.failureCount > 0) {
                 const badTokens = [];
@@ -133,6 +176,7 @@ async function sendNotification({
                 });
 
                 if (badTokens.length > 0) {
+                    badTokens.forEach(t => deactivateToken(t));
                     try {
                         await pool.query(
                             "UPDATE device_tokens SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE token = ANY($1::text[])",
@@ -142,10 +186,38 @@ async function sendNotification({
                     } catch {}
                 }
             }
+        } else {
+            logEntry.status = tokens.length === 0 ? "no_tokens_registered" : "firebase_not_ready";
         }
     } catch (err) {
+        logEntry.status = "error";
+        logEntry.errors.push({ code: err.code || "SEND_ERROR", message: err.message });
         console.warn("[FCM DISPATCH ERROR]", err.message);
     }
+
+    NOTIFICATION_DISPATCH_LOGS.unshift(logEntry);
+    if (NOTIFICATION_DISPATCH_LOGS.length > 200) NOTIFICATION_DISPATCH_LOGS.pop();
+
+    try {
+        await pool.query(
+            `INSERT INTO notification_logs (event, user_id, for_admin, title, message, target_id, tokens_count, success_count, failure_count, error_message)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [
+                logEntry.event,
+                logEntry.user_id ? logEntry.user_id.toString() : null,
+                logEntry.for_admin,
+                logEntry.title,
+                logEntry.message,
+                logEntry.target_id,
+                logEntry.tokens_targeted,
+                logEntry.success_count,
+                logEntry.failure_count,
+                logEntry.errors.length ? JSON.stringify(logEntry.errors) : (logEntry.failure_count > 0 ? "FCM failure" : null)
+            ]
+        ).catch(() => {});
+    } catch (_) {}
+
+    return payload;
 
     return payload;
 }
@@ -433,5 +505,6 @@ module.exports = {
     sendSubscriptionNotification,
     sendPaymentNotification,
     sendPickupNotification,
-    IN_APP_NOTIFICATIONS
+    IN_APP_NOTIFICATIONS,
+    NOTIFICATION_DISPATCH_LOGS
 };

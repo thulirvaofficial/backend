@@ -1,12 +1,12 @@
 const express = require("express");
 const { pool } = require("../config/database");
 const { IN_APP_NOTIFICATIONS, sendNotification } = require("../services/notificationService");
+const { DEVICE_TOKENS, addDeviceToken, getDeviceTokens } = require("../services/tokenStore");
 
 const router = express.Router();
 
 // Fallback in-memory stores
 let REAL_NOTIFICATIONS = [];
-let DEVICE_TOKENS = [];
 let IN_MEMORY_ANNOUNCEMENTS = [
     {
         id: 1,
@@ -121,21 +121,15 @@ router.post("/register-token", async (req, res) => {
         );
     } catch {}
 
-    const existing = DEVICE_TOKENS.find(t => t.token === token);
-    if (existing) {
-        existing.user_id = user_id || existing.user_id;
-        existing.role = role || existing.role;
-        existing.updated_at = new Date().toISOString();
-    } else {
-        DEVICE_TOKENS.push({
-            token,
-            platform: platform || "android",
-            user_id: user_id || null,
-            role: role || "customer",
-            created_at: new Date().toISOString()
-        });
-    }
+    // Synchronize to shared token store
+    addDeviceToken({
+        token,
+        platform: platform || "android",
+        user_id: user_id || null,
+        role: role || "customer"
+    });
 
+    console.log(`✓ [TOKEN REGISTERED] Device push token saved for ${role || 'customer'} (user_id: ${user_id || 'guest'})`);
     res.json({ success: true, message: "Device push token registered successfully" });
 });
 
@@ -333,6 +327,155 @@ router.post("/run-expiry-check", (req, res) => {
         success: true,
         message: "Subscription expiry check executed successfully"
     });
+});
+
+/* DEACTIVATE / DEREGISTER FCM DEVICE TOKEN (ON LOGOUT) */
+router.post("/deactivate-token", async (req, res) => {
+    const { token } = req.body;
+    if (!token) {
+        return res.status(400).json({ success: false, message: "Token is required" });
+    }
+    const { deactivateToken } = require("../services/tokenStore");
+    try {
+        await pool.query(
+            "UPDATE device_tokens SET is_active = false, user_id = null, role = 'guest', updated_at = CURRENT_TIMESTAMP WHERE token = $1",
+            [token]
+        );
+    } catch {}
+    deactivateToken(token);
+    console.log(`✓ [TOKEN DEACTIVATED] Token ${token.substring(0, 15)}... marked inactive on logout`);
+    res.json({ success: true, message: "Token deactivated successfully" });
+});
+
+/* NOTIFICATION DIAGNOSTIC ENDPOINT (REQUIREMENT 9) */
+router.get("/diagnostic", async (req, res) => {
+    const fs = require("fs");
+    const path = require("path");
+    const defaultPath = path.join(__dirname, "..", "config", "firebase-service-account.json");
+    const hasDefaultKey = fs.existsSync(defaultPath);
+    const customKeyPath = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+    const hasCustomKey = customKeyPath ? fs.existsSync(customKeyPath) : false;
+    const isJsonEnv = customKeyPath && customKeyPath.trim().startsWith("{");
+
+    let serviceAccountDetails = null;
+    if (hasDefaultKey) {
+        try {
+            const parsed = JSON.parse(fs.readFileSync(defaultPath, "utf8"));
+            serviceAccountDetails = { client_email: parsed.client_email, project_id: parsed.project_id, has_key: !!parsed.private_key };
+        } catch (_) {}
+    } else if (hasCustomKey) {
+        try {
+            const parsed = JSON.parse(fs.readFileSync(customKeyPath, "utf8"));
+            serviceAccountDetails = { client_email: parsed.client_email, project_id: parsed.project_id, has_key: !!parsed.private_key };
+        } catch (_) {}
+    } else if (isJsonEnv) {
+        try {
+            const parsed = JSON.parse(customKeyPath);
+            serviceAccountDetails = { client_email: parsed.client_email, project_id: parsed.project_id, has_key: !!parsed.private_key };
+        } catch (_) {}
+    }
+
+    let tokenStats = { totalActive: 0, adminActive: 0, customerActive: 0, recentTokens: [] };
+    try {
+        const statsRes = await pool.query(`
+            SELECT 
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE role = 'admin' AND is_active = true) as admin_count,
+                COUNT(*) FILTER (WHERE role != 'admin' AND is_active = true) as customer_count
+            FROM device_tokens
+        `);
+        if (statsRes.rows.length) {
+            tokenStats.totalActive = parseInt(statsRes.rows[0].total || 0);
+            tokenStats.adminActive = parseInt(statsRes.rows[0].admin_count || 0);
+            tokenStats.customerActive = parseInt(statsRes.rows[0].customer_count || 0);
+        }
+        const recentRes = await pool.query(`
+            SELECT id, user_id, role, device_type, is_active, SUBSTRING(token, 1, 15) as token_prefix, updated_at
+            FROM device_tokens ORDER BY updated_at DESC LIMIT 10
+        `);
+        tokenStats.recentTokens = recentRes.rows;
+    } catch (err) {
+        tokenStats.error = err.message;
+        tokenStats.inMemoryCount = DEVICE_TOKENS.length;
+        tokenStats.inMemoryAdmin = DEVICE_TOKENS.filter(t => t.role === 'admin' && t.is_active).length;
+        tokenStats.inMemoryCustomer = DEVICE_TOKENS.filter(t => t.role !== 'admin' && t.is_active).length;
+    }
+
+    const { NOTIFICATION_DISPATCH_LOGS } = require("../services/notificationService");
+
+    res.json({
+        success: true,
+        serverTime: new Date().toISOString(),
+        firebase: {
+            hasDefaultKeyFile: hasDefaultKey,
+            hasCustomKeyFile: hasCustomKey,
+            hasJsonInEnv: !!isJsonEnv,
+            serviceAccount: serviceAccountDetails,
+            projectId: process.env.FIREBASE_PROJECT_ID || "thulirva-e9697",
+            googleApplicationCredentials: process.env.GOOGLE_APPLICATION_CREDENTIALS || null
+        },
+        tokens: tokenStats,
+        recentDispatches: (NOTIFICATION_DISPATCH_LOGS || []).slice(0, 30)
+    });
+});
+
+/* GET FCM DELIVERY LOGS (ADMIN ONLY) */
+router.get("/admin/logs", async (req, res) => {
+    let logs = [];
+    try {
+        const result = await pool.query("SELECT * FROM notification_logs ORDER BY created_at DESC LIMIT 50");
+        if (result.rows.length) {
+            logs = result.rows;
+        }
+    } catch {}
+
+    const { NOTIFICATION_DISPATCH_LOGS } = require("../services/notificationService");
+    if (!logs.length) {
+        logs = NOTIFICATION_DISPATCH_LOGS || [];
+    }
+
+    res.json({
+        success: true,
+        logs: logs
+    });
+});
+
+/* TEST FCM DISPATCH ENDPOINT FOR VERIFICATION */
+router.post("/test-dispatch", async (req, res) => {
+    const { token, title, message, forAdmin, userId, type, targetId } = req.body;
+    try {
+        const result = await sendNotification({
+            userId: userId || null,
+            title: title || "Test Notification 🔔",
+            message: message || "Testing push notification dispatch",
+            type: type || "test_alert",
+            targetId: targetId || "TEST-01",
+            forAdmin: forAdmin === true
+        });
+        const { NOTIFICATION_DISPATCH_LOGS } = require("../services/notificationService");
+        const latestLog = (NOTIFICATION_DISPATCH_LOGS || [])[0] || null;
+        res.json({
+            success: true,
+            message: "Test dispatch executed",
+            result,
+            deliveryLog: latestLog
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+/* SUBMIT CUSTOMER ENQUIRY (NOTIFIES ADMIN) */
+router.post("/enquiry", async (req, res) => {
+    const { name, email, phone, subject, message } = req.body;
+    sendNotification({
+        title: "New Customer Enquiry 📩",
+        message: `${name || 'Customer'} (${phone || email || ''}): ${subject || message || 'New farm query received'}`,
+        type: "customer_enquiry",
+        targetId: phone || email || "",
+        forAdmin: true
+    }).catch(() => {});
+    res.json({ success: true, message: "Enquiry submitted successfully" });
 });
 
 module.exports = {
