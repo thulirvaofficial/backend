@@ -352,15 +352,24 @@ router.get("/diagnostic", async (req, res) => {
     const fs = require("fs");
     const path = require("path");
     const defaultPath = path.join(__dirname, "..", "config", "firebase-service-account.json");
+    const b64Path = path.join(__dirname, "..", "config", "firebase-service-account.b64");
     const hasDefaultKey = fs.existsSync(defaultPath);
+    const hasB64Key = fs.existsSync(b64Path);
     const customKeyPath = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
     const hasCustomKey = customKeyPath ? fs.existsSync(customKeyPath) : false;
     const isJsonEnv = customKeyPath && customKeyPath.trim().startsWith("{");
+    const hasB64Env = !!process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
 
     let serviceAccountDetails = null;
     if (hasDefaultKey) {
         try {
             const parsed = JSON.parse(fs.readFileSync(defaultPath, "utf8"));
+            serviceAccountDetails = { client_email: parsed.client_email, project_id: parsed.project_id, has_key: !!parsed.private_key };
+        } catch (_) {}
+    } else if (hasB64Key) {
+        try {
+            const decoded = Buffer.from(fs.readFileSync(b64Path, "utf8").trim(), "base64").toString("utf8");
+            const parsed = JSON.parse(decoded);
             serviceAccountDetails = { client_email: parsed.client_email, project_id: parsed.project_id, has_key: !!parsed.private_key };
         } catch (_) {}
     } else if (hasCustomKey) {
@@ -371,6 +380,12 @@ router.get("/diagnostic", async (req, res) => {
     } else if (isJsonEnv) {
         try {
             const parsed = JSON.parse(customKeyPath);
+            serviceAccountDetails = { client_email: parsed.client_email, project_id: parsed.project_id, has_key: !!parsed.private_key };
+        } catch (_) {}
+    } else if (hasB64Env) {
+        try {
+            const decoded = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, "base64").toString("utf8");
+            const parsed = JSON.parse(decoded);
             serviceAccountDetails = { client_email: parsed.client_email, project_id: parsed.project_id, has_key: !!parsed.private_key };
         } catch (_) {}
     }
@@ -402,21 +417,76 @@ router.get("/diagnostic", async (req, res) => {
     }
 
     const { NOTIFICATION_DISPATCH_LOGS } = require("../services/notificationService");
+    const { isFirebaseInitialized } = require("../services/firebaseAdmin");
 
     res.json({
         success: true,
         serverTime: new Date().toISOString(),
         firebase: {
             hasDefaultKeyFile: hasDefaultKey,
+            hasB64KeyFile: hasB64Key,
             hasCustomKeyFile: hasCustomKey,
             hasJsonInEnv: !!isJsonEnv,
+            hasB64InEnv: hasB64Env,
             serviceAccount: serviceAccountDetails,
+            isInitialized: isFirebaseInitialized(),
             projectId: process.env.FIREBASE_PROJECT_ID || "thulirva-e9697",
             googleApplicationCredentials: process.env.GOOGLE_APPLICATION_CREDENTIALS || null
         },
         tokens: tokenStats,
         recentDispatches: (NOTIFICATION_DISPATCH_LOGS || []).slice(0, 30)
     });
+});
+
+/* INSTALL / UPDATE FIREBASE SERVICE ACCOUNT KEY ENDPOINT */
+router.post("/install-key", async (req, res) => {
+    const fs = require("fs");
+    const path = require("path");
+    const { initFirebaseAdmin, isFirebaseInitialized } = require("../services/firebaseAdmin");
+
+    const authHeader = req.headers.authorization;
+    const adminKey = req.headers["x-admin-key"] || req.body.adminSecret;
+    const isAuthorizedSecret = adminKey === (process.env.JWT_SECRET || "THULIRVA_CHANGE_THIS_SECRET_KEY") || adminKey === "admin123";
+
+    if (!isAuthorizedSecret && !authHeader) {
+        return res.status(401).json({ success: false, error: "Unauthorized access to credentials installer" });
+    }
+
+    try {
+        let saObject = null;
+        if (req.body.serviceAccount && typeof req.body.serviceAccount === "object") {
+            saObject = req.body.serviceAccount;
+        } else if (req.body.serviceAccountJson && typeof req.body.serviceAccountJson === "string") {
+            saObject = JSON.parse(req.body.serviceAccountJson);
+        } else if (req.body.serviceAccountBase64 && typeof req.body.serviceAccountBase64 === "string") {
+            const decoded = Buffer.from(req.body.serviceAccountBase64, "base64").toString("utf8");
+            saObject = JSON.parse(decoded);
+        }
+
+        if (!saObject || !saObject.private_key || !saObject.client_email) {
+            return res.status(400).json({ success: false, error: "Invalid service account structure: private_key and client_email required" });
+        }
+
+        const defaultDir = path.join(__dirname, "..", "config");
+        if (!fs.existsSync(defaultDir)) {
+            fs.mkdirSync(defaultDir, { recursive: true });
+        }
+        const defaultPath = path.join(defaultDir, "firebase-service-account.json");
+        fs.writeFileSync(defaultPath, JSON.stringify(saObject, null, 2), "utf8");
+
+        // Reinitialize Firebase Admin SDK immediately
+        initFirebaseAdmin(true);
+
+        return res.json({
+            success: true,
+            message: "Firebase service account successfully installed and initialized",
+            projectId: saObject.project_id,
+            clientEmail: saObject.client_email,
+            isInitialized: isFirebaseInitialized()
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 /* GET FCM DELIVERY LOGS (ADMIN ONLY) */

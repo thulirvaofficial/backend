@@ -1,5 +1,5 @@
 const admin = require("firebase-admin");
-const { initializeApp, getApps, getApp, cert, applicationDefault } = require("firebase-admin/app");
+const { initializeApp, getApps, getApp, cert, applicationDefault, deleteApp } = require("firebase-admin/app");
 const { getMessaging } = require("firebase-admin/messaging");
 const fs = require("fs");
 const path = require("path");
@@ -34,16 +34,29 @@ let appInstance = null;
  * Initialize Firebase Admin SDK using supported modular APIs (Firebase Admin v14+).
  * Safe against duplicate initialization and handles missing credentials gracefully.
  */
-function initFirebaseAdmin() {
+function initFirebaseAdmin(forceReinit = false) {
     const existingApps = getApps();
-    if (existingApps.length > 0) {
+    if (!forceReinit && existingApps.length > 0) {
         appInstance = existingApps[0];
         return appInstance;
+    }
+
+    if (forceReinit && existingApps.length > 0) {
+        try {
+            existingApps.forEach(a => {
+                try { deleteApp(a); } catch (_) {}
+            });
+            appInstance = null;
+            console.log("[FIREBASE ADMIN] Removed existing app instances for reinitialization.");
+        } catch (delErr) {
+            console.warn("[FIREBASE ADMIN] Warning on cleanup:", delErr.message);
+        }
     }
 
     try {
         const customPath = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
         const defaultPath = path.join(__dirname, "..", "config", "firebase-service-account.json");
+        const b64Path = path.join(__dirname, "..", "config", "firebase-service-account.b64");
 
         let serviceAccount = null;
 
@@ -61,12 +74,31 @@ function initFirebaseAdmin() {
             } catch (parseErr) {
                 console.warn("⚠️ [FIREBASE ADMIN] Failed parsing service account from environment JSON:", parseErr.message);
             }
+        } else if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+            try {
+                const decoded = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, "base64").toString("utf8");
+                serviceAccount = JSON.parse(decoded);
+                console.log("[FIREBASE ADMIN] Loaded service account from FIREBASE_SERVICE_ACCOUNT_BASE64");
+            } catch (b64Err) {
+                console.warn("⚠️ [FIREBASE ADMIN] Failed parsing FIREBASE_SERVICE_ACCOUNT_BASE64:", b64Err.message);
+            }
         } else if (fs.existsSync(defaultPath)) {
             try {
                 serviceAccount = JSON.parse(fs.readFileSync(defaultPath, "utf8"));
                 console.log("[FIREBASE ADMIN] Loaded service account from default config path:", defaultPath);
             } catch (defaultReadErr) {
                 console.warn("⚠️ [FIREBASE ADMIN] Failed parsing service account at defaultPath:", defaultReadErr.message);
+            }
+        } else if (fs.existsSync(b64Path)) {
+            try {
+                const raw = fs.readFileSync(b64Path, "utf8").trim();
+                const decoded = Buffer.from(raw, "base64").toString("utf8");
+                serviceAccount = JSON.parse(decoded);
+                // Also write to defaultPath for persistence
+                try { fs.writeFileSync(defaultPath, decoded, "utf8"); } catch (_) {}
+                console.log("[FIREBASE ADMIN] Loaded service account from base64 config file:", b64Path);
+            } catch (b64FileErr) {
+                console.warn("⚠️ [FIREBASE ADMIN] Failed parsing service account at b64Path:", b64FileErr.message);
             }
         }
 
