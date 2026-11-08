@@ -19,7 +19,9 @@ async function sendNotification({
     message,
     type = "order",
     targetId = null,
-    forAdmin = false
+    forAdmin = false,
+    token = null,
+    tokens: directTokens = null
 }) {
     const payload = {
         id: "NOTIF-" + Date.now() + "-" + Math.floor(Math.random() * 1000),
@@ -67,36 +69,39 @@ async function sendNotification({
 
     try {
         let tokens = [];
-        try {
-            if (forAdmin) {
-                const res = await pool.query(
-                    "SELECT token FROM device_tokens WHERE role = 'admin' AND is_active = true"
-                );
-                tokens = res.rows.map(r => r.token);
-            } else if (userId) {
-                const res = await pool.query(
-                    `SELECT token FROM device_tokens 
-                     WHERE (user_id::text = $1::text 
-                            OR user_id IN (SELECT phone FROM users WHERE id::text = $1::text)
-                            OR user_id IN (SELECT email FROM users WHERE id::text = $1::text))
-                       AND is_active = true`,
-                    [userId.toString()]
-                );
-                tokens = res.rows.map(r => r.token);
-            } else {
-                // Broadcast to all active customer devices
-                const res = await pool.query(
-                    "SELECT token FROM device_tokens WHERE is_active = true AND role != 'admin' LIMIT 500"
-                );
-                tokens = res.rows.map(r => r.token);
+        if (token) {
+            tokens = [token];
+        } else if (Array.isArray(directTokens) && directTokens.length > 0) {
+            tokens = [...directTokens];
+        } else {
+            try {
+                if (forAdmin) {
+                    const res = await pool.query(
+                        "SELECT token FROM device_tokens WHERE role = 'admin' AND is_active = true"
+                    );
+                    tokens = res.rows.map(r => r.token);
+                } else if (userId) {
+                    const res = await pool.query(
+                        "SELECT token FROM device_tokens " +
+                        "WHERE (user_id::text = $1::text " +
+                        "       OR user_id IN (SELECT id FROM users WHERE phone = $1::text OR email = $1::text OR id::text = $1::text)) " +
+                        "  AND is_active = true",
+                        [userId.toString()]
+                    );
+                    tokens = res.rows.map(r => r.token);
+                } else {
+                    // Broadcast to all active customer devices
+                    const res = await pool.query(
+                        "SELECT token FROM device_tokens WHERE is_active = true AND role != 'admin' LIMIT 500"
+                    );
+                    tokens = res.rows.map(r => r.token);
+                }
+            } catch (dbErr) {
+                console.warn("[NOTIFICATION SERVICE] Token query warning:", dbErr.message);
             }
-        } catch (dbErr) {
-            // DB fallback
-        }
-
-        // Fallback to shared in-memory token store if database is offline or empty
-        if (!tokens || tokens.length === 0) {
-            tokens = getDeviceTokens({ forAdmin, userId });
+            if (!tokens || tokens.length === 0) {
+                tokens = getDeviceTokens({ forAdmin, userId });
+            }
         }
 
         // Deduplicate tokens

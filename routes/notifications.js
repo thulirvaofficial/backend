@@ -520,7 +520,8 @@ router.post("/test-dispatch", async (req, res) => {
             message: message || "Testing push notification dispatch",
             type: type || "test_alert",
             targetId: targetId || "TEST-01",
-            forAdmin: forAdmin === true
+            forAdmin: forAdmin === true,
+            token: token || null
         });
         const { NOTIFICATION_DISPATCH_LOGS } = require("../services/notificationService");
         const latestLog = (NOTIFICATION_DISPATCH_LOGS || [])[0] || null;
