@@ -320,7 +320,13 @@ router.post("/", async (req, res) => {
 
                 // Insert items & deduct stock atomically
                 for (const item of items) {
-                    const prodId = item.id || item.product_id || null;
+                    const rawProdId = item.id || item.product_id || null;
+                    let validProdId = null;
+                    if (rawProdId && !isNaN(Number(rawProdId))) {
+                        const prCheck = await client.query("SELECT id FROM products WHERE id = $1", [Number(rawProdId)]).catch(() => ({ rows: [] }));
+                        if (prCheck.rows.length > 0) validProdId = prCheck.rows[0].id;
+                    }
+
                     const prodName = item.name || item.product_name || "Farm Fresh Product";
                     const qty = Number(item.quantity || 1);
                     const prc = Number(item.price || 0);
@@ -329,24 +335,24 @@ router.post("/", async (req, res) => {
                     await client.query(
                         `INSERT INTO order_items (order_id, product_id, product_name, quantity, price, total, weight, image)
                          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-                        [createdOrderId, prodId, prodName, qty, prc, itmTot, item.weight || "", item.image || ""]
+                        [createdOrderId, validProdId, prodName, qty, prc, itmTot, item.weight || "", item.image || ""]
                     );
 
                     // Automatic stock reduction
-                    if (prodId) {
+                    if (validProdId) {
                         const stockRes = await client.query(
                             `UPDATE products 
                              SET stock = GREATEST(0, stock - $1), updated_at = CURRENT_TIMESTAMP 
                              WHERE id = $2
                              RETURNING id, name, stock`,
-                            [qty, prodId]
+                            [qty, validProdId]
                         );
                         if (stockRes.rows.length && Number(stockRes.rows[0].stock) <= 5) {
                             sendNotification({
                                 title: "Low Stock Alert ⚠️",
                                 message: `"${stockRes.rows[0].name}" stock is low (${stockRes.rows[0].stock} items remaining).`,
                                 type: "low_stock",
-                                targetId: prodId.toString(),
+                                targetId: validProdId.toString(),
                                 forAdmin: true
                             }).catch(() => {});
                         }
@@ -366,9 +372,14 @@ router.post("/", async (req, res) => {
                 await client.query("ROLLBACK");
                 client.release();
                 console.error("Order Transaction Error:", txErr.message);
+                return res.status(500).json({
+                    success: false,
+                    message: "Database failed to save order: " + txErr.message
+                });
             }
         } catch (dbErr) {
             console.error("Database Connection Error on Order:", dbErr.message);
+            // Only fall back if database is completely offline/unreachable
         }
 
         const finalId = createdOrderId || (MOCK_ORDERS.length ? Math.max(...MOCK_ORDERS.map(o => o.id)) + 1 : 1001);
@@ -519,11 +530,19 @@ router.get("/admin/verifications", async (req, res) => {
     try {
         const orders = await getOrdersWithItems();
         const dbIds = new Set(orders.map(o => o.id.toString()));
-        const memOrders = MOCK_ORDERS.filter(o => !dbIds.has(o.id.toString()));
+        const memOrders = (MOCK_ORDERS || []).filter(o => !dbIds.has(o.id.toString()));
         const allOrders = [...orders, ...memOrders];
+        allOrders.sort((a, b) => {
+            const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+            const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+            if (dateA !== dateB) return dateB - dateA;
+            const idA = parseInt(a.id, 10) || 0;
+            const idB = parseInt(b.id, 10) || 0;
+            return idB - idA;
+        });
         return res.json({ success: true, orders: allOrders });
     } catch (err) {
-        res.json({ success: true, orders: MOCK_ORDERS });
+        res.json({ success: true, orders: MOCK_ORDERS || [] });
     }
 });
 

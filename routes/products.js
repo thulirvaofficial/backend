@@ -32,21 +32,6 @@ function saveBase64Image(image) {
 
 let IN_MEMORY_VARIANTS = {};
 
-let MOCK_PRODUCTS = [
-    { id: 1, name: "Fresh Cow Milk", category: "Milk", category_name: "Dairy", price: 44, compare_price: 50, weight: "500 ml", stock: 120, badge: "Fresh", emoji: "🥛", image: "/assets/images/products/fresh_cow_milk.jpg", status: "active", description: "100% pure cow milk sourced from healthy pasture cows. No hormones, no preservatives." },
-    { id: 2, name: "Pure Bilona Cow Ghee", category: "Ghee", category_name: "Ghee & Butter", price: 520, compare_price: 600, weight: "500 ml", stock: 45, badge: "Pure", emoji: "🧈", image: "/assets/images/products/pure_cow_ghee.jpg", status: "active", description: "Prepared using traditional Bilona method from curd churned butter. Rich aroma and authentic taste." },
-    { id: 3, name: "Fresh Artisanal Paneer", category: "Paneer", category_name: "Paneer", price: 82, compare_price: 95, weight: "200 g", stock: 60, badge: "Fresh", emoji: "🧀", image: "/assets/images/products/fresh_paneer.jpg", status: "active", description: "Ultra soft, chemical-free cottage cheese made fresh every morning from pure cow milk." },
-    { id: 4, name: "Natural Thick Set Curd", category: "Curd", category_name: "Dairy", price: 48, compare_price: 55, weight: "500 g", stock: 75, badge: "Probiotic", emoji: "🫙", image: "/assets/images/products/product_lineup.jpg", status: "active", description: "Probiotic rich, naturally set cow milk curd with thick, velvety consistency." },
-    { id: 5, name: "Traditional Farm Butter", category: "Ghee", category_name: "Ghee & Butter", price: 140, compare_price: 160, weight: "250 g", stock: 35, badge: "Creamy", emoji: "🧈", image: "/assets/images/products/pure_cow_ghee.jpg", status: "active", description: "Churned from cultured cream, unsalted, creamy, and 100% natural." },
-    { id: 6, name: "Cold-Pressed Groundnut Oil", category: "Oils", category_name: "Oils", price: 280, compare_price: 320, weight: "1 Litre", stock: 40, badge: "Wood Pressed", emoji: "🫗", image: "/assets/images/products/product_lineup.jpg", status: "active", description: "Traditional cold wood-pressed oil retaining natural antioxidants and rich flavor." },
-    { id: 7, name: "Artisanal Organic Tofu", category: "Vegan", category_name: "Vegan", price: 120, compare_price: 140, weight: "250 g", stock: 30, badge: "High Protein", emoji: "🌱", image: "/assets/images/products/fresh_paneer.jpg", status: "active", description: "Soy milk paneer pressed with care. Non-GMO, vegan and protein packed." },
-    { id: 8, name: "Pure Wild Forest Honey", category: "Vegan", category_name: "Vegan", price: 280, compare_price: 320, weight: "500 ml", stock: 25, badge: "Raw", emoji: "🍯", image: "/assets/images/products/product_lineup.jpg", status: "active", description: "Unfiltered, unprocessed raw wild honey harvested from natural forest hives." },
-    { id: 9, name: "Salem Turmeric Powder", category: "Masalas", category_name: "Masalas", price: 120, compare_price: 150, weight: "200 g", stock: 50, badge: "High Curcumin", emoji: "🌶️", image: "/assets/images/products/product_lineup.jpg", status: "active", description: "Pure ground turmeric root with high natural curcumin content and deep golden color." },
-    { id: 10, name: "Cold-Pressed Sesame Oil", category: "Oils", category_name: "Oils", price: 320, compare_price: 360, weight: "500 ml", stock: 30, badge: "Wood Pressed", emoji: "🫗", image: "/assets/images/products/product_lineup.jpg", status: "active", description: "Gingelly oil extracted with organic palm jaggery in traditional wooden chekku." },
-    { id: 11, name: "Premium Almonds", category: "Vegan", category_name: "Dry Fruits", price: 120, compare_price: 140, weight: "100 g", stock: 50, badge: "Premium", emoji: "🌰", image: "/assets/images/products/product_lineup.jpg", status: "active", description: "Premium California whole almonds, naturally sweet and rich in vitamin E." },
-    { id: 12, name: "Whole Cashews", category: "Vegan", category_name: "Dry Fruits", price: 180, compare_price: 210, weight: "200 g", stock: 45, badge: "Crunchy", emoji: "🌰", image: "/assets/images/products/product_lineup.jpg", status: "active", description: "W240 grade whole crunchy cashews, vacuum packed for freshness." }
-];
-
 function generateDefaultVariants(product) {
     const nameLower = (product.name || "").toLowerCase();
     const basePrice = Number(product.price) || 50;
@@ -145,18 +130,21 @@ router.get("/", async (req, res) => {
             WHERE p.status='active'
             ORDER BY p.id DESC
         `);
-        const list = result.rows.length > 0 ? result.rows : MOCK_PRODUCTS;
+        const list = result.rows || [];
         const productsWithVariants = await attachVariantsToProducts(list);
         return res.json({ success: true, products: productsWithVariants });
-    } catch {
-        const productsWithVariants = await attachVariantsToProducts(MOCK_PRODUCTS);
-        res.json({ success: true, products: productsWithVariants });
+    } catch (err) {
+        console.error("Products GET error:", err.message);
+        return res.status(500).json({ success: false, message: "Failed to fetch products from database" });
     }
 });
 
 /* GET SINGLE PRODUCT WITH VARIANTS */
 router.get("/:id", async (req, res) => {
     const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+        return res.status(400).json({ success: false, message: "Invalid product ID" });
+    }
     try {
         const result = await pool.query(`
             SELECT p.*, c.name AS category_name
@@ -164,13 +152,14 @@ router.get("/:id", async (req, res) => {
             LEFT JOIN categories c ON p.category_id = c.id
             WHERE p.id = $1
         `, [id]);
-        let prod = result.rows.length > 0 ? result.rows[0] : (MOCK_PRODUCTS.find(p => p.id === id) || MOCK_PRODUCTS[0]);
-        const withVariants = await attachVariantsToProducts([prod]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: "Product not found" });
+        }
+        const withVariants = await attachVariantsToProducts([result.rows[0]]);
         res.json({ success: true, product: withVariants[0] });
-    } catch {
-        const fallback = MOCK_PRODUCTS.find(p => p.id === id) || MOCK_PRODUCTS[0];
-        const withVariants = await attachVariantsToProducts([fallback]);
-        res.json({ success: true, product: withVariants[0] });
+    } catch (err) {
+        console.error("Product GET ID error:", err.message);
+        res.status(500).json({ success: false, message: "Failed to fetch product" });
     }
 });
 
@@ -183,12 +172,12 @@ router.get("/admin/all", async (req, res) => {
             LEFT JOIN categories c ON p.category_id = c.id
             ORDER BY p.id DESC
         `);
-        const list = result.rows.length ? result.rows : MOCK_PRODUCTS;
+        const list = result.rows || [];
         const withVariants = await attachVariantsToProducts(list);
         res.json({ success: true, products: withVariants });
-    } catch {
-        const withVariants = await attachVariantsToProducts(MOCK_PRODUCTS);
-        res.json({ success: true, products: withVariants });
+    } catch (err) {
+        console.error("Admin products GET error:", err.message);
+        res.status(500).json({ success: false, message: "Failed to fetch admin products" });
     }
 });
 
@@ -296,37 +285,29 @@ router.delete("/variants/:variantId", async (req, res) => {
 /* CREATE PRODUCT */
 router.post("/", async (req, res) => {
     try {
-        const { name, description, category, category_id, price, compare_price, sku, stock, weight, image, badge } = req.body;
+        const { name, description, category_id, price, compare_price, sku, stock, weight, image, badge, status } = req.body;
         const savedImage = saveBase64Image(image);
         
-        try {
-            const result = await pool.query(`
-                INSERT INTO products (name, description, category_id, price, compare_price, sku, stock, weight, image)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-                RETURNING *
-            `, [name, description, category_id || null, price || 0, compare_price || null, sku || null, stock || 0, weight || null, savedImage || null]);
-            return res.json({ success: true, product: result.rows[0] });
-        } catch {
-            const newId = MOCK_PRODUCTS.length ? Math.max(...MOCK_PRODUCTS.map(p => p.id)) + 1 : 1;
-            const newProduct = {
-                id: newId,
-                name: name || "New Product",
-                category: category || "Dairy",
-                category_name: category || "Dairy",
-                price: Number(price) || 0,
-                compare_price: compare_price ? Number(compare_price) : null,
-                weight: weight || "500 ml",
-                stock: stock ? Number(stock) : 50,
-                badge: badge || "New",
-                emoji: "🥛",
-                image: savedImage || "/assets/images/products/product_lineup.jpg",
-                status: "active",
-                description: description || "Fresh farm quality product."
-            };
-            MOCK_PRODUCTS.unshift(newProduct);
-            return res.json({ success: true, product: newProduct });
-        }
+        const result = await pool.query(`
+            INSERT INTO products (name, description, category_id, price, compare_price, sku, stock, weight, image, badge, status)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            RETURNING *
+        `, [
+            name || "Product",
+            description || "",
+            category_id || null,
+            Number(price) || 0,
+            compare_price ? Number(compare_price) : null,
+            sku || null,
+            stock !== undefined ? Number(stock) : 0,
+            weight || null,
+            savedImage || null,
+            badge || null,
+            status || "active"
+        ]);
+        return res.json({ success: true, product: result.rows[0] });
     } catch (error) {
+        console.error("Create product error:", error.message);
         res.status(500).json({ success: false, message: error.message });
     }
 });
@@ -335,38 +316,33 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
     try {
         const id = parseInt(req.params.id);
-        const { name, description, category, category_id, price, compare_price, sku, stock, weight, image, status, badge } = req.body;
+        const { name, description, category_id, price, compare_price, sku, stock, weight, image, status, badge } = req.body;
         const savedImage = saveBase64Image(image);
         
-        try {
-            const result = await pool.query(`
-                UPDATE products
-                SET name=COALESCE($1, name), description=COALESCE($2, description), category_id=COALESCE($3, category_id), price=COALESCE($4, price), compare_price=COALESCE($5, compare_price), sku=COALESCE($6, sku), stock=COALESCE($7, stock), weight=COALESCE($8, weight), image=COALESCE($9, image), status=COALESCE($10, status), updated_at=CURRENT_TIMESTAMP
-                WHERE id=$11
-                RETURNING *
-            `, [name, description, category_id, price !== undefined ? Number(price) : null, compare_price !== undefined ? Number(compare_price) : null, sku, stock !== undefined ? Number(stock) : null, weight, savedImage, status, id]);
-            if (result.rows.length) return res.json({ success: true, product: result.rows[0] });
-        } catch {
-            const idx = MOCK_PRODUCTS.findIndex(p => p.id === id);
-            if (idx !== -1) {
-                MOCK_PRODUCTS[idx] = {
-                    ...MOCK_PRODUCTS[idx],
-                    name: name !== undefined ? name : MOCK_PRODUCTS[idx].name,
-                    category: category !== undefined ? category : MOCK_PRODUCTS[idx].category,
-                    price: price !== undefined ? Number(price) : MOCK_PRODUCTS[idx].price,
-                    compare_price: compare_price !== undefined ? Number(compare_price) : MOCK_PRODUCTS[idx].compare_price,
-                    stock: stock !== undefined ? Number(stock) : MOCK_PRODUCTS[idx].stock,
-                    weight: weight !== undefined ? weight : MOCK_PRODUCTS[idx].weight,
-                    image: savedImage !== undefined ? savedImage : MOCK_PRODUCTS[idx].image,
-                    status: status !== undefined ? status : MOCK_PRODUCTS[idx].status,
-                    description: description !== undefined ? description : MOCK_PRODUCTS[idx].description,
-                    badge: badge !== undefined ? badge : MOCK_PRODUCTS[idx].badge
-                };
-                return res.json({ success: true, product: MOCK_PRODUCTS[idx] });
-            }
+        const result = await pool.query(`
+            UPDATE products
+            SET name=COALESCE($1, name),
+                description=COALESCE($2, description),
+                category_id=COALESCE($3, category_id),
+                price=COALESCE($4, price),
+                compare_price=COALESCE($5, compare_price),
+                sku=COALESCE($6, sku),
+                stock=COALESCE($7, stock),
+                weight=COALESCE($8, weight),
+                image=COALESCE($9, image),
+                status=COALESCE($10, status),
+                badge=COALESCE($11, badge),
+                updated_at=CURRENT_TIMESTAMP
+            WHERE id=$12
+            RETURNING *
+        `, [name, description, category_id, price !== undefined ? Number(price) : null, compare_price !== undefined ? Number(compare_price) : null, sku, stock !== undefined ? Number(stock) : null, weight, savedImage, status, badge, id]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: "Product not found" });
         }
-        res.json({ success: true, message: "Product updated" });
+        return res.json({ success: true, product: result.rows[0] });
     } catch (error) {
+        console.error("Update product error:", error.message);
         res.status(500).json({ success: false, message: error.message });
     }
 });
@@ -376,10 +352,11 @@ router.delete("/:id", async (req, res) => {
     const id = parseInt(req.params.id);
     try {
         await pool.query("DELETE FROM products WHERE id=$1", [id]);
-    } catch {
-        MOCK_PRODUCTS = MOCK_PRODUCTS.filter(p => p.id !== id);
+        res.json({ success: true, message: "Product deleted" });
+    } catch (error) {
+        console.error("Delete product error:", error.message);
+        res.status(500).json({ success: false, message: error.message });
     }
-    res.json({ success: true, message: "Product deleted" });
 });
 
 module.exports = router;
