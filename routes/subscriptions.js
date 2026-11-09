@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const jwt = require("jsonwebtoken");
 const { pool } = require("../config/database");
-const { notifySubscriptionActivated, notifySubscriptionRenewed, notifyAdminNewOrder, sendSubscriptionNotification } = require("../services/notificationService");
+const { notifySubscriptionActivated, notifySubscriptionRenewed, notifyAdminNewOrder, sendSubscriptionNotification, sendNotification, sendPaymentNotification } = require("../services/notificationService");
 
 const router = express.Router();
 
@@ -125,10 +125,45 @@ let MOCK_PLANS = [
     }
 ];
 
-// Real-time Customer Subscriptions (Starts empty - no fake records)
-let MOCK_SUBSCRIPTIONS = [];
+// Real-time Customer Subscriptions with disk persistence
+const DATA_DIR = path.resolve(__dirname, "..", "data");
+const SUBS_FILE = path.join(DATA_DIR, "subscriptions.json");
+
+function loadSubscriptionsFromDisk() {
+    try {
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+        if (fs.existsSync(SUBS_FILE)) {
+            const data = fs.readFileSync(SUBS_FILE, "utf-8");
+            return JSON.parse(data);
+        }
+    } catch (e) {
+        console.warn("[SUBSCRIPTIONS DISK LOAD WARN]:", e.message);
+    }
+    return [];
+}
+
+function saveSubscriptionsToDisk(subs) {
+    try {
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+        fs.writeFileSync(SUBS_FILE, JSON.stringify(subs, null, 2), "utf-8");
+    } catch (e) {
+        console.warn("[SUBSCRIPTIONS DISK SAVE WARN]:", e.message);
+    }
+}
+
+let MOCK_SUBSCRIPTIONS = loadSubscriptionsFromDisk();
 router.getSubscriptions = () => MOCK_SUBSCRIPTIONS;
-router.getSubscriptions = () => MOCK_SUBSCRIPTIONS;
+
+function generateSubscriptionId() {
+    const today = new Date();
+    const dateStr = today.toISOString().slice(0, 10).replace(/-/g, "");
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    return `SUB-${dateStr}-${randomSuffix}`;
+}
 
 /* ============================================================
    1. SUBSCRIPTION PLANS (CATALOG)
@@ -426,6 +461,7 @@ router.post("/admin/create", async (req, res) => {
         } catch (_) {}
 
         MOCK_SUBSCRIPTIONS.unshift(newSub);
+        saveSubscriptionsToDisk(MOCK_SUBSCRIPTIONS);
         notifySubscriptionRenewed(newSub).catch(() => {});
         res.json({ success: true, message: "Subscription created successfully", subscription: newSub });
     } catch (err) {
@@ -433,25 +469,220 @@ router.post("/admin/create", async (req, res) => {
     }
 });
 
-/* BUY / CREATE NEW SUBSCRIPTION (Website User) */
+/* CORE INTERNAL SUBSCRIPTION CREATOR (Clean separation from Orders) */
+async function createSubscriptionInternal(inputData) {
+    const user_id = inputData.user_id || inputData.userId || null;
+    const customer_name = inputData.customer_name || inputData.customerName || "Valued Customer";
+    const customer_phone = inputData.customer_phone || inputData.customerPhone || "";
+    const customer_email = inputData.customer_email || inputData.customerEmail || "";
+    const product_name = inputData.product_name || inputData.productName || "Fresh Cow Milk (500ml)";
+    const time_period = inputData.time_period || inputData.timePeriod || "Daily Morning (30 Days)";
+    const total_price = Number(inputData.total_price || inputData.totalPrice || inputData.total) || 1320;
+    const transaction_id = inputData.transaction_id || inputData.transactionId || inputData.utr || "";
+    const payment_proof = inputData.payment_proof || inputData.paymentProof || inputData.proof || "";
+
+    // =========================================================================
+    // DEDUPLICATION & IDEMPOTENCY GUARD (Prevents Double-Click / Duplicate Subs)
+    // =========================================================================
+    const cleanTx = (transaction_id || "").toString().trim().toLowerCase();
+    
+    // 1. Transaction ID / UTR Deduplication (If UTR already recorded, return existing subscription)
+    if (cleanTx.length > 3) {
+        const existingByTx = (MOCK_SUBSCRIPTIONS || []).find(s => 
+            ((s.transaction_id || s.transactionId || "").toString().trim().toLowerCase() === cleanTx)
+        );
+        if (existingByTx) {
+            console.log(`[SUBSCRIPTION DEDUP] Blocked duplicate submission for transaction_id '${transaction_id}'. Returning existing subscription: ${existingByTx.id}`);
+            return existingByTx;
+        }
+
+        try {
+            const dbTxCheck = await pool.query(
+                "SELECT * FROM subscriptions WHERE LOWER(TRIM(transaction_id)) = $1 LIMIT 1",
+                [cleanTx]
+            );
+            if (dbTxCheck.rows.length > 0) {
+                console.log(`[SUBSCRIPTION DEDUP] Found existing DB subscription with transaction_id '${transaction_id}'. Returning ${dbTxCheck.rows[0].id}`);
+                return dbTxCheck.rows[0];
+            }
+        } catch (_) {}
+    }
+
+    // 2. Rapid Double-Click Guard (within 60 seconds for same customer & product)
+    const now = Date.now();
+    const existingRecent = (MOCK_SUBSCRIPTIONS || []).find(s => {
+        const sUser = (s.user_id || s.userId || "").toString().trim();
+        const sPhone = (s.customer_phone || s.customerPhone || "").toString().replace(/\D/g, "");
+        const sEmail = (s.customer_email || s.customerEmail || "").toString().toLowerCase().trim();
+        
+        const inUser = (user_id || "").toString().trim();
+        const inPhone = (customer_phone || "").toString().replace(/\D/g, "");
+        const inEmail = (customer_email || "").toString().toLowerCase().trim();
+
+        const isUserMatch = (inUser && sUser && inUser === sUser) ||
+                            (inPhone && sPhone && inPhone.length >= 10 && inPhone === sPhone) ||
+                            (inEmail && sEmail && inEmail.length > 3 && inEmail === sEmail);
+
+        if (!isUserMatch) return false;
+
+        const isProdMatch = (s.product_name || "").toString().toLowerCase().trim() === product_name.toString().toLowerCase().trim() ||
+                            (s.plan_id && inputData.plan_id && s.plan_id.toString() === inputData.plan_id.toString());
+
+        if (!isProdMatch) return false;
+
+        if (s.created_at) {
+            const createdMs = new Date(s.created_at).getTime();
+            if (!isNaN(createdMs) && (now - createdMs < 60000)) {
+                return true;
+            }
+        }
+        return false;
+    });
+
+    if (existingRecent) {
+        console.log(`[SUBSCRIPTION DEDUP] Blocked rapid duplicate click within 60s for customer '${customer_name}' (${product_name}). Returning existing: ${existingRecent.id}`);
+        return existingRecent;
+    }
+
+    const duration_days = Number(inputData.duration_days || inputData.durationDays) || (time_period.includes("15") ? 15 : 30);
+    const start_date = inputData.start_date || inputData.startDate || new Date().toISOString().split("T")[0];
+    const startDateObj = new Date(start_date);
+    const expiryDateObj = new Date(startDateObj.getTime() + duration_days * 24 * 60 * 60 * 1000);
+    const expiry_date = inputData.expiry_date || inputData.expiryDate || expiryDateObj.toISOString().split("T")[0];
+
+    const savedProof = saveBase64Image(payment_proof);
+    const subId = inputData.id && inputData.id.startsWith("SUB-") ? inputData.id : generateSubscriptionId();
+
+    const payment_status = inputData.payment_status || (transaction_id ? "Verification Pending" : "Pending");
+    const status = inputData.status || (transaction_id ? "Pending Approval" : "Pending");
+
+    const subData = {
+        id: subId,
+        user_id: user_id,
+        userId: user_id,
+        customer_name: customer_name,
+        customerName: customer_name,
+        customer_phone: customer_phone,
+        customerPhone: customer_phone,
+        customer_email: customer_email,
+        customerEmail: customer_email,
+        plan_id: inputData.plan_id || null,
+        product_id: inputData.product_id || null,
+        product_name: product_name,
+        productName: product_name,
+        product_image: inputData.product_image || inputData.productImage || "/assets/images/products/fresh_cow_milk.jpg",
+        productImage: inputData.product_image || inputData.productImage || "/assets/images/products/fresh_cow_milk.jpg",
+        time_period: time_period,
+        timePeriod: time_period,
+        frequency: inputData.frequency || "Daily",
+        duration_days: duration_days,
+        durationDays: duration_days,
+        quantity: Number(inputData.quantity) || 1,
+        delivery_slot: inputData.delivery_slot || inputData.deliverySlot || "6:00 AM - 7:00 AM",
+        deliverySlot: inputData.delivery_slot || inputData.deliverySlot || "6:00 AM - 7:00 AM",
+        price_per_delivery: Number(inputData.price_per_delivery) || 44,
+        total_price: total_price,
+        totalPrice: total_price,
+        total: total_price,
+        start_date: start_date,
+        startDate: start_date,
+        expiry_date: expiry_date,
+        expiryDate: expiry_date,
+        address: inputData.address || "Doorstep Address, Kanchipuram",
+        city: inputData.city || "Kanchipuram",
+        pincode: inputData.pincode || "631601",
+        payment_method: inputData.payment_method || "UPI Direct Payment (7904880944@superyes)",
+        payment_status: payment_status,
+        paymentStatus: payment_status,
+        transaction_id: transaction_id,
+        transactionId: transaction_id,
+        payment_proof: savedProof || "",
+        paymentProof: savedProof || "",
+        status: status,
+        created_at: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+    };
+
+    try {
+        let validUserId = null;
+        if (subData.user_id && !isNaN(Number(subData.user_id))) {
+            const uCheck = await pool.query("SELECT id FROM users WHERE id = $1", [Number(subData.user_id)]).catch(() => ({ rows: [] }));
+            if (uCheck.rows.length > 0) validUserId = Number(subData.user_id);
+        }
+
+        let validPlanId = null;
+        if (subData.plan_id && !isNaN(Number(subData.plan_id))) {
+            const pCheck = await pool.query("SELECT id FROM subscription_plans WHERE id = $1", [Number(subData.plan_id)]).catch(() => ({ rows: [] }));
+            if (pCheck.rows.length > 0) validPlanId = Number(subData.plan_id);
+        }
+
+        let validProductId = null;
+        if (subData.product_id && !isNaN(Number(subData.product_id))) {
+            const prCheck = await pool.query("SELECT id FROM products WHERE id = $1", [Number(subData.product_id)]).catch(() => ({ rows: [] }));
+            if (prCheck.rows.length > 0) validProductId = Number(subData.product_id);
+        }
+
+        await pool.query(`
+            INSERT INTO subscriptions (
+                id, user_id, customer_name, customer_phone, customer_email,
+                plan_id, product_id, product_name, product_image, time_period,
+                frequency, quantity, delivery_slot, price_per_delivery, total_price,
+                start_date, expiry_date, duration_days, address, city, pincode,
+                payment_method, payment_status, status, transaction_id, payment_proof
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+        `, [
+            subData.id, validUserId, subData.customer_name, subData.customer_phone, subData.customer_email,
+            validPlanId, validProductId, subData.product_name, subData.product_image, subData.time_period,
+            subData.frequency, subData.quantity, subData.delivery_slot, subData.price_per_delivery, subData.total_price,
+            subData.start_date, subData.expiry_date, subData.duration_days, subData.address, subData.city, subData.pincode,
+            subData.payment_method, subData.payment_status, subData.status, subData.transaction_id, subData.payment_proof
+        ]);
+        console.log(`✓ [SUBSCRIPTION SAVED TO DB] ID: ${subData.id}`);
+    } catch (dbErr) {
+        console.warn("[SUBSCRIPTION DB INSERT ERROR, trying minimal insert]:", dbErr.message);
+        await pool.query(`
+            INSERT INTO subscriptions (
+                id, customer_name, customer_phone, product_name, frequency,
+                quantity, total_price, start_date, address, payment_status, status
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        `, [
+            subData.id, subData.customer_name, subData.customer_phone, subData.product_name,
+            subData.frequency, subData.quantity, subData.total_price, subData.start_date,
+            subData.address, subData.payment_status, subData.status
+        ]).catch(e => console.error("Minimal subscription insert error:", e.message));
+    }
+
+    MOCK_SUBSCRIPTIONS.unshift(subData);
+    saveSubscriptionsToDisk(MOCK_SUBSCRIPTIONS);
+
+    notifyAdminNewOrder({
+        id: subData.id,
+        customer_name: subData.customer_name,
+        total: subData.total_price,
+        delivery_type: 'subscription'
+    }).catch(() => {});
+
+    if (transaction_id || savedProof) {
+        sendPaymentNotification({
+            orderOrSub: subData,
+            status: "verification_required",
+            amount: subData.total_price,
+            forAdmin: true
+        }).catch(() => {});
+        sendPaymentNotification({
+            orderOrSub: subData,
+            status: "pending",
+            amount: subData.total_price,
+            forAdmin: false
+        }).catch(() => {});
+    }
+
+    return subData;
+}
+router.createSubscriptionRecord = createSubscriptionInternal;
+
+/* BUY / CREATE NEW SUBSCRIPTION (Customer / App Checkout) */
 router.post("/", async (req, res) => {
     try {
-        const {
-            plan_id,
-            product_id,
-            product_image,
-            frequency,
-            quantity,
-            delivery_slot,
-            price_per_delivery,
-            start_date,
-            address,
-            city,
-            pincode,
-            payment_method
-        } = req.body;
-
-        // Authoritative authenticated user ID from JWT token to prevent subscription impersonation
         let authenticatedUserId = null;
         const authHeader = req.headers.authorization;
         if (authHeader && authHeader.startsWith("Bearer ")) {
@@ -461,140 +692,16 @@ router.post("/", async (req, res) => {
                 authenticatedUserId = decoded.id;
             } catch (_) {}
         }
-        const user_id = authenticatedUserId || req.body.user_id || req.body.userId || null;
-        const customer_name = req.body.customer_name || req.body.customerName || "Valued Customer";
-        const customer_phone = req.body.customer_phone || req.body.customerPhone || "";
-        const customer_email = req.body.customer_email || req.body.customerEmail || "";
-        const product_name = req.body.product_name || req.body.productName || "Fresh Cow Milk (500ml)";
-        const time_period = req.body.time_period || req.body.timePeriod || "Daily Morning (30 Days)";
-        const total_price = Number(req.body.total_price || req.body.totalPrice || req.body.total) || 1320;
-        const transaction_id = req.body.transaction_id || req.body.transactionId || req.body.utr || "";
-        const payment_proof = req.body.payment_proof || req.body.paymentProof || req.body.proof || "";
 
-        const savedProof = saveBase64Image(payment_proof);
-        const subId = "SUB-" + Math.floor(1000 + Math.random() * 9000);
-        const subData = {
-            id: subId,
-            user_id: user_id,
-            userId: user_id,
-            customer_name: customer_name,
-            customerName: customer_name,
-            customer_phone: customer_phone,
-            customerPhone: customer_phone,
-            customer_email: customer_email,
-            customerEmail: customer_email,
-            plan_id: plan_id || null,
-            product_id: product_id || null,
-            product_name: product_name,
-            productName: product_name,
-            product_image: product_image || "/assets/images/products/fresh_cow_milk.jpg",
-            productImage: product_image || "/assets/images/products/fresh_cow_milk.jpg",
-            time_period: time_period,
-            timePeriod: time_period,
-            frequency: frequency || "Daily",
-            quantity: Number(quantity) || 1,
-            delivery_slot: delivery_slot || "6:00 AM - 7:00 AM",
-            deliverySlot: delivery_slot || "6:00 AM - 7:00 AM",
-            price_per_delivery: Number(price_per_delivery) || 44,
-            total_price: total_price,
-            totalPrice: total_price,
-            total: total_price,
-            start_date: start_date || new Date().toISOString().split("T")[0],
-            startDate: start_date || new Date().toISOString().split("T")[0],
-            address: address || "Doorstep Address, Kanchipuram",
-            city: city || "Kanchipuram",
-            pincode: pincode || "631601",
-            payment_method: payment_method || "UPI Direct Payment (7904880944@superyes)",
-            payment_status: transaction_id ? "Paid (Verification Pending)" : "Pending",
-            transaction_id: transaction_id,
-            transactionId: transaction_id,
-            payment_proof: savedProof || "",
-            paymentProof: savedProof || "",
-            status: "Active",
-            created_at: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
-        };
-
-        try {
-            // Validate foreign keys safely before insertion
-            let validUserId = null;
-            if (subData.user_id && !isNaN(Number(subData.user_id))) {
-                const uCheck = await pool.query("SELECT id FROM users WHERE id = $1", [Number(subData.user_id)]).catch(() => ({ rows: [] }));
-                if (uCheck.rows.length > 0) validUserId = Number(subData.user_id);
-            }
-
-            let validPlanId = null;
-            if (subData.plan_id && !isNaN(Number(subData.plan_id))) {
-                const pCheck = await pool.query("SELECT id FROM subscription_plans WHERE id = $1", [Number(subData.plan_id)]).catch(() => ({ rows: [] }));
-                if (pCheck.rows.length > 0) validPlanId = Number(subData.plan_id);
-            }
-
-            let validProductId = null;
-            if (subData.product_id && !isNaN(Number(subData.product_id))) {
-                const prCheck = await pool.query("SELECT id FROM products WHERE id = $1", [Number(subData.product_id)]).catch(() => ({ rows: [] }));
-                if (prCheck.rows.length > 0) validProductId = Number(subData.product_id);
-            }
-
-            await pool.query(`
-                INSERT INTO subscriptions (
-                    id, user_id, customer_name, customer_phone, customer_email,
-                    plan_id, product_id, product_name, product_image, time_period,
-                    frequency, quantity, delivery_slot, price_per_delivery, total_price,
-                    start_date, address, city, pincode, payment_method, payment_status, status,
-                    transaction_id, payment_proof
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
-            `, [
-                subData.id, validUserId, subData.customer_name, subData.customer_phone, subData.customer_email,
-                validPlanId, validProductId, subData.product_name, subData.product_image, subData.time_period,
-                subData.frequency, subData.quantity, subData.delivery_slot, subData.price_per_delivery, subData.total_price,
-                subData.start_date, subData.address, subData.city, subData.pincode, subData.payment_method, subData.payment_status, subData.status,
-                subData.transaction_id, subData.payment_proof
-            ]);
-            console.log(`✓ [SUBSCRIPTION SAVED TO DB] ID: ${subData.id}`);
-        } catch (dbErr) {
-            console.warn("[SUBSCRIPTION DB INSERT ERROR, trying minimal insert]:", dbErr.message);
-            await pool.query(`
-                INSERT INTO subscriptions (
-                    id, customer_name, customer_phone, product_name, frequency,
-                    quantity, total_price, start_date, address, payment_status, status
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-            `, [
-                subData.id, subData.customer_name, subData.customer_phone, subData.product_name,
-                subData.frequency, subData.quantity, subData.total_price, subData.start_date,
-                subData.address, subData.payment_status, subData.status
-            ]).catch(e => console.error("Minimal subscription insert error:", e.message));
-        }
-
-        MOCK_SUBSCRIPTIONS.unshift(subData);
-
-        // Push notifications for new subscription
-        notifySubscriptionActivated(subData).catch(() => {});
-        notifyAdminNewOrder({
-            id: subData.id,
-            customer_name: subData.customer_name,
-            total: subData.total_price,
-            delivery_type: 'subscription'
-        }).catch(() => {});
-
-        // Payment verification required alerts if proof or transaction ID is present
-        if (transaction_id || savedProof) {
-            sendPaymentNotification({
-                orderOrSub: subData,
-                status: "verification_required",
-                amount: subData.total_price,
-                forAdmin: true
-            }).catch(() => {});
-            sendPaymentNotification({
-                orderOrSub: subData,
-                status: "pending",
-                amount: subData.total_price,
-                forAdmin: false
-            }).catch(() => {});
-        }
+        const subData = await createSubscriptionInternal({
+            ...req.body,
+            user_id: authenticatedUserId || req.body.user_id || req.body.userId || null
+        });
 
         res.json({
             success: true,
             subscription: subData,
-            message: "Subscription started successfully! Fresh doorstep delivery scheduled."
+            message: "Subscription created successfully! Pending admin approval."
         });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -719,11 +826,12 @@ const deleteSubHandler = async (req, res) => {
 /* APPROVE / VERIFY SUBSCRIPTION PAYMENT (Admin) */
 const verifyPaymentHandler = async (req, res) => {
     const id = req.params.id;
+    const verifiedBy = req.user?.name || req.body?.admin_name || "Admin Operations";
     let sub = null;
     try {
         const result = await pool.query(
-            "UPDATE subscriptions SET payment_status='verified', status='Active', updated_at=NOW() WHERE id=$1 RETURNING *",
-            [id]
+            "UPDATE subscriptions SET payment_status='verified', status='Active', verified_at=NOW(), verified_by=$1, updated_at=NOW() WHERE id=$2 RETURNING *",
+            [verifiedBy, id]
         );
         if (result.rows.length) sub = result.rows[0];
     } catch (e) {
@@ -734,14 +842,18 @@ const verifyPaymentHandler = async (req, res) => {
     if (memSub) {
         memSub.payment_status = "verified";
         memSub.status = "Active";
+        memSub.verified_at = new Date().toISOString();
+        memSub.verified_by = verifiedBy;
+        memSub.updated_at = new Date().toISOString();
     }
-    sub = sub || memSub || { id, payment_status: "verified", status: "Active" };
+    saveSubscriptionsToDisk(MOCK_SUBSCRIPTIONS);
+    sub = sub || memSub || { id, payment_status: "verified", status: "Active", verified_at: new Date().toISOString(), verified_by: verifiedBy };
 
-    // Send push notification to customer
+    // Send push notification to customer with sound
     sendNotification({
         userId: sub.user_id || sub.userId,
         title: "Subscription Payment Approved! 🥛",
-        message: `Your payment for ${sub.product_name || 'milk subscription'} has been verified! Daily deliveries are now active.`,
+        message: `Your payment for ${sub.product_name || 'milk subscription'} has been verified! Daily morning deliveries are now active.`,
         type: "subscription_activated",
         targetId: id
     }).catch(() => {});
@@ -761,7 +873,7 @@ const rejectPaymentHandler = async (req, res) => {
     let sub = null;
     try {
         const result = await pool.query(
-            "UPDATE subscriptions SET payment_status='rejected', status='Cancelled', notes=COALESCE(notes, '') || ' | Rejected: ' || $1, updated_at=NOW() WHERE id=$2 RETURNING *",
+            "UPDATE subscriptions SET payment_status='rejected', status='Rejected', rejection_reason=$1, notes=COALESCE(notes, '') || ' | Rejected: ' || $1, updated_at=NOW() WHERE id=$2 RETURNING *",
             [rejectionReason, id]
         );
         if (result.rows.length) sub = result.rows[0];
@@ -772,10 +884,13 @@ const rejectPaymentHandler = async (req, res) => {
     const memSub = MOCK_SUBSCRIPTIONS.find(s => s.id == id);
     if (memSub) {
         memSub.payment_status = "rejected";
-        memSub.status = "Cancelled";
+        memSub.status = "Rejected";
+        memSub.rejection_reason = rejectionReason;
         memSub.notes = (memSub.notes || "") + ` | Rejected: ${rejectionReason}`;
+        memSub.updated_at = new Date().toISOString();
     }
-    sub = sub || memSub || { id, payment_status: "rejected", status: "Cancelled" };
+    saveSubscriptionsToDisk(MOCK_SUBSCRIPTIONS);
+    sub = sub || memSub || { id, payment_status: "rejected", status: "Rejected", rejection_reason: rejectionReason };
 
     // Send push notification to customer
     sendNotification({

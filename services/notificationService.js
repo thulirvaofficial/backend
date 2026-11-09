@@ -114,15 +114,15 @@ async function sendNotification({
         if (tokens.length > 0 && messaging && isReady) {
             let targetChannelId;
             if (forAdmin) {
-                if (type.includes("order") || type.includes("pickup")) targetChannelId = "thulirva_admin_orders_channel";
-                else if (type.includes("sub")) targetChannelId = "thulirva_admin_subscriptions_channel";
-                else if (type.includes("pay")) targetChannelId = "thulirva_admin_payments_channel";
-                else targetChannelId = "thulirva_admin_channel";
+                if (type.includes("order") || type.includes("pickup")) targetChannelId = "thulirva_admin_orders_channel_v2";
+                else if (type.includes("sub")) targetChannelId = "thulirva_admin_subscriptions_channel_v2";
+                else if (type.includes("pay")) targetChannelId = "thulirva_admin_payments_channel_v2";
+                else targetChannelId = "thulirva_admin_channel_v2";
             } else {
-                if (type.includes("order")) targetChannelId = "thulirva_orders_channel";
-                else if (type.includes("sub")) targetChannelId = "thulirva_subscriptions_channel";
-                else if (type.includes("pay")) targetChannelId = "thulirva_payments_channel";
-                else targetChannelId = "thulirva_general_channel";
+                if (type.includes("order")) targetChannelId = "thulirva_orders_channel_v2";
+                else if (type.includes("sub")) targetChannelId = "thulirva_subscriptions_channel_v2";
+                else if (type.includes("pay")) targetChannelId = "thulirva_payments_channel_v2";
+                else targetChannelId = "thulirva_general_channel_v2";
             }
             console.log(`[FCM DISPATCH] Sending to ${tokens.length} devices [${forAdmin ? 'ADMIN' : 'USER'}] via channel "${targetChannelId}": "${title}" - "${message}"`);
 
@@ -142,10 +142,10 @@ async function sendNotification({
                     priority: "high",
                     notification: {
                         channelId: targetChannelId,
-                        sound: "default",
+                        sound: "thulirva_notification",
                         priority: "max",
                         defaultVibrateTimings: true,
-                        defaultSound: true,
+                        defaultSound: false,
                         visibility: "public"
                     }
                 },

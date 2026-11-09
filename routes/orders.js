@@ -40,7 +40,39 @@ function generateUniqueOrderNumber() {
     return `THU-${dateStr}-${randomSuffix}`;
 }
 
-let MOCK_ORDERS = [];
+const subscriptionsRouter = require("./subscriptions");
+
+// Real-time Mock Orders with disk persistence
+const DATA_DIR = path.resolve(__dirname, "..", "data");
+const ORDERS_FILE = path.join(DATA_DIR, "orders.json");
+
+function loadOrdersFromDisk() {
+    try {
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+        if (fs.existsSync(ORDERS_FILE)) {
+            const data = fs.readFileSync(ORDERS_FILE, "utf-8");
+            return JSON.parse(data);
+        }
+    } catch (e) {
+        console.warn("[ORDERS DISK LOAD WARN]:", e.message);
+    }
+    return [];
+}
+
+function saveOrdersToDisk(orders) {
+    try {
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+        fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2), "utf-8");
+    } catch (e) {
+        console.warn("[ORDERS DISK SAVE WARN]:", e.message);
+    }
+}
+
+let MOCK_ORDERS = loadOrdersFromDisk();
 
 router.getOrders = () => MOCK_ORDERS;
 
@@ -52,9 +84,9 @@ router.post("/", async (req, res) => {
             city,
             state,
             pincode,
-            items,
             payment_method
         } = req.body;
+        let items = req.body.items || [];
 
         const customer_name = req.body.customer_name || req.body.customerName || "Valued Customer";
         const customer_phone = req.body.customer_phone || req.body.customerPhone || "";
@@ -81,6 +113,84 @@ router.post("/", async (req, res) => {
         // Validation
         if (!items || !Array.isArray(items) || items.length === 0) {
             return res.status(400).json({ success: false, message: "Cart cannot be empty. Please add items." });
+        }
+
+        // STRICT SEPARATION: Detect Subscription items vs Normal Order items
+        const subscriptionItems = items.filter(it => {
+            const cat = (it.category || "").toLowerCase();
+            const idStr = String(it.id || it.product_id || "");
+            const nameLower = (it.name || it.product_name || "").toLowerCase();
+            return cat === "subscription" || idStr.startsWith("SUB_") || it.is_subscription === true || nameLower.includes("(30 days plan)") || nameLower.includes("subscription plan");
+        });
+
+        const normalOrderItems = items.filter(it => {
+            const cat = (it.category || "").toLowerCase();
+            const idStr = String(it.id || it.product_id || "");
+            const nameLower = (it.name || it.product_name || "").toLowerCase();
+            return cat !== "subscription" && !idStr.startsWith("SUB_") && !it.is_subscription && !nameLower.includes("(30 days plan)") && !nameLower.includes("subscription plan");
+        });
+
+        // If subscription items are present, create dedicated subscription records
+        let createdSubs = [];
+        if (subscriptionItems.length > 0 && typeof subscriptionsRouter.createSubscriptionRecord === "function") {
+            for (const subIt of subscriptionItems) {
+                const subPlanId = String(subIt.id || "").replace("SUB_", "") || null;
+                const createdSub = await subscriptionsRouter.createSubscriptionRecord({
+                    user_id: user_id,
+                    customer_name: customer_name,
+                    customer_phone: customer_phone,
+                    customer_email: customer_email,
+                    plan_id: subPlanId && !isNaN(Number(subPlanId)) ? Number(subPlanId) : null,
+                    product_id: subIt.product_id || null,
+                    product_name: subIt.name || subIt.product_name || "Daily Fresh Cow Milk",
+                    product_image: subIt.image || subIt.product_image,
+                    time_period: subIt.time_period || "Daily Morning (30 Days)",
+                    frequency: subIt.frequency || subIt.weight || "Daily",
+                    quantity: Number(subIt.quantity) || 1,
+                    delivery_slot: req.body.pickup_slot || "6:00 AM - 7:00 AM",
+                    total_price: Number(subIt.price || 0) * Number(subIt.quantity || 1),
+                    address: address || "Doorstep Address",
+                    city: city || "Kanchipuram",
+                    pincode: pincode || "631601",
+                    payment_method: payment_method || "UPI Direct Payment (7904880944@superyes)",
+                    transaction_id: transaction_id,
+                    payment_proof: payment_proof,
+                    payment_status: transaction_id ? "Verification Pending" : "Pending",
+                    status: transaction_id ? "Pending Approval" : "Pending"
+                });
+                createdSubs.push(createdSub);
+            }
+        }
+
+        // If the cart contained ONLY subscription items:
+        // Return subscription response immediately and DO NOT insert into normal orders!
+        if (normalOrderItems.length === 0) {
+            return res.json({
+                success: true,
+                is_subscription: true,
+                message: "Subscription created successfully! Pending admin approval.",
+                subscription: createdSubs[0],
+                subscriptions: createdSubs
+            });
+        }
+
+        // Otherwise proceed with ONLY normal product items
+        items = normalOrderItems;
+
+        // Order Idempotency Guard (Prevents double order submission for same payment reference)
+        if (transaction_id && transaction_id.trim().length > 3) {
+            const cleanTx = transaction_id.trim().toLowerCase();
+            const existingOrder = MOCK_ORDERS.find(o => 
+                ((o.transaction_id || o.transactionId || "").trim().toLowerCase() === cleanTx)
+            );
+            if (existingOrder) {
+                console.log(`[ORDER DEDUP] Blocked duplicate order for transaction_id '${transaction_id}'. Returning existing order: ${existingOrder.id}`);
+                return res.json({
+                    success: true,
+                    order: existingOrder,
+                    message: "Order placed successfully! Pending payment verification."
+                });
+            }
         }
 
         if (order_type !== "pickup") {
@@ -134,6 +244,47 @@ router.post("/", async (req, res) => {
         let createdOrderId = null;
         let dbOrder = null;
 
+        // Resolve valid integer user_id for PostgreSQL foreign key constraint to avoid transaction aborts
+        let validUserId = null;
+        if (user_id && !isNaN(Number(user_id)) && Number(user_id) > 0) {
+            try {
+                const uChk = await pool.query("SELECT id FROM users WHERE id = $1", [Number(user_id)]);
+                if (uChk.rows.length > 0) validUserId = uChk.rows[0].id;
+            } catch (_) {}
+        }
+        if (!validUserId && customer_email && customer_email.includes("@")) {
+            try {
+                const uEmail = await pool.query("SELECT id FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1", [customer_email.trim()]);
+                if (uEmail.rows.length > 0) validUserId = uEmail.rows[0].id;
+            } catch (_) {}
+        }
+        if (!validUserId && customer_phone && customer_phone.length >= 10) {
+            try {
+                const cleanPh = customer_phone.replace(/\D/g, "");
+                const uPh = await pool.query("SELECT id FROM users WHERE REPLACE(phone, ' ', '') = $1 OR phone = $2 LIMIT 1", [cleanPh, customer_phone]);
+                if (uPh.rows.length > 0) validUserId = uPh.rows[0].id;
+            } catch (_) {}
+        }
+        // Auto-provision user account in PostgreSQL if not present so foreign key passes and order history links
+        if (!validUserId && (customer_email || customer_phone)) {
+            try {
+                const newU = await pool.query(
+                    `INSERT INTO users (name, email, phone, role) 
+                     VALUES ($1, $2, $3, 'customer') 
+                     ON CONFLICT (email) DO UPDATE SET phone = COALESCE(users.phone, EXCLUDED.phone) 
+                     RETURNING id`,
+                    [
+                        customer_name || "Valued Customer",
+                        customer_email || `user_${Date.now()}@thulirva.local`,
+                        customer_phone || ""
+                    ]
+                );
+                if (newU.rows.length > 0) validUserId = newU.rows[0].id;
+            } catch (_) {
+                validUserId = null;
+            }
+        }
+
         // PostgreSQL Transaction: Insert Order, Insert Items, Deduct Stock, Insert Status History
         try {
             const client = await pool.connect();
@@ -149,7 +300,7 @@ router.post("/", async (req, res) => {
                     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
                     RETURNING *`,
                     [
-                        order_number, user_id, customer_name, customer_phone, customer_email,
+                        order_number, validUserId, customer_name, customer_phone, customer_email,
                         address || (order_type === "pickup" ? "THULIRVA Farm Store, Thimmarajampettai, Kanchipuram" : "Doorstep Address"),
                         city || (order_type === "pickup" ? "Kanchipuram" : "Chennai"),
                         state || "Tamil Nadu",
@@ -226,8 +377,8 @@ router.post("/", async (req, res) => {
             id: finalId,
             order_number: order_number,
             orderNumber: order_number,
-            user_id: user_id,
-            userId: user_id,
+            user_id: validUserId || user_id,
+            userId: validUserId || user_id,
             customer_name: customer_name,
             customerName: customer_name,
             customer_phone: customer_phone,
@@ -259,11 +410,12 @@ router.post("/", async (req, res) => {
             payment_proof: savedProof || "",
             paymentProof: savedProof || "",
             order_status: "pending",
-            created_at: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }),
+            created_at: dbOrder?.created_at ? new Date(dbOrder.created_at).toISOString() : new Date().toISOString(),
             items: items || []
         };
 
         MOCK_ORDERS.unshift(orderData);
+        saveOrdersToDisk(MOCK_ORDERS);
 
         // Safely increment coupon usage count on successful order placement
         if (coupon_code) {
@@ -345,22 +497,34 @@ async function getOrdersWithItems(whereClause = "", params = []) {
 router.get("/admin/all", async (req, res) => {
     try {
         const orders = await getOrdersWithItems();
-        if (orders.length > 0) {
-            return res.json({ success: true, orders });
-        }
-    } catch {}
-    res.json({ success: true, orders: MOCK_ORDERS });
+        const dbIds = new Set(orders.map(o => o.id.toString()));
+        const memOrders = (MOCK_ORDERS || []).filter(o => !dbIds.has(o.id.toString()));
+        const allOrders = [...orders, ...memOrders];
+        allOrders.sort((a, b) => {
+            const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+            const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+            if (dateA !== dateB) return dateB - dateA;
+            const idA = parseInt(a.id, 10) || 0;
+            const idB = parseInt(b.id, 10) || 0;
+            return idB - idA;
+        });
+        return res.json({ success: true, orders: allOrders });
+    } catch (err) {
+        res.json({ success: true, orders: MOCK_ORDERS || [] });
+    }
 });
 
 /* GET ALL PAYMENT VERIFICATIONS & PAYMENT RECORDS (ADMIN) */
 router.get("/admin/verifications", async (req, res) => {
     try {
         const orders = await getOrdersWithItems();
-        if (orders.length > 0) {
-            return res.json({ success: true, orders });
-        }
-    } catch {}
-    res.json({ success: true, orders: MOCK_ORDERS });
+        const dbIds = new Set(orders.map(o => o.id.toString()));
+        const memOrders = MOCK_ORDERS.filter(o => !dbIds.has(o.id.toString()));
+        const allOrders = [...orders, ...memOrders];
+        return res.json({ success: true, orders: allOrders });
+    } catch (err) {
+        res.json({ success: true, orders: MOCK_ORDERS });
+    }
 });
 
 /* GET ALL PICKUP ORDERS */
@@ -382,56 +546,79 @@ router.get("/user/:identifier", async (req, res) => {
     const ident = rawIdent.toLowerCase();
     const cleanDigits = rawIdent.replace(/\D/g, "");
     const isEmail = ident.includes("@");
-    const isPhone = cleanDigits.length === 10 && /^[6-9]\d{9}$/.test(cleanDigits);
+    const isPhone = cleanDigits.length >= 10 && /^[6-9]\d{9}$/.test(cleanDigits);
     const isNumericId = !isEmail && !isPhone && !isNaN(Number(ident));
 
     try {
-        let whereSql = "";
+        let matchedUser = null;
+        if (isNumericId) {
+            const uRes = await pool.query("SELECT id, email, phone FROM users WHERE id = $1 LIMIT 1", [Number(ident)]).catch(() => ({ rows: [] }));
+            if (uRes.rows.length > 0) matchedUser = uRes.rows[0];
+        } else if (isEmail) {
+            const uRes = await pool.query("SELECT id, email, phone FROM users WHERE LOWER(email) = $1 LIMIT 1", [ident]).catch(() => ({ rows: [] }));
+            if (uRes.rows.length > 0) matchedUser = uRes.rows[0];
+        } else if (isPhone) {
+            const uRes = await pool.query("SELECT id, email, phone FROM users WHERE REPLACE(phone, ' ', '') = $1 OR phone = $2 LIMIT 1", [cleanDigits, rawIdent]).catch(() => ({ rows: [] }));
+            if (uRes.rows.length > 0) matchedUser = uRes.rows[0];
+        }
+
+        const userNumericId = matchedUser ? matchedUser.id : (isNumericId ? Number(ident) : null);
+        const userEmail = matchedUser?.email ? matchedUser.email.toLowerCase().trim() : (isEmail ? ident : null);
+        const userPhone = matchedUser?.phone ? matchedUser.phone.replace(/\D/g, "") : (isPhone ? cleanDigits : null);
+
+        let whereClauses = [];
         let params = [];
 
-        if (isNumericId) {
-            whereSql = "WHERE user_id = $1";
-            params = [Number(ident)];
-        } else if (isEmail) {
-            whereSql = "WHERE LOWER(customer_email) = $1";
-            params = [ident];
-        } else if (isPhone) {
-            whereSql = "WHERE REPLACE(customer_phone, ' ', '') = $1 OR customer_phone = $1";
-            params = [cleanDigits];
-        } else {
-            whereSql = "WHERE LOWER(COALESCE(user_id::text, '')) = $1 OR LOWER(customer_email) = $1";
-            params = [ident];
+        if (userNumericId) {
+            params.push(userNumericId);
+            whereClauses.push(`user_id = $${params.length}`);
+        }
+        if (userEmail) {
+            params.push(userEmail);
+            whereClauses.push(`LOWER(customer_email) = $${params.length}`);
+        }
+        if (userPhone && userPhone.length >= 10) {
+            params.push(userPhone);
+            whereClauses.push(`REPLACE(customer_phone, ' ', '') = $${params.length}`);
         }
 
-        const orders = await getOrdersWithItems(whereSql, params);
-        if (orders.length > 0) {
-            return res.json({ success: true, orders });
+        if (whereClauses.length === 0) {
+            params.push(ident);
+            whereClauses.push(`LOWER(COALESCE(user_id::text, '')) = $1 OR LOWER(customer_email) = $1`);
         }
+
+        const whereSql = `WHERE (${whereClauses.join(" OR ")})`;
+        const orders = await getOrdersWithItems(whereSql, params);
+        
+        // Merge in-memory / disk orders safely
+        const dbIds = new Set(orders.map(o => o.id.toString()));
+        const memOrders = (MOCK_ORDERS || []).filter(o => {
+            if (dbIds.has(o.id.toString())) return false;
+            const oUid = (o.user_id || o.userId || "").toString().trim();
+            const oEmail = (o.customer_email || o.customerEmail || "").toLowerCase().trim();
+            const oPhone = (o.customer_phone || o.customerPhone || "").replace(/\D/g, "");
+
+            if (userNumericId && oUid === userNumericId.toString()) return true;
+            if (userEmail && oEmail === userEmail) return true;
+            if (userPhone && oPhone === userPhone) return true;
+            return false;
+        });
+
+        const allUserOrders = [...orders, ...memOrders];
+        allUserOrders.sort((a, b) => {
+            const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+            const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+            if (dateA !== dateB) return dateB - dateA;
+            const idA = parseInt(a.id, 10) || 0;
+            const idB = parseInt(b.id, 10) || 0;
+            return idB - idA;
+        });
+
+        return res.json({ success: true, orders: allUserOrders });
     } catch (err) {
         console.error("[ORDERS USER QUERY ERROR]", err.message);
+        return res.json({ success: true, orders: [] });
     }
-
-    const userOrders = MOCK_ORDERS.filter(o => {
-        const oUid = (o.user_id || o.userId || "").toString().trim();
-        const oEmail = (o.customer_email || o.customerEmail || "").toLowerCase().trim();
-        const oPhone = (o.customer_phone || o.customerPhone || "").replace(/\D/g, "");
-
-        if (isNumericId) {
-            return oUid === ident;
-        }
-        if (isEmail) {
-            return oEmail === ident;
-        }
-        if (isPhone) {
-            return oPhone === cleanDigits;
-        }
-        return oUid === ident || oEmail === ident;
-    });
-
-    res.json({
-        success: true,
-        orders: userOrders
-    });
 });
 
 /* GET SINGLE ORDER BY ID OR ORDER NUMBER */
@@ -514,6 +701,7 @@ const updateOrderStatusHandler = async (req, res) => {
                 console.error("[NOTIFY STATUS CHANGE ERROR]", e.message);
             });
         }
+        saveOrdersToDisk(MOCK_ORDERS);
     }
 
     res.json({ success: true, message: "Order updated successfully", order });
@@ -575,6 +763,7 @@ const verifyPaymentHandler = async (req, res) => {
             console.error("[NOTIFY PAYMENT VERIFIED ERROR]", e.message);
         });
         sendPaymentNotification({ orderOrSub: order, status: "verified", amount: order.total }).catch(() => {});
+        saveOrdersToDisk(MOCK_ORDERS);
     }
 
     res.json({ success: true, message: "Payment verified successfully", order });
@@ -627,6 +816,7 @@ const rejectPaymentHandler = async (req, res) => {
             console.error("[NOTIFY PAYMENT REJECTED ERROR]", e.message);
         });
         sendPaymentNotification({ orderOrSub: order, status: "rejected", amount: order.total, reason }).catch(() => {});
+        saveOrdersToDisk(MOCK_ORDERS);
     }
 
     res.json({ success: true, message: "Payment rejected", reason, order });

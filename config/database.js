@@ -267,6 +267,13 @@ async function initializeDatabase() {
             "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Active'",
             "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS transaction_id VARCHAR(150)",
             "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS payment_proof TEXT",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS duration_days INTEGER DEFAULT 30",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS expiry_date VARCHAR(50)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS rejection_reason TEXT",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS notes TEXT",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS verified_by VARCHAR(150)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
             "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
         ];
         for (const sql of subCols) {
