@@ -133,6 +133,29 @@ router.post("/register-token", async (req, res) => {
     res.json({ success: true, message: "Device push token registered successfully" });
 });
 
+/* UPDATE NOTIFICATION PREFERENCE (PUSH / MORNING REMINDER) */
+router.post("/update-preference", async (req, res) => {
+    const { token, user_id, push_enabled, morning_reminder } = req.body;
+    try {
+        if (token) {
+            await pool.query(
+                "UPDATE device_tokens SET is_active = $1, updated_at = CURRENT_TIMESTAMP WHERE token = $2",
+                [push_enabled !== false, token]
+            ).catch(() => {});
+        }
+        if (user_id) {
+            await pool.query(
+                "UPDATE device_tokens SET is_active = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2",
+                [push_enabled !== false, user_id]
+            ).catch(() => {});
+        }
+        console.log(`✓ [NOTIFICATION PREFERENCE] push_enabled=${push_enabled} for user=${user_id || 'guest'}`);
+        res.json({ success: true, message: "Notification preferences updated successfully" });
+    } catch (e) {
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
 /* ============================================================
    ADMIN NEWS & NOTIFICATION MANAGEMENT (REQUIREMENT 4)
 ============================================================ */

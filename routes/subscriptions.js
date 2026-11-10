@@ -748,7 +748,7 @@ const cancelSubHandler = async (req, res) => {
     const id = req.params.id;
     let sub = null;
     try {
-        const result = await pool.query("UPDATE subscriptions SET status='Cancelled' WHERE id=$1 RETURNING *", [id]);
+        const result = await pool.query("UPDATE subscriptions SET status='Cancelled', updated_at=CURRENT_TIMESTAMP WHERE id=$1 RETURNING *", [id]);
         if (result.rows.length) sub = result.rows[0];
     } catch {}
 
@@ -792,12 +792,36 @@ const resumeSubHandler = async (req, res) => {
     const id = req.params.id;
     let sub = null;
     try {
-        const result = await pool.query("UPDATE subscriptions SET status='Active' WHERE id=$1 RETURNING *", [id]);
+        const chk = await pool.query("SELECT * FROM subscriptions WHERE id = $1", [id]);
+        if (chk.rows.length) {
+            const currentStatus = (chk.rows[0].status || "").toLowerCase();
+            if (currentStatus === "cancelled") {
+                return res.status(400).json({
+                    success: false,
+                    message: "Cannot resume a cancelled subscription. Cancelled subscriptions are permanently stopped."
+                });
+            }
+            if (currentStatus === "expired") {
+                return res.status(400).json({
+                    success: false,
+                    message: "Cannot resume an expired subscription. Please renew or purchase a new subscription plan."
+                });
+            }
+        }
+        const result = await pool.query("UPDATE subscriptions SET status='Active', updated_at=CURRENT_TIMESTAMP WHERE id=$1 RETURNING *", [id]);
         if (result.rows.length) sub = result.rows[0];
     } catch {}
 
     const memSub = MOCK_SUBSCRIPTIONS.find(s => s.id == id);
-    if (memSub) memSub.status = "Active";
+    if (memSub) {
+        if ((memSub.status || "").toLowerCase() === "cancelled") {
+            return res.status(400).json({
+                success: false,
+                message: "Cannot resume a cancelled subscription."
+            });
+        }
+        memSub.status = "Active";
+    }
     sub = sub || memSub || { id, status: "Active" };
 
     sendSubscriptionNotification({ subscription: sub, event: "resumed" }).catch(() => {});
