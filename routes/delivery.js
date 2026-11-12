@@ -31,6 +31,12 @@ const {
     emitToOrder,
     emitToPartner
 } = require("../services/socketService");
+const {
+    loadPartnersFromDisk,
+    savePartnersToDisk,
+    getPartnerById,
+    savePartner
+} = require("../services/deliveryPartnerService");
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "THULIRVA_CHANGE_THIS_SECRET_KEY";
@@ -40,23 +46,12 @@ const PARTNERS_FILE = path.join(DATA_DIR, "delivery_partners.json");
 const ORDERS_FILE = path.join(DATA_DIR, "orders.json");
 
 function loadPartners() {
-    try {
-        if (fs.existsSync(PARTNERS_FILE)) {
-            return JSON.parse(fs.readFileSync(PARTNERS_FILE, "utf-8"));
-        }
-    } catch {}
-    return [];
+    return loadPartnersFromDisk();
 }
 
 function savePartners(partners) {
-    try {
-        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-        fs.writeFileSync(PARTNERS_FILE, JSON.stringify(partners, null, 2), "utf-8");
-    } catch {}
+    savePartnersToDisk(partners);
 }
-
-let MOCK_PARTNERS = loadPartners();
-if (!fs.existsSync(PARTNERS_FILE)) savePartners(MOCK_PARTNERS);
 
 /**
  * Middleware: Verify Delivery Partner JWT Token
@@ -220,8 +215,8 @@ const registerPartnerHandler = async (req, res) => {
             }
         } catch {}
 
-        // Also check memory / disk store
-        const existingMemory = MOCK_PARTNERS.find(
+        // Also check disk store
+        const existingMemory = loadPartnersFromDisk().find(
             p => p.phone === cleanPhone || (email && p.email && p.email.toLowerCase() === email.trim().toLowerCase())
         );
         if (existingMemory) {
@@ -232,7 +227,7 @@ const registerPartnerHandler = async (req, res) => {
         }
 
         // Generate sequential unique partner ID (e.g. THU-DP-0005)
-        let nextNumber = MOCK_PARTNERS.length + 1;
+        let nextNumber = loadPartnersFromDisk().length + 1;
         try {
             const countRes = await pool.query("SELECT COUNT(*) FROM delivery_partners");
             nextNumber = Math.max(nextNumber, Number(countRes.rows[0].count) + 1);
@@ -317,9 +312,8 @@ const registerPartnerHandler = async (req, res) => {
             } catch (_) {}
         }
 
-        // Add to local JSON cache
-        MOCK_PARTNERS.push(newPartner);
-        savePartners(MOCK_PARTNERS);
+        // Save to central store
+        await savePartner(newPartner);
 
         // Notify Admin via Socket.IO
         emitToAdmin("partner:new_registration", {
@@ -370,24 +364,15 @@ const uploadPartnerKycHandler = async (req, res) => {
 
         const docs = savePartnerKycFiles(id, aadhaar_front, aadhaar_back);
 
-        let partners = loadPartners();
-        const p = partners.find(x => x.partner_id === id);
+        const p = await getPartnerById(id);
         if (p) {
             p.kyc_status = "pending_verification";
             p.kyc_submitted_at = new Date().toISOString();
             p.updated_at = new Date().toISOString();
             p.aadhaar_front_url = docs.frontUrl;
             p.aadhaar_back_url = docs.backUrl;
-            savePartners(partners);
+            await savePartner(p);
         }
-
-        try {
-            await pool.query(`
-                UPDATE delivery_partners
-                SET kyc_status = 'pending_verification', updated_at = NOW(), aadhaar_front_url = $2, aadhaar_back_url = $3
-                WHERE partner_id = $1
-            `, [id, docs.frontUrl, docs.backUrl]);
-        } catch {}
 
         emitToAdmin("partner:kyc_uploaded", {
             partner_id: id,
@@ -453,27 +438,7 @@ const loginPartnerHandler = async (req, res) => {
             return res.status(400).json({ success: false, message: "Partner ID or Phone and password are required." });
         }
 
-        let partner = null;
-
-        // Try DB lookup
-        try {
-            const dbRes = await pool.query(`
-                SELECT * FROM delivery_partners 
-                WHERE LOWER(partner_id) = LOWER($1) OR phone = $1
-            `, [identifier]);
-            if (dbRes.rows.length > 0) {
-                partner = dbRes.rows[0];
-            }
-        } catch {}
-
-        // Fallback to local memory/disk store
-        if (!partner) {
-            const allPartners = loadPartners();
-            partner = allPartners.find(p =>
-                p.partner_id.toLowerCase() === identifier.toLowerCase() ||
-                p.phone === identifier
-            );
-        }
+        let partner = await getPartnerById(identifier);
 
         if (!partner) {
             return res.status(401).json({ success: false, message: "Invalid Delivery Partner ID or Phone number." });
@@ -547,6 +512,7 @@ const loginPartnerHandler = async (req, res) => {
 
         partner.is_online = true;
         partner.last_active_at = new Date().toISOString();
+        await savePartner(partner);
 
         return res.json({
             success: true,
@@ -589,8 +555,11 @@ const logoutPartnerHandler = async (req, res) => {
                     [partnerId]
                 );
             } catch {}
-            const p = MOCK_PARTNERS.find(x => x.partner_id === partnerId);
-            if (p) p.is_online = false;
+            const p = await getPartnerById(partnerId);
+            if (p) {
+                p.is_online = false;
+                await savePartner(p);
+            }
         }
         return res.json({ success: true, message: "Logged out successfully" });
     } catch (err) {
@@ -623,17 +592,13 @@ const heartbeatHandler = async (req, res) => {
             `, [Boolean(is_online), latitude ? Number(latitude) : null, longitude ? Number(longitude) : null, partnerId]);
         } catch {}
 
-        let partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
-        if (!partner) {
-            MOCK_PARTNERS = loadPartners();
-            partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
-        }
+        let partner = await getPartnerById(partnerId);
         if (partner) {
             partner.is_online = Boolean(is_online);
             partner.last_active_at = new Date().toISOString();
             if (latitude) partner.current_latitude = Number(latitude);
             if (longitude) partner.current_longitude = Number(longitude);
-            savePartners(MOCK_PARTNERS);
+            await savePartner(partner);
         }
 
         // Return active dispatch offer if any
@@ -674,12 +639,7 @@ router.post("/auth/forgot-password", (req, res) => res.redirect(307, "../forgot-
  */
 router.get("/profile", authenticatePartner, async (req, res) => {
     const partnerId = req.partner.partner_id;
-    let partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId) || loadPartners().find(p => p.partner_id === partnerId);
-
-    try {
-        const dbRes = await pool.query("SELECT * FROM delivery_partners WHERE partner_id = $1", [partnerId]);
-        if (dbRes.rows.length > 0) partner = dbRes.rows[0];
-    } catch {}
+    let partner = await getPartnerById(partnerId);
 
     if (!partner) {
         return res.status(404).json({ success: false, message: "Partner profile not found." });
@@ -737,11 +697,7 @@ const updatePartnerProfileHandler = async (req, res) => {
             vehicle_type, vehicle_number, emergency_contact
         } = req.body;
 
-        let partners = loadPartners();
-        let partner = partners.find(p => p.partner_id === partnerId);
-        if (!partner) {
-            partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
-        }
+        let partner = await getPartnerById(partnerId);
         if (!partner) {
             return res.status(404).json({ success: false, message: "Partner profile not found." });
         }
@@ -757,8 +713,7 @@ const updatePartnerProfileHandler = async (req, res) => {
         if (emergency_contact !== undefined) partner.emergency_contact = emergency_contact ? emergency_contact.trim() : null;
         partner.updated_at = new Date().toISOString();
 
-        savePartners(partners);
-        MOCK_PARTNERS = partners;
+        await savePartner(partner);
 
         try {
             await pool.query(`
@@ -841,12 +796,12 @@ router.post("/profile/photo", authenticatePartner, async (req, res) => {
 
         const photoUrl = `/uploads/partners/${filename}`;
 
-        // Update in memory / JSON store
-        const partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+        // Update in central store
+        const partner = await getPartnerById(partnerId);
         if (partner) {
             partner.profile_photo = photoUrl;
             partner.updated_at = new Date().toISOString();
-            savePartners(MOCK_PARTNERS);
+            await savePartner(partner);
         }
 
         // Update in PostgreSQL
@@ -875,11 +830,11 @@ router.delete("/profile/photo", authenticatePartner, async (req, res) => {
     try {
         const partnerId = req.partner.partner_id;
 
-        const partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+        const partner = await getPartnerById(partnerId);
         if (partner) {
             partner.profile_photo = null;
             partner.updated_at = new Date().toISOString();
-            savePartners(MOCK_PARTNERS);
+            await savePartner(partner);
         }
 
         try {
@@ -926,10 +881,10 @@ router.post("/attendance/check-in", authenticatePartner, async (req, res) => {
         }
 
         // Mark partner online upon check-in
-        const partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+        const partner = await getPartnerById(partnerId);
         if (partner) {
             partner.is_online = true;
-            savePartners(MOCK_PARTNERS);
+            await savePartner(partner);
         }
 
         try {
@@ -965,10 +920,10 @@ router.post("/attendance/check-out", authenticatePartner, async (req, res) => {
         }
 
         // Mark partner offline upon checkout
-        const partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+        const partner = await getPartnerById(partnerId);
         if (partner) {
             partner.is_online = false;
-            savePartners(MOCK_PARTNERS);
+            await savePartner(partner);
         }
 
         try {
@@ -1018,10 +973,10 @@ const updatePartnerStatusHandler = async (req, res) => {
         );
     } catch {}
 
-    const partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+    const partner = await getPartnerById(partnerId);
     if (partner) {
         partner.is_online = Boolean(is_online);
-        savePartners(MOCK_PARTNERS);
+        await savePartner(partner);
     }
 
     emitToAdmin("partner:status:changed", {
@@ -1069,18 +1024,14 @@ router.post("/location", authenticatePartner, async (req, res) => {
         `, [partnerId, lat, lng, speed, heading, accuracy]);
     } catch {}
 
-    let partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
-    if (!partner) {
-        MOCK_PARTNERS = loadPartners();
-        partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
-    }
+    let partner = await getPartnerById(partnerId);
     if (partner) {
         partner.current_latitude = lat;
         partner.current_longitude = lng;
         partner.speed = speed;
         partner.heading = heading;
         partner.last_active_at = new Date().toISOString();
-        savePartners(MOCK_PARTNERS);
+        await savePartner(partner);
     }
 
     emitToAdmin("delivery:location:update", {
@@ -1139,7 +1090,7 @@ router.get("/dashboard", authenticatePartner, async (req, res) => {
         const earningsToday = Math.round(ordersDelivered * 35 + subDelivered * 30);
 
         // Partner name & status
-        const partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId) || loadPartners().find(p => p.partner_id === partnerId) || {
+        const partner = await getPartnerById(partnerId) || {
             name: req.partner.name || "Delivery Partner",
             is_online: false
         };

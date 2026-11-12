@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { pool } = require("../config/database");
+const { emitToAdmin } = require("./socketService");
 
 const DATA_DIR = path.resolve(__dirname, "..", "data");
 const ATTENDANCE_FILE = path.join(DATA_DIR, "partner_attendance.json");
@@ -32,12 +33,25 @@ function saveAttendance(records) {
     }
 }
 
+/**
+ * Get current date string formatted as YYYY-MM-DD in Asia/Kolkata timezone
+ */
 function getTodayStr() {
-    const d = new Date();
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
+    try {
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Kolkata',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        });
+        return formatter.format(new Date());
+    } catch (_) {
+        const d = new Date();
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        return `${yyyy}-${mm}-${dd}`;
+    }
 }
 
 function savePhotoFromBase64(base64Data, filename) {
@@ -138,6 +152,17 @@ async function checkIn({ partner_id, partner_name, photo_base64, latitude, longi
             newRecord.check_in_time, newRecord.check_in_photo,
             newRecord.check_in_location.latitude, newRecord.check_in_location.longitude
         ]);
+    } catch (_) {}
+
+    // Emit live update to Admin App
+    try {
+        emitToAdmin("partner:attendance_check_in", {
+            partner_id: newRecord.partner_id,
+            partner_name: newRecord.partner_name,
+            check_in_time: newRecord.check_in_time,
+            date: newRecord.date,
+            status: "checked_in"
+        });
     } catch (_) {}
 
     return {
@@ -295,9 +320,39 @@ function getAdminAttendanceList({ filter = "today", partner_id = null, start_dat
         );
     }
 
+    // Attach partner metadata and calculate attendance metrics
+    let totalPartners = 0;
+    const partnerMap = new Map();
+    try {
+        const partnersFile = path.join(DATA_DIR, "delivery_partners.json");
+        if (fs.existsSync(partnersFile)) {
+            const raw = JSON.parse(fs.readFileSync(partnersFile, "utf-8"));
+            const valid = raw.filter(p => p.registration_status !== "deleted" && p.registration_status !== "deactivated");
+            totalPartners = valid.filter(p => p.registration_status === "approved" || p.is_active).length;
+            valid.forEach(p => partnerMap.set(p.partner_id, p));
+        }
+    } catch (_) {}
+
+    filtered = filtered.map(r => {
+        const p = partnerMap.get(r.partner_id);
+        return {
+            ...r,
+            assigned_area: r.assigned_area || p?.assigned_area || "Chennai Central",
+            vehicle_type: p?.vehicle_type || "Scooter",
+            vehicle_number: p?.vehicle_number || ""
+        };
+    });
+
+    const todayRecords = records.filter(r => r.date === todayStr);
+    const presentToday = new Set(todayRecords.map(r => r.partner_id)).size;
+    const absentToday = Math.max(0, totalPartners - presentToday);
+
     return {
         success: true,
         filter,
+        total_partners: totalPartners,
+        present_today: presentToday,
+        absent_today: absentToday,
         count: filtered.length,
         attendance: filtered
     };
