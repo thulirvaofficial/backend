@@ -1,96 +1,201 @@
 const express = require("express");
-const { pool } = require("../config/database");
+const {
+    getAllAreas,
+    createArea,
+    updateArea,
+    toggleAreaStatus,
+    deleteArea
+} = require("../services/serviceabilityService");
+const { emitToAdmin } = require("../services/socketService");
 
 const router = express.Router();
 
-let MOCK_LOCATIONS = [
-    { id: 1, name: "Oragadam", pincode: "603109", status: "active" },
-    { id: 2, name: "Padapai", pincode: "601301", status: "active" },
-    { id: 3, name: "Sriperumbudur", pincode: "602105", status: "active" },
-    { id: 4, name: "Valasaravakkam", pincode: "600087", status: "active" },
-    { id: 5, name: "Porur", pincode: "600116", status: "active" },
-    { id: 6, name: "Virugambakkam", pincode: "600092", status: "active" },
-    { id: 7, name: "Vadapalani", pincode: "600026", status: "active" },
-    { id: 8, name: "Koyambedu", pincode: "600107", status: "active" },
-    { id: 9, name: "KK Nagar", pincode: "600078", status: "active" },
-    { id: 10, name: "Alapakkam", pincode: "600116", status: "active" },
-    { id: 11, name: "Maduravoyal", pincode: "600095", status: "active" }
-];
+/**
+ * Format a serviceable area model into the delivery location representation
+ * for web checkout and admin compatibility.
+ */
+function formatLocation(a) {
+    const isActive = Boolean(a.is_active && a.is_serviceable);
+    return {
+        id: a.id,
+        name: a.area_name,
+        area_name: a.area_name,
+        pincode: a.pincode,
+        city: a.city,
+        state: a.state,
+        country: a.country || "India",
+        latitude: a.latitude,
+        longitude: a.longitude,
+        status: isActive ? "active" : "inactive",
+        is_active: a.is_active,
+        is_serviceable: a.is_serviceable,
+        coverage_status: a.coverage_status || (isActive ? "active" : "coming_soon"),
+        delivery_charge: a.delivery_charge || 0,
+        minimum_order_amount: a.minimum_order_amount || 0,
+        estimated_delivery_time: a.estimated_delivery_time || "Early Morning (5:30 - 7:30 AM)",
+        delivery_time: a.delivery_time || a.estimated_delivery_time || "Early Morning (5:30 - 7:30 AM)",
+        boundary_coordinates: a.boundary_coordinates,
+        created_at: a.created_at,
+        updated_at: a.updated_at
+    };
+}
 
-/* GET ALL DELIVERY LOCATIONS */
+/* GET ALL DELIVERY LOCATIONS (Unified with central serviceability service) */
 router.get("/", async (req, res) => {
     try {
-        const result = await pool.query(
-            "SELECT * FROM delivery_locations ORDER BY name ASC"
-        );
-        if (result.rows && result.rows.length > 0) {
-            return res.json({ success: true, locations: result.rows });
+        const { areas } = await getAllAreas({ includeInactive: true });
+        let locations = areas.map(formatLocation);
+
+        if (req.query.active_only === "true") {
+            locations = locations.filter(l => l.status === "active");
         }
-        res.json({ success: true, locations: MOCK_LOCATIONS });
-    } catch {
-        res.json({ success: true, locations: MOCK_LOCATIONS });
+
+        return res.json({
+            success: true,
+            total: locations.length,
+            active_count: locations.filter(l => l.status === "active").length,
+            locations
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/* GET ACTIVE LOCATIONS ONLY */
+router.get("/active", async (req, res) => {
+    try {
+        const { areas } = await getAllAreas({ includeInactive: false });
+        const locations = areas.map(formatLocation);
+        return res.json({
+            success: true,
+            count: locations.length,
+            locations
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 });
 
 /* ADD NEW DELIVERY LOCATION (Admin) */
 router.post("/", async (req, res) => {
-    const { name, pincode, status } = req.body;
-    if (!name || !name.trim()) {
+    const { name, area_name, pincode, status, city, state, latitude, longitude } = req.body;
+    const cleanName = (name || area_name || "").trim();
+
+    if (!cleanName) {
         return res.status(400).json({ success: false, message: "Location name is required." });
     }
 
-    const cleanName = name.trim();
-    const cleanPin = (pincode || "").trim();
-    const cleanStatus = status || "active";
-
     try {
-        const result = await pool.query(
-            "INSERT INTO delivery_locations (name, pincode, status) VALUES ($1,$2,$3) RETURNING *",
-            [cleanName, cleanPin, cleanStatus]
-        );
-        const loc = result.rows[0];
-        MOCK_LOCATIONS.push(loc);
+        const isActive = status ? status === "active" : true;
+        const newArea = await createArea({
+            area_name: cleanName,
+            pincode: (pincode || "").trim(),
+            city: city || "Chennai",
+            state: state || "Tamil Nadu",
+            latitude: latitude ? Number(latitude) : 13.0827,
+            longitude: longitude ? Number(longitude) : 80.2707,
+            is_active: isActive,
+            is_serviceable: isActive,
+            coverage_status: isActive ? "active" : "coming_soon"
+        });
+
+        try {
+            if (typeof emitToAdmin === "function") {
+                emitToAdmin("serviceable_area:update", { action: "create", area: newArea });
+            }
+        } catch (_) {}
+
+        const loc = formatLocation(newArea);
         return res.json({ success: true, location: loc, message: "Delivery location added successfully" });
-    } catch {
-        const newId = MOCK_LOCATIONS.length ? Math.max(...MOCK_LOCATIONS.map(l => l.id)) + 1 : 1;
-        const newLoc = { id: newId, name: cleanName, pincode: cleanPin, status: cleanStatus };
-        MOCK_LOCATIONS.push(newLoc);
-        res.json({ success: true, location: newLoc, message: "Delivery location added successfully" });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 });
 
 /* UPDATE DELIVERY LOCATION (Admin) */
 router.put("/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
-    const { name, pincode, status } = req.body;
+    const id = req.params.id;
+    const { name, area_name, pincode, status, city, state, latitude, longitude } = req.body;
 
     try {
-        await pool.query(
-            "UPDATE delivery_locations SET name=COALESCE($1, name), pincode=COALESCE($2, pincode), status=COALESCE($3, status) WHERE id=$4",
-            [name, pincode, status, id]
-        );
-    } catch {}
+        const updateData = {};
+        if (name || area_name) updateData.area_name = (name || area_name).trim();
+        if (pincode !== undefined) updateData.pincode = pincode.trim();
+        if (city) updateData.city = city.trim();
+        if (state) updateData.state = state.trim();
+        if (latitude !== undefined) updateData.latitude = Number(latitude);
+        if (longitude !== undefined) updateData.longitude = Number(longitude);
+        if (status !== undefined) {
+            updateData.is_active = status === "active";
+            updateData.is_serviceable = status === "active";
+            updateData.coverage_status = status === "active" ? "active" : "coming_soon";
+        }
 
-    const loc = MOCK_LOCATIONS.find(l => l.id === id);
-    if (loc) {
-        if (name) loc.name = name;
-        if (pincode !== undefined) loc.pincode = pincode;
-        if (status) loc.status = status;
+        const updated = await updateArea(id, updateData);
+        if (!updated) {
+            return res.status(404).json({ success: false, message: "Delivery location not found" });
+        }
+
+        try {
+            if (typeof emitToAdmin === "function") {
+                emitToAdmin("serviceable_area:update", { action: "update", id, area: updated });
+            }
+        } catch (_) {}
+
+        return res.json({ success: true, message: "Delivery location updated", location: formatLocation(updated) });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
-
-    res.json({ success: true, message: "Delivery location updated" });
 });
 
-/* DELETE DELIVERY LOCATION (Admin) */
-router.delete("/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
-
+/* TOGGLE LOCATION ACTIVE / PAUSED STATUS (Admin) */
+const toggleStatusRoute = async (req, res) => {
+    const id = req.params.id;
     try {
-        await pool.query("DELETE FROM delivery_locations WHERE id=$1", [id]);
-    } catch {}
+        const updated = await toggleAreaStatus(id);
+        if (!updated) {
+            return res.status(404).json({ success: false, message: "Delivery location not found" });
+        }
 
-    MOCK_LOCATIONS = MOCK_LOCATIONS.filter(l => l.id !== id);
-    res.json({ success: true, message: "Delivery location deleted" });
+        try {
+            if (typeof emitToAdmin === "function") {
+                emitToAdmin("serviceable_area:update", { action: "toggle", id, area: updated });
+            }
+        } catch (_) {}
+
+        return res.json({
+            success: true,
+            status: updated.is_active ? "active" : "inactive",
+            message: `Location is now ${updated.is_active ? "Active" : "Paused"}`,
+            location: formatLocation(updated)
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+router.patch("/:id/toggle", toggleStatusRoute);
+router.put("/:id/toggle", toggleStatusRoute);
+
+/* DELETE DELIVERY LOCATION (Admin - Soft Deactivation) */
+router.delete("/:id", async (req, res) => {
+    const id = req.params.id;
+    try {
+        const ok = await deleteArea(id);
+        if (!ok) {
+            return res.status(404).json({ success: false, message: "Delivery location not found" });
+        }
+
+        try {
+            if (typeof emitToAdmin === "function") {
+                emitToAdmin("serviceable_area:update", { action: "delete", id });
+            }
+        } catch (_) {}
+
+        return res.json({ success: true, message: "Delivery location deactivated successfully" });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
 });
 
 module.exports = router;

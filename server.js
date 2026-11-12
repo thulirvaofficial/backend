@@ -142,6 +142,11 @@ app.use(
 );
 
 app.use(
+    "/api/customer/addresses",
+    addressRoutes
+);
+
+app.use(
     "/api/notifications",
     notificationRoutes
 );
@@ -203,6 +208,11 @@ app.use(
 
 app.use(
     "/api/admin/serviceable-areas",
+    serviceabilityRoutes
+);
+
+app.use(
+    "/api/admin/serviceability",
     serviceabilityRoutes
 );
 

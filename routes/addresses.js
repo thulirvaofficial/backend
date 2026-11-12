@@ -1,34 +1,73 @@
 const express = require("express");
+const fs = require("fs");
+const path = require("path");
 const { pool } = require("../config/database");
 
 const router = express.Router();
+const DATA_DIR = path.resolve(__dirname, "..", "data");
+const ADDRESSES_FILE = path.join(DATA_DIR, "addresses.json");
 
-let MOCK_ADDRESSES = [
-    {
-        id: 1,
-        user_id: 1,
-        name: "Kamesh S",
-        phone: "9876543210",
-        address: "No. 12, Gandhi Street, KK Nagar",
-        city: "Chennai",
-        state: "Tamil Nadu",
-        pincode: "600078",
-        is_default: true,
-        created_at: new Date().toISOString()
-    },
-    {
-        id: 2,
-        user_id: 1,
-        name: "Kamesh S (Work)",
-        phone: "9876543210",
-        address: "DLF Cybercity, Block 3, Porur",
-        city: "Chennai",
-        state: "Tamil Nadu",
-        pincode: "600116",
-        is_default: false,
-        created_at: new Date().toISOString()
-    }
-];
+function loadAddresses() {
+    try {
+        if (fs.existsSync(ADDRESSES_FILE)) {
+            const raw = fs.readFileSync(ADDRESSES_FILE, "utf-8");
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+    } catch {}
+    return [
+        {
+            id: 1,
+            user_id: 1,
+            name: "Kamesh S",
+            phone: "9876543210",
+            address: "No. 12, Gandhi Street, KK Nagar",
+            street: "Gandhi Street",
+            area: "KK Nagar",
+            landmark: "Near Sivan Park",
+            delivery_instructions: "Leave at door",
+            city: "Chennai",
+            state: "Tamil Nadu",
+            pincode: "600078",
+            latitude: 13.0410,
+            longitude: 80.1994,
+            is_serviceable: true,
+            serviceable_area_id: 2,
+            is_default: true,
+            created_at: new Date().toISOString()
+        },
+        {
+            id: 2,
+            user_id: 1,
+            name: "Kamesh S (Work)",
+            phone: "9876543210",
+            address: "DLF Cybercity, Block 3, Porur",
+            street: "Mount Poonamallee High Rd",
+            area: "Porur",
+            landmark: "DLF Block 3 Gate 1",
+            delivery_instructions: "Security desk",
+            city: "Chennai",
+            state: "Tamil Nadu",
+            pincode: "600116",
+            latitude: 13.0382,
+            longitude: 80.1565,
+            is_serviceable: true,
+            serviceable_area_id: 7,
+            is_default: false,
+            created_at: new Date().toISOString()
+        }
+    ];
+}
+
+function saveAddresses(addresses) {
+    try {
+        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+        fs.writeFileSync(ADDRESSES_FILE, JSON.stringify(addresses, null, 2), "utf-8");
+    } catch {}
+}
+
+let MOCK_ADDRESSES = loadAddresses();
+if (!fs.existsSync(ADDRESSES_FILE)) saveAddresses(MOCK_ADDRESSES);
 
 /* GET USER ADDRESSES */
 router.get("/user/:userId", async (req, res) => {
@@ -113,6 +152,7 @@ router.post("/", async (req, res) => {
         MOCK_ADDRESSES.forEach(a => { if (a.user_id == newAddr.user_id) a.is_default = false; });
     }
     MOCK_ADDRESSES.unshift(newAddr);
+    saveAddresses(MOCK_ADDRESSES);
 
     res.json({ success: true, address: newAddr, serviceable: is_serviceable, message: "Address added successfully" });
 });
@@ -187,6 +227,7 @@ router.put("/:id", async (req, res) => {
         if (is_serviceable !== undefined) addr.is_serviceable = is_serviceable;
         if (serviceable_area_id !== undefined) addr.serviceable_area_id = serviceable_area_id;
         if (is_default !== undefined) addr.is_default = Boolean(is_default);
+        saveAddresses(MOCK_ADDRESSES);
     }
 
     res.json({ success: true, address: addr, message: "Address updated successfully" });
@@ -200,6 +241,7 @@ router.delete("/:id", async (req, res) => {
     } catch {}
 
     MOCK_ADDRESSES = MOCK_ADDRESSES.filter(a => a.id !== id);
+    saveAddresses(MOCK_ADDRESSES);
     res.json({ success: true, message: "Address deleted successfully" });
 });
 

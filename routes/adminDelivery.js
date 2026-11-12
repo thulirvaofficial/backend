@@ -4,6 +4,8 @@ const fs = require("fs");
 const path = require("path");
 const { pool } = require("../config/database");
 const { initiateSmartDispatch } = require("../services/dispatchEngine");
+const { getAdminAttendanceList } = require("../services/attendanceService");
+const { getAreaAllocationSetting, setAreaAllocationSetting } = require("../services/subscriptionDeliveryService");
 
 const router = express.Router();
 const DATA_DIR = path.resolve(__dirname, "..", "data");
@@ -56,7 +58,7 @@ const getPartnersHandler = async (req, res) => {
         try {
             let sql = `
                 SELECT 
-                    partner_id, name, phone, email, address, city, pincode, assigned_area,
+                    partner_id, name, phone, email, profile_photo, address, city, pincode, assigned_area,
                     vehicle_type, vehicle_number, driving_licence, identity_documents,
                     emergency_contact, registration_status, rejection_reason,
                     current_latitude, current_longitude, is_online, is_active, is_blocked,
@@ -89,6 +91,7 @@ const getPartnersHandler = async (req, res) => {
                 name: p.name,
                 phone: p.phone,
                 email: p.email,
+                profile_photo: p.profile_photo || null,
                 address: p.address || "",
                 city: p.city || "Chennai",
                 pincode: p.pincode || "",
@@ -158,29 +161,75 @@ router.get("/pending", getPendingRegistrationsHandler);
  */
 const getFleetStatisticsHandler = async (req, res) => {
     try {
-        let totalFleet = 0;
-        let onlineNow = 0;
-        let totalTrips = 0;
-        let activeDeliveries = 0;
-        let pendingRegistrations = 0;
-
+        let partners = [];
         try {
             const partnersRes = await pool.query("SELECT * FROM delivery_partners");
-            const partners = partnersRes.rows;
-
-            totalFleet = partners.filter(p => p.registration_status === "approved" && !p.is_blocked).length;
-            onlineNow = partners.filter(p => p.is_online && !p.is_blocked).length;
-            pendingRegistrations = partners.filter(p => p.registration_status === "pending_approval").length;
-            totalTrips = partners.reduce((sum, p) => sum + (Number(p.total_deliveries_count) || 0), 0);
-            activeDeliveries = partners.reduce((sum, p) => sum + (Number(p.active_orders_count) || 0), 0);
+            partners = partnersRes.rows;
         } catch {
-            const partners = loadPartners();
-            totalFleet = partners.filter(p => (p.registration_status === "approved" || !p.registration_status) && !p.is_blocked).length;
-            onlineNow = partners.filter(p => p.is_online && !p.is_blocked).length;
-            pendingRegistrations = partners.filter(p => p.registration_status === "pending_approval").length;
-            totalTrips = partners.reduce((sum, p) => sum + (Number(p.total_deliveries_count) || 0), 0);
-            activeDeliveries = partners.reduce((sum, p) => sum + (Number(p.active_orders_count) || 0), 0);
+            partners = loadPartners();
         }
+
+        // Active 5-minute heartbeat window for online riders
+        const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+
+        const totalFleet = partners.filter(p =>
+            (p.registration_status === "approved" || (!p.registration_status && p.is_active)) &&
+            !p.is_blocked &&
+            p.is_active !== false &&
+            p.registration_status !== "deactivated"
+        ).length;
+
+        const onlineNow = partners.filter(p => {
+            if (!p.is_online || p.is_blocked || p.is_active === false || p.registration_status === "deactivated") {
+                return false;
+            }
+            if (!p.last_active_at) return false;
+            const t = new Date(p.last_active_at).getTime();
+            return !isNaN(t) && t >= fiveMinutesAgo;
+        }).length;
+
+        const pendingRegistrations = partners.filter(p => p.registration_status === "pending_approval").length;
+
+        // Calculate actual delivered trips and active transit deliveries
+        let deliveredOrdersCount = 0;
+        let activeOrdersCount = 0;
+
+        try {
+            if (fs.existsSync(ORDERS_FILE)) {
+                const allOrders = JSON.parse(fs.readFileSync(ORDERS_FILE, "utf-8"));
+                deliveredOrdersCount = allOrders.filter(o => o.order_status === "delivered").length;
+                activeOrdersCount = allOrders.filter(o => ["assigned", "picked_up", "out_for_delivery"].includes(o.order_status)).length;
+            }
+        } catch {}
+
+        try {
+            const dbOrders = await pool.query(`
+                SELECT 
+                    COUNT(CASE WHEN order_status = 'delivered' THEN 1 END) as delivered_count,
+                    COUNT(CASE WHEN order_status IN ('assigned', 'picked_up', 'out_for_delivery') THEN 1 END) as active_count
+                FROM orders
+            `);
+            if (dbOrders.rows && dbOrders.rows.length) {
+                deliveredOrdersCount = Math.max(deliveredOrdersCount, Number(dbOrders.rows[0].delivered_count) || 0);
+                activeOrdersCount = Math.max(activeOrdersCount, Number(dbOrders.rows[0].active_count) || 0);
+            }
+        } catch {}
+
+        // Add delivered subscription daily items
+        let deliveredSubsCount = 0;
+        try {
+            const subDeliveriesPath = path.join(DATA_DIR, "subscription_deliveries.json");
+            if (fs.existsSync(subDeliveriesPath)) {
+                const subsObj = JSON.parse(fs.readFileSync(subDeliveriesPath, "utf-8"));
+                for (const dateKey of Object.keys(subsObj)) {
+                    const list = subsObj[dateKey] || [];
+                    deliveredSubsCount += list.filter(s => s.status === "delivered").length;
+                }
+            }
+        } catch {}
+
+        const totalTrips = deliveredOrdersCount + deliveredSubsCount;
+        const activeDeliveries = activeOrdersCount;
 
         return res.json({
             success: true,
@@ -533,6 +582,240 @@ router.post("/partners/:id/reset-password", async (req, res) => {
     }
 });
 
+/**
+ * GET /api/admin/delivery/partners/:id/kyc & /api/admin/delivery-partners/:id/kyc
+ * Get KYC document URLs and status for a delivery partner
+ */
+const getPartnerKycHandler = async (req, res) => {
+    try {
+        const partnerId = req.params.id;
+        const partners = loadPartners();
+        const partner = partners.find(p => p.partner_id === partnerId);
+        if (!partner) {
+            return res.status(404).json({ success: false, message: "Partner not found" });
+        }
+
+        const kycDir = path.join(DATA_DIR, "kyc_documents", partnerId);
+        const frontExists = fs.existsSync(path.join(kycDir, "aadhaar_front.jpg")) || fs.existsSync(path.join(kycDir, "aadhaar_front.png"));
+        const backExists = fs.existsSync(path.join(kycDir, "aadhaar_back.jpg")) || fs.existsSync(path.join(kycDir, "aadhaar_back.png"));
+
+        return res.json({
+            success: true,
+            partner_id: partner.partner_id,
+            name: partner.name,
+            phone: partner.phone,
+            kyc_status: partner.kyc_status || (partner.is_active ? "verified" : "pending_verification"),
+            registration_status: partner.registration_status || (partner.is_active ? "approved" : "pending_approval"),
+            aadhaar_front_url: `/api/admin/delivery/partners/${partnerId}/kyc/front`,
+            aadhaar_back_url: `/api/admin/delivery/partners/${partnerId}/kyc/back`,
+            front_uploaded: frontExists,
+            back_uploaded: backExists,
+            rejection_reason: partner.rejection_reason || null,
+            submitted_at: partner.kyc_submitted_at || partner.created_at || new Date().toISOString()
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+router.get("/partners/:id/kyc", getPartnerKycHandler);
+
+/**
+ * GET /api/admin/delivery/partners/:id/kyc/:type (type: 'front' or 'back')
+ * Private authenticated document access for Admin
+ */
+const getPartnerKycDocumentHandler = async (req, res) => {
+    try {
+        const { id: partnerId, type } = req.params;
+        const cleanType = type === "back" ? "back" : "front";
+        const kycDir = path.join(DATA_DIR, "kyc_documents", partnerId);
+
+        const possibleFiles = [
+            path.join(kycDir, `aadhaar_${cleanType}.jpg`),
+            path.join(kycDir, `aadhaar_${cleanType}.jpeg`),
+            path.join(kycDir, `aadhaar_${cleanType}.png`),
+            path.join(kycDir, `aadhaar_${cleanType}.webp`)
+        ];
+
+        for (const file of possibleFiles) {
+            if (fs.existsSync(file)) {
+                return res.sendFile(file);
+            }
+        }
+
+        return res.status(404).json({
+            success: false,
+            message: `KYC document (${cleanType}) not uploaded for partner ${partnerId}`
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+router.get("/partners/:id/kyc/:type", getPartnerKycDocumentHandler);
+
+/**
+ * PATCH /api/admin/delivery/partners/:id/kyc & PUT /partners/:id/kyc
+ * Admin KYC Actions: 'approve', 'reject', 'request_reupload'
+ */
+const updatePartnerKycHandler = async (req, res) => {
+    try {
+        const partnerId = req.params.id;
+        const { action, reason } = req.body;
+
+        if (!action || !["approve", "reject", "request_reupload"].includes(action)) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid action required: 'approve', 'reject', or 'request_reupload'"
+            });
+        }
+
+        let partners = loadPartners();
+        const partner = partners.find(p => p.partner_id === partnerId);
+        if (!partner) {
+            return res.status(404).json({ success: false, message: "Partner not found" });
+        }
+
+        let newKycStatus = "pending_verification";
+        let newRegStatus = partner.registration_status;
+
+        if (action === "approve") {
+            newKycStatus = "verified";
+            newRegStatus = "approved";
+            partner.is_active = true;
+            partner.rejection_reason = null;
+        } else if (action === "reject") {
+            newKycStatus = "rejected";
+            newRegStatus = "rejected";
+            partner.is_active = false;
+            partner.rejection_reason = reason || "Aadhaar verification criteria not met.";
+        } else if (action === "request_reupload") {
+            newKycStatus = "reupload_requested";
+            partner.rejection_reason = reason || "Please upload clearer photos of Aadhaar card front and back.";
+        }
+
+        partner.kyc_status = newKycStatus;
+        partner.registration_status = newRegStatus;
+        partner.updated_at = new Date().toISOString();
+
+        try {
+            await pool.query(`
+                UPDATE delivery_partners
+                SET kyc_status = $1, registration_status = $2, rejection_reason = $3, is_active = $4, updated_at = NOW()
+                WHERE partner_id = $5
+            `, [newKycStatus, newRegStatus, partner.rejection_reason, partner.is_active, partnerId]);
+        } catch {}
+
+        savePartners(partners);
+        await recordAudit("Operations Admin", `KYC_${action.toUpperCase()}`, `Updated KYC for ${partnerId}: ${newKycStatus}`);
+
+        return res.json({
+            success: true,
+            message: `KYC for partner ${partnerId} updated to: ${newKycStatus}`,
+            kyc_status: newKycStatus,
+            registration_status: newRegStatus
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+router.patch("/partners/:id/kyc", updatePartnerKycHandler);
+router.put("/partners/:id/kyc", updatePartnerKycHandler);
+
+/**
+ * DELETE /api/admin/delivery/partners/:id & DELETE /api/admin/delivery-partners/:id
+ * Soft delete partner with active orders safety check
+ */
+const deletePartnerHandler = async (req, res) => {
+    try {
+        const partnerId = req.params.id;
+        let partners = loadPartners();
+        const pIndex = partners.findIndex(p => p.partner_id === partnerId);
+        if (pIndex === -1) {
+            return res.status(404).json({ success: false, message: "Partner not found" });
+        }
+        const partner = partners[pIndex];
+
+        // Safety validation: verify no active orders in progress
+        let activeOrdersCount = Number(partner.active_orders_count || 0);
+
+        try {
+            if (fs.existsSync(ORDERS_FILE)) {
+                const orders = JSON.parse(fs.readFileSync(ORDERS_FILE, "utf-8"));
+                const pendingOrders = orders.filter(
+                    o => o.partner_id === partnerId && ["pending", "processing", "picked_up", "out_for_delivery"].includes(o.order_status)
+                );
+                activeOrdersCount = Math.max(activeOrdersCount, pendingOrders.length);
+            }
+        } catch {}
+
+        try {
+            const dbCheck = await pool.query(`
+                SELECT COUNT(*) FROM orders 
+                WHERE partner_id = $1 AND order_status IN ('pending', 'processing', 'picked_up', 'out_for_delivery')
+            `, [partnerId]);
+            if (dbCheck.rows && dbCheck.rows.length) {
+                activeOrdersCount = Math.max(activeOrdersCount, Number(dbCheck.rows[0].count));
+            }
+        } catch {}
+
+        if (activeOrdersCount > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot delete partner ${partnerId}: Has ${activeOrdersCount} active delivery order(s) in progress. Reassign or complete orders first.`
+            });
+        }
+
+        const totalDeliveries = Number(partner.total_deliveries_count || 0);
+
+        if (totalDeliveries === 0) {
+            // Permanently delete test/new partner without delivery history
+            partners.splice(pIndex, 1);
+            savePartners(partners);
+
+            try {
+                await pool.query("DELETE FROM delivery_partners WHERE partner_id = $1", [partnerId]);
+            } catch {}
+
+            await recordAudit("Operations Admin", "DELETE_DELIVERY_PARTNER", `Permanently deleted delivery partner ${partnerId}`);
+
+            return res.json({
+                success: true,
+                message: `Partner ${partnerId} deleted permanently.`
+            });
+        } else {
+            // Soft deactivation for partners with historical orders
+            partner.is_active = false;
+            partner.is_online = false;
+            partner.registration_status = "deactivated";
+            partner.deleted_at = new Date().toISOString();
+            partner.updated_at = new Date().toISOString();
+            savePartners(partners);
+
+            try {
+                await pool.query(`
+                    UPDATE delivery_partners
+                    SET is_active = false, is_online = false, registration_status = 'deactivated', updated_at = NOW()
+                    WHERE partner_id = $1
+                `, [partnerId]);
+            } catch {}
+
+            await recordAudit("Operations Admin", "DEACTIVATE_DELIVERY_PARTNER", `Soft-deactivated delivery partner ${partnerId}`);
+
+            return res.json({
+                success: true,
+                message: `Partner ${partnerId} deactivated successfully. Historical order logs preserved.`
+            });
+        }
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+router.delete("/partners/:id", deletePartnerHandler);
+router.delete("/:id", deletePartnerHandler);
+
 /* ============================================================
    2. LIVE GPS TRACKING (GOOGLE MAPS)
 ============================================================ */
@@ -691,6 +974,95 @@ router.get("/audit-logs", async (req, res) => {
         `).catch(() => ({ rows: [] }));
 
         return res.json({ success: true, logs: logs.rows });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * GET /api/admin/delivery/attendance
+ * List partner attendance records with date and partner filters
+ */
+router.get("/attendance", (req, res) => {
+    try {
+        const { filter, partner_id, start_date, end_date, search } = req.query;
+        const result = getAdminAttendanceList({
+            filter: filter || "today",
+            partner_id,
+            start_date,
+            end_date,
+            search
+        });
+        return res.json(result);
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * GET /api/admin/delivery/settings/area-allocation
+ * Fetch current area allocation status (true | false)
+ */
+router.get("/settings/area-allocation", (req, res) => {
+    const enabled = getAreaAllocationSetting();
+    return res.json({
+        success: true,
+        area_allocation_enabled: enabled,
+        message: enabled
+            ? "Area allocation is ENABLED: Partners only see tasks in their assigned areas."
+            : "Area allocation is DISABLED: All approved partners see all tasks across all areas."
+    });
+});
+
+/**
+ * POST /api/admin/delivery/settings/area-allocation
+ * Toggle area allocation status
+ */
+router.post("/settings/area-allocation", async (req, res) => {
+    try {
+        const val = req.body.enabled !== undefined ? req.body.enabled : req.body.area_allocation_enabled;
+        if (val === undefined) {
+            return res.status(400).json({ success: false, message: "Field 'enabled' or 'area_allocation_enabled' (boolean) is required." });
+        }
+        const enabled = Boolean(val);
+
+        const ok = setAreaAllocationSetting(enabled);
+        if (!ok) {
+            return res.status(500).json({ success: false, message: "Failed to persist setting." });
+        }
+
+        await recordAudit("Operations Admin", "AREA_ALLOCATION_TOGGLE", `Changed AREA_ALLOCATION_ENABLED to ${enabled}`);
+
+        return res.json({
+            success: true,
+            area_allocation_enabled: enabled,
+            message: `Area allocation setting updated to ${enabled}`
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.put("/settings/area-allocation", async (req, res) => {
+    try {
+        const val = req.body.enabled !== undefined ? req.body.enabled : req.body.area_allocation_enabled;
+        if (val === undefined) {
+            return res.status(400).json({ success: false, message: "Field 'enabled' or 'area_allocation_enabled' (boolean) is required." });
+        }
+        const enabled = Boolean(val);
+
+        const ok = setAreaAllocationSetting(enabled);
+        if (!ok) {
+            return res.status(500).json({ success: false, message: "Failed to persist setting." });
+        }
+
+        await recordAudit("Operations Admin", "AREA_ALLOCATION_TOGGLE", `Changed AREA_ALLOCATION_ENABLED to ${enabled}`);
+
+        return res.json({
+            success: true,
+            area_allocation_enabled: enabled,
+            message: `Area allocation setting updated to ${enabled}`
+        });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }

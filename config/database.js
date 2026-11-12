@@ -934,30 +934,7 @@ async function initializeDatabase() {
             );
         `);
 
-        // Seed 4 Delivery Partner test accounts if table is empty
-        const dpCheck = await pool.query("SELECT COUNT(*) FROM delivery_partners");
-        if (Number(dpCheck.rows[0].count) === 0) {
-            const bcrypt = require("bcryptjs");
-            const defaultHashedPassword = await bcrypt.hash("123456", 10);
-
-            const initialPartners = [
-                ['THU-DP-0001', 'Kamesh Sundaram', '9840122334', 'kamesh.s@thulirva.in', defaultHashedPassword, 'Kanchipuram Main Hub', 'Kanchipuram', 'Scooter', 'TN 21 AB 1001', 12.8342, 79.7036],
-                ['THU-DP-0002', 'Murugan K', '9840233445', 'murugan.k@thulirva.in', defaultHashedPassword, 'Walajabad Road, Kanchipuram', 'Kanchipuram', 'Motorcycle', 'TN 21 BC 2002', 12.8389, 79.7082],
-                ['THU-DP-0003', 'Senthil Nathan', '9840344556', 'senthil.n@thulirva.in', defaultHashedPassword, 'Anna Nagar West, Chennai', 'Chennai Central', 'Scooter', 'TN 02 CD 3003', 13.0850, 80.2100],
-                ['THU-DP-0004', 'Vignesh Kumar', '9840455667', 'vignesh.k@thulirva.in', defaultHashedPassword, 'Velachery Main Road, Chennai', 'Chennai South', 'Scooter', 'TN 07 DE 4004', 12.9800, 80.2200]
-            ];
-
-            for (const [pid, name, phone, email, pass, addr, area, vtype, vnum, lat, lng] of initialPartners) {
-                await pool.query(`
-                    INSERT INTO delivery_partners (
-                        partner_id, name, phone, email, password, address, assigned_area, vehicle_type, vehicle_number, current_latitude, current_longitude, is_online, is_active, is_blocked, registration_status
-                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, false, true, false, 'approved')
-                    ON CONFLICT (partner_id) DO NOTHING
-                `, [pid, name, phone, email, pass, addr, area, vtype, vnum, lat, lng]);
-            }
-            console.log("[+] Initialized 4 default Delivery Partners (password: 123456)");
-        }
-
+        // Ensure delivery_partners table exists without injecting fake mock data
         console.log("[+] Database tables ready");
     } catch (error) {
         console.error("[DATABASE ERROR]", error.message);

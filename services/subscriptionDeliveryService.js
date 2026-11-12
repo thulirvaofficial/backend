@@ -4,6 +4,40 @@ const { pool } = require("../config/database");
 
 const DATA_DIR = path.resolve(__dirname, "..", "data");
 const SUB_DELIVERIES_FILE = path.join(DATA_DIR, "subscription_deliveries.json");
+const SETTINGS_FILE = path.join(DATA_DIR, "system_settings.json");
+
+/**
+ * Backend-controlled Area Allocation Setting
+ * Default: false (All approved partners can view all eligible tasks across all areas)
+ */
+function getAreaAllocationSetting() {
+    try {
+        if (fs.existsSync(SETTINGS_FILE)) {
+            const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+            return Boolean(data.AREA_ALLOCATION_ENABLED);
+        }
+    } catch {}
+    return false;
+}
+
+function setAreaAllocationSetting(enabled) {
+    try {
+        let data = {};
+        if (fs.existsSync(SETTINGS_FILE)) {
+            data = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+        }
+        data.AREA_ALLOCATION_ENABLED = Boolean(enabled);
+        data.updated_at = new Date().toISOString();
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(data, null, 2), "utf-8");
+        return true;
+    } catch (e) {
+        console.warn("[SETTINGS SAVE WARN]:", e.message);
+        return false;
+    }
+}
 
 function loadSubDeliveriesFromDisk() {
     try {
@@ -228,17 +262,24 @@ ensureSeedSubscriptionDeliveries();
 
 /**
  * Get daily subscription deliveries for a given date
+ * Respects AREA_ALLOCATION_ENABLED business rule:
+ * - If false: ALL approved & active partners view ALL eligible subscription tasks across all areas
+ * - If true: partners only view subscription deliveries matching their assigned area
  */
-async function getSubscriptionDeliveries(dateStr, partnerId = null) {
+async function getSubscriptionDeliveries(dateStr, partner = null) {
     const targetDate = formatDateKey(dateStr);
+    const partnerId = typeof partner === "object" && partner ? partner.partner_id : (typeof partner === "string" ? partner : null);
+    const partnerArea = (typeof partner === "object" && partner && partner.assigned_area) ? partner.assigned_area.trim().toLowerCase() : "";
+    const areaAllocationEnabled = getAreaAllocationSetting();
 
     try {
         let query = "SELECT * FROM daily_subscription_deliveries WHERE delivery_date = $1";
         const params = [targetDate];
 
-        if (partnerId) {
-            query += " AND (partner_id = $2 OR partner_id IS NULL)";
-            params.push(partnerId);
+        // Only filter by area when area allocation is explicitly enabled
+        if (areaAllocationEnabled && partnerArea) {
+            query += " AND (LOWER(address) LIKE $2 OR LOWER(delivery_slot) LIKE $2)";
+            params.push(`%${partnerArea}%`);
         }
         query += " ORDER BY status ASC, id ASC";
 
@@ -248,7 +289,9 @@ async function getSubscriptionDeliveries(dateStr, partnerId = null) {
             const total = deliveries.length;
             const delivered = deliveries.filter(d => d.status === "delivered").length;
             const pending = deliveries.filter(d => d.status === "pending").length;
-            return { total, delivered, pending, deliveries };
+            const outForDelivery = deliveries.filter(d => d.status === "out_for_delivery").length;
+            const failed = deliveries.filter(d => d.status === "failed").length;
+            return { total, delivered, pending, outForDelivery, failed, deliveries };
         }
     } catch {
         // Fallback to disk store
@@ -257,8 +300,16 @@ async function getSubscriptionDeliveries(dateStr, partnerId = null) {
     // Fallback from disk store
     let deliveries = MOCK_SUB_DELIVERIES.filter(d => {
         const matchesDate = d.delivery_date === targetDate;
-        const matchesPartner = !partnerId || d.partner_id === partnerId;
-        return matchesDate && matchesPartner;
+        if (!matchesDate) return false;
+
+        // When area allocation is enabled, enforce area restriction
+        if (areaAllocationEnabled && partnerArea) {
+            const addr = (d.address || "").toLowerCase();
+            return addr.includes(partnerArea);
+        }
+
+        // When area allocation is disabled: all eligible tasks visible!
+        return true;
     });
 
     // If no deliveries found for targetDate, ensure tasks exist for active subscriptions on this date
@@ -279,30 +330,100 @@ async function getSubscriptionDeliveries(dateStr, partnerId = null) {
         }));
         MOCK_SUB_DELIVERIES.push(...cloned);
         saveSubDeliveriesToDisk(MOCK_SUB_DELIVERIES);
-        deliveries = cloned.filter(d => !partnerId || d.partner_id === partnerId);
+        deliveries = cloned.filter(d => {
+            if (areaAllocationEnabled && partnerArea) {
+                return (d.address || "").toLowerCase().includes(partnerArea);
+            }
+            return true;
+        });
     }
 
     const total = deliveries.length;
     const delivered = deliveries.filter(d => d.status === "delivered").length;
     const pending = deliveries.filter(d => d.status === "pending").length;
+    const outForDelivery = deliveries.filter(d => d.status === "out_for_delivery").length;
+    const failed = deliveries.filter(d => d.status === "failed").length;
 
-    return { total, delivered, pending, deliveries };
+    return { total, delivered, pending, outForDelivery, failed, deliveries };
 }
 
 /**
- * Mark a subscription delivery status
+ * Atomic Claiming of Subscription Delivery Task
+ * Prevents race condition / duplicate claiming by multiple partners
  */
-async function updateSubscriptionDeliveryStatus(deliveryId, status, notes = "", failedReason = null) {
+async function claimSubscriptionDelivery(deliveryId, partnerId, partnerName = "Delivery Partner") {
+    const nowIso = new Date().toISOString();
+
+    try {
+        // Atomic conditional update in database
+        const res = await pool.query(`
+            UPDATE daily_subscription_deliveries
+            SET partner_id = $1, status = 'out_for_delivery', notes = $2
+            WHERE (daily_id = $3 OR id::text = $3 OR subscription_id = $3)
+              AND (partner_id IS NULL OR partner_id = '' OR partner_id = $1)
+              AND status != 'delivered'
+            RETURNING *
+        `, [partnerId, `Claimed by ${partnerName} (${partnerId}) at ${nowIso}`, deliveryId.toString()]);
+
+        if (res.rows.length > 0) {
+            return { success: true, delivery: res.rows[0] };
+        }
+    } catch {
+        // Disk fallback
+    }
+
+    // Disk fallback atomic check
+    const item = MOCK_SUB_DELIVERIES.find(d =>
+        d.daily_id === deliveryId ||
+        d.id?.toString() === deliveryId?.toString() ||
+        d.subscription_id === deliveryId
+    );
+
+    if (!item) {
+        return { success: false, message: `Subscription delivery record '${deliveryId}' not found.` };
+    }
+
+    if (item.status === "delivered") {
+        return { success: false, conflict: true, message: "This delivery task has already been completed." };
+    }
+
+    if (item.claimed_by && item.claimed_by !== partnerId && item.status === "out_for_delivery") {
+        return {
+            success: false,
+            conflict: true,
+            message: `This delivery task has already been claimed by another partner (${item.claimed_by_name || item.claimed_by}).`
+        };
+    }
+
+    // Atomic claim successful
+    item.partner_id = partnerId;
+    item.claimed_by = partnerId;
+    item.claimed_by_name = partnerName;
+    item.status = "out_for_delivery";
+    item.claimed_at = nowIso;
+    item.notes = `Claimed by ${partnerName} (${partnerId})`;
+
+    saveSubDeliveriesToDisk(MOCK_SUB_DELIVERIES);
+    return { success: true, delivery: item };
+}
+
+/**
+ * Mark a subscription delivery status (delivered / failed)
+ * Validates claiming ownership
+ */
+async function updateSubscriptionDeliveryStatus(deliveryId, status, notes = "", failedReason = null, partnerId = null) {
     const isDelivered = status === "delivered";
     const nowIso = new Date().toISOString();
 
     try {
         const res = await pool.query(`
             UPDATE daily_subscription_deliveries
-            SET status = $1, delivered_at = $2, notes = $3, failed_reason = $4
-            WHERE daily_id = $5 OR id::text = $5 OR subscription_id = $5
+            SET status = $1, delivered_at = $2, notes = $3, failed_reason = $4,
+                partner_id = COALESCE(partner_id, $5)
+            WHERE (daily_id = $6 OR id::text = $6 OR subscription_id = $6)
+              AND (partner_id IS NULL OR partner_id = $5 OR $5 IS NULL)
             RETURNING *
-        `, [status, isDelivered ? new Date() : null, notes, failedReason, deliveryId.toString()]);
+        `, [status, isDelivered ? new Date() : null, notes, failedReason, partnerId, deliveryId.toString()]);
 
         if (res.rows.length > 0) {
             return { success: true, delivery: res.rows[0] };
@@ -322,10 +443,19 @@ async function updateSubscriptionDeliveryStatus(deliveryId, status, notes = "", 
         return { success: false, message: `Subscription delivery record '${deliveryId}' not found.` };
     }
 
+    if (partnerId && item.claimed_by && item.claimed_by !== partnerId) {
+        return {
+            success: false,
+            conflict: true,
+            message: "You are not authorized to update this delivery task as it was claimed by another partner."
+        };
+    }
+
     item.status = status;
     item.delivered_at = isDelivered ? nowIso : null;
     item.notes = notes || item.notes;
     item.failed_reason = failedReason || item.failed_reason;
+    if (partnerId) item.partner_id = partnerId;
 
     saveSubDeliveriesToDisk(MOCK_SUB_DELIVERIES);
     return { success: true, delivery: item };
@@ -334,7 +464,10 @@ async function updateSubscriptionDeliveryStatus(deliveryId, status, notes = "", 
 module.exports = {
     getSubscriptionDeliveries,
     updateSubscriptionDeliveryStatus,
+    claimSubscriptionDelivery,
     ensureSeedSubscriptionDeliveries,
+    getAreaAllocationSetting,
+    setAreaAllocationSetting,
     formatDateKey,
     formatReadableDate
 };

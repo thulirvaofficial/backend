@@ -1,405 +1,11 @@
 [
   {
     "id": 1,
-    "area_name": "Oragadam",
-    "city": "Chennai / Kanchipuram",
-    "state": "Tamil Nadu",
-    "pincode": "603109",
-    "boundary_type": "polygon",
-    "latitude": 12.8342,
-    "longitude": 79.9575,
-    "radius_meters": 5000,
-    "is_serviceable": true,
-    "is_active": true,
-    "delivery_charge": 30,
-    "minimum_order_amount": 199,
-    "estimated_delivery_time": "30-45 minutes",
-    "boundary_coordinates": [
-      {
-        "lat": 12.8692,
-        "lng": 79.9575
-      },
-      {
-        "lat": 12.8517,
-        "lng": 79.98781
-      },
-      {
-        "lat": 12.8167,
-        "lng": 79.98781
-      },
-      {
-        "lat": 12.7992,
-        "lng": 79.9575
-      },
-      {
-        "lat": 12.8167,
-        "lng": 79.92719
-      },
-      {
-        "lat": 12.8517,
-        "lng": 79.92719
-      }
-    ],
-    "created_at": "2026-11-12T06:25:07.494Z",
-    "updated_at": "2026-11-12T06:25:07.504Z"
-  },
-  {
-    "id": 2,
-    "area_name": "Padapai",
-    "city": "Chennai / Kanchipuram",
-    "state": "Tamil Nadu",
-    "pincode": "601301",
-    "boundary_type": "polygon",
-    "latitude": 12.8988,
-    "longitude": 80.0152,
-    "radius_meters": 5000,
-    "is_serviceable": true,
-    "is_active": true,
-    "delivery_charge": 30,
-    "minimum_order_amount": 199,
-    "estimated_delivery_time": "35-50 minutes",
-    "boundary_coordinates": [
-      {
-        "lat": 12.9338,
-        "lng": 80.0152
-      },
-      {
-        "lat": 12.9163,
-        "lng": 80.04551
-      },
-      {
-        "lat": 12.8813,
-        "lng": 80.04551
-      },
-      {
-        "lat": 12.8638,
-        "lng": 80.0152
-      },
-      {
-        "lat": 12.8813,
-        "lng": 79.98489
-      },
-      {
-        "lat": 12.9163,
-        "lng": 79.98489
-      }
-    ],
-    "created_at": "2026-11-12T06:25:07.504Z",
-    "updated_at": "2026-11-12T06:25:07.504Z"
-  },
-  {
-    "id": 3,
-    "area_name": "Sriperumbudur",
-    "city": "Kanchipuram",
-    "state": "Tamil Nadu",
-    "pincode": "602105",
-    "boundary_type": "polygon",
-    "latitude": 12.9691,
-    "longitude": 79.9482,
-    "radius_meters": 6000,
-    "is_serviceable": true,
-    "is_active": true,
-    "delivery_charge": 30,
-    "minimum_order_amount": 199,
-    "estimated_delivery_time": "30-45 minutes",
-    "boundary_coordinates": [
-      {
-        "lat": 13.0041,
-        "lng": 79.9482
-      },
-      {
-        "lat": 12.9866,
-        "lng": 79.97851
-      },
-      {
-        "lat": 12.9516,
-        "lng": 79.97851
-      },
-      {
-        "lat": 12.9341,
-        "lng": 79.9482
-      },
-      {
-        "lat": 12.9516,
-        "lng": 79.91789
-      },
-      {
-        "lat": 12.9866,
-        "lng": 79.91789
-      }
-    ],
-    "created_at": "2026-11-12T06:25:07.504Z",
-    "updated_at": "2026-11-12T06:25:07.504Z"
-  },
-  {
-    "id": 4,
-    "area_name": "Valasaravakkam",
-    "city": "Chennai",
-    "state": "Tamil Nadu",
-    "pincode": "600087",
-    "boundary_type": "polygon",
-    "latitude": 13.0403,
-    "longitude": 80.1723,
-    "radius_meters": 4000,
-    "is_serviceable": true,
-    "is_active": true,
-    "delivery_charge": 0,
-    "minimum_order_amount": 149,
-    "estimated_delivery_time": "25-35 minutes",
-    "boundary_coordinates": [
-      {
-        "lat": 13.0753,
-        "lng": 80.1723
-      },
-      {
-        "lat": 13.0578,
-        "lng": 80.20261
-      },
-      {
-        "lat": 13.0228,
-        "lng": 80.20261
-      },
-      {
-        "lat": 13.0053,
-        "lng": 80.1723
-      },
-      {
-        "lat": 13.0228,
-        "lng": 80.14199
-      },
-      {
-        "lat": 13.0578,
-        "lng": 80.14199
-      }
-    ],
-    "created_at": "2026-11-12T06:25:07.504Z",
-    "updated_at": "2026-11-12T06:25:07.504Z"
-  },
-  {
-    "id": 5,
-    "area_name": "Porur",
-    "city": "Chennai",
-    "state": "Tamil Nadu",
-    "pincode": "600116",
-    "boundary_type": "polygon",
-    "latitude": 13.0382,
-    "longitude": 80.1565,
-    "radius_meters": 4500,
-    "is_serviceable": true,
-    "is_active": true,
-    "delivery_charge": 0,
-    "minimum_order_amount": 149,
-    "estimated_delivery_time": "25-35 minutes",
-    "boundary_coordinates": [
-      {
-        "lat": 13.0732,
-        "lng": 80.1565
-      },
-      {
-        "lat": 13.0557,
-        "lng": 80.18681
-      },
-      {
-        "lat": 13.0207,
-        "lng": 80.18681
-      },
-      {
-        "lat": 13.0032,
-        "lng": 80.1565
-      },
-      {
-        "lat": 13.0207,
-        "lng": 80.12619
-      },
-      {
-        "lat": 13.0557,
-        "lng": 80.12619
-      }
-    ],
-    "created_at": "2026-11-12T06:25:07.504Z",
-    "updated_at": "2026-11-12T06:25:07.504Z"
-  },
-  {
-    "id": 6,
-    "area_name": "Virugambakkam",
-    "city": "Chennai",
-    "state": "Tamil Nadu",
-    "pincode": "600092",
-    "boundary_type": "polygon",
-    "latitude": 13.0537,
-    "longitude": 80.1916,
-    "radius_meters": 4000,
-    "is_serviceable": true,
-    "is_active": true,
-    "delivery_charge": 0,
-    "minimum_order_amount": 149,
-    "estimated_delivery_time": "20-30 minutes",
-    "boundary_coordinates": [
-      {
-        "lat": 13.0887,
-        "lng": 80.1916
-      },
-      {
-        "lat": 13.0712,
-        "lng": 80.22191
-      },
-      {
-        "lat": 13.0362,
-        "lng": 80.22191
-      },
-      {
-        "lat": 13.0187,
-        "lng": 80.1916
-      },
-      {
-        "lat": 13.0362,
-        "lng": 80.16129
-      },
-      {
-        "lat": 13.0712,
-        "lng": 80.16129
-      }
-    ],
-    "created_at": "2026-11-12T06:25:07.504Z",
-    "updated_at": "2026-11-12T06:25:07.504Z"
-  },
-  {
-    "id": 7,
-    "area_name": "Vadapalani",
-    "city": "Chennai",
-    "state": "Tamil Nadu",
-    "pincode": "600026",
-    "boundary_type": "polygon",
-    "latitude": 13.05,
-    "longitude": 80.2121,
-    "radius_meters": 3500,
-    "is_serviceable": true,
-    "is_active": true,
-    "delivery_charge": 0,
-    "minimum_order_amount": 149,
-    "estimated_delivery_time": "20-30 minutes",
-    "boundary_coordinates": [
-      {
-        "lat": 13.085,
-        "lng": 80.2121
-      },
-      {
-        "lat": 13.0675,
-        "lng": 80.24241
-      },
-      {
-        "lat": 13.0325,
-        "lng": 80.24241
-      },
-      {
-        "lat": 13.015,
-        "lng": 80.2121
-      },
-      {
-        "lat": 13.0325,
-        "lng": 80.18179
-      },
-      {
-        "lat": 13.0675,
-        "lng": 80.18179
-      }
-    ],
-    "created_at": "2026-11-12T06:25:07.504Z",
-    "updated_at": "2026-11-12T06:25:07.504Z"
-  },
-  {
-    "id": 8,
-    "area_name": "Koyambedu",
-    "city": "Chennai",
-    "state": "Tamil Nadu",
-    "pincode": "600107",
-    "boundary_type": "polygon",
-    "latitude": 13.0694,
-    "longitude": 80.1948,
-    "radius_meters": 4000,
-    "is_serviceable": true,
-    "is_active": true,
-    "delivery_charge": 0,
-    "minimum_order_amount": 149,
-    "estimated_delivery_time": "25-35 minutes",
-    "boundary_coordinates": [
-      {
-        "lat": 13.1044,
-        "lng": 80.1948
-      },
-      {
-        "lat": 13.0869,
-        "lng": 80.22511
-      },
-      {
-        "lat": 13.0519,
-        "lng": 80.22511
-      },
-      {
-        "lat": 13.0344,
-        "lng": 80.1948
-      },
-      {
-        "lat": 13.0519,
-        "lng": 80.16449
-      },
-      {
-        "lat": 13.0869,
-        "lng": 80.16449
-      }
-    ],
-    "created_at": "2026-11-12T06:25:07.504Z",
-    "updated_at": "2026-11-12T06:25:07.504Z"
-  },
-  {
-    "id": 9,
-    "area_name": "KK Nagar",
-    "city": "Chennai",
-    "state": "Tamil Nadu",
-    "pincode": "600078",
-    "boundary_type": "polygon",
-    "latitude": 13.041,
-    "longitude": 80.1994,
-    "radius_meters": 3500,
-    "is_serviceable": true,
-    "is_active": true,
-    "delivery_charge": 0,
-    "minimum_order_amount": 149,
-    "estimated_delivery_time": "20-30 minutes",
-    "boundary_coordinates": [
-      {
-        "lat": 13.076,
-        "lng": 80.1994
-      },
-      {
-        "lat": 13.0585,
-        "lng": 80.22971
-      },
-      {
-        "lat": 13.0235,
-        "lng": 80.22971
-      },
-      {
-        "lat": 13.006,
-        "lng": 80.1994
-      },
-      {
-        "lat": 13.0235,
-        "lng": 80.16909
-      },
-      {
-        "lat": 13.0585,
-        "lng": 80.16909
-      }
-    ],
-    "created_at": "2026-11-12T06:25:07.504Z",
-    "updated_at": "2026-11-12T06:25:07.504Z"
-  },
-  {
-    "id": 10,
+    "location_id": 1,
     "area_name": "Alapakkam",
     "city": "Chennai",
     "state": "Tamil Nadu",
+    "country": "India",
     "pincode": "600116",
     "boundary_type": "polygon",
     "latitude": 13.0475,
@@ -407,9 +13,12 @@
     "radius_meters": 3500,
     "is_serviceable": true,
     "is_active": true,
+    "coverage_status": "active",
     "delivery_charge": 0,
     "minimum_order_amount": 149,
     "estimated_delivery_time": "25-35 minutes",
+    "delivery_time": "25-35 minutes",
+    "delivery_type": "doorstep",
     "boundary_coordinates": [
       {
         "lat": 13.0825,
@@ -436,14 +45,192 @@
         "lng": 80.12979
       }
     ],
-    "created_at": "2026-11-12T06:25:07.504Z",
-    "updated_at": "2026-11-12T06:25:07.504Z"
+    "boundary_polygon": [
+      {
+        "lat": 13.0825,
+        "lng": 80.1601
+      },
+      {
+        "lat": 13.065,
+        "lng": 80.19041
+      },
+      {
+        "lat": 13.03,
+        "lng": 80.19041
+      },
+      {
+        "lat": 13.0125,
+        "lng": 80.1601
+      },
+      {
+        "lat": 13.03,
+        "lng": 80.12979
+      },
+      {
+        "lat": 13.065,
+        "lng": 80.12979
+      }
+    ],
+    "created_at": "2026-11-12T10:10:55.740Z",
+    "updated_at": "2026-11-12T10:10:55.750Z"
   },
   {
-    "id": 11,
+    "id": 2,
+    "location_id": 2,
+    "area_name": "KK Nagar",
+    "city": "Chennai",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "pincode": "600078",
+    "boundary_type": "polygon",
+    "latitude": 13.041,
+    "longitude": 80.1994,
+    "radius_meters": 3500,
+    "is_serviceable": true,
+    "is_active": true,
+    "coverage_status": "active",
+    "delivery_charge": 0,
+    "minimum_order_amount": 149,
+    "estimated_delivery_time": "20-30 minutes",
+    "delivery_time": "20-30 minutes",
+    "delivery_type": "doorstep",
+    "boundary_coordinates": [
+      {
+        "lat": 13.076,
+        "lng": 80.1994
+      },
+      {
+        "lat": 13.0585,
+        "lng": 80.22971
+      },
+      {
+        "lat": 13.0235,
+        "lng": 80.22971
+      },
+      {
+        "lat": 13.006,
+        "lng": 80.1994
+      },
+      {
+        "lat": 13.0235,
+        "lng": 80.16909
+      },
+      {
+        "lat": 13.0585,
+        "lng": 80.16909
+      }
+    ],
+    "boundary_polygon": [
+      {
+        "lat": 13.076,
+        "lng": 80.1994
+      },
+      {
+        "lat": 13.0585,
+        "lng": 80.22971
+      },
+      {
+        "lat": 13.0235,
+        "lng": 80.22971
+      },
+      {
+        "lat": 13.006,
+        "lng": 80.1994
+      },
+      {
+        "lat": 13.0235,
+        "lng": 80.16909
+      },
+      {
+        "lat": 13.0585,
+        "lng": 80.16909
+      }
+    ],
+    "created_at": "2026-11-12T10:10:55.750Z",
+    "updated_at": "2026-11-12T10:10:55.750Z"
+  },
+  {
+    "id": 3,
+    "location_id": 3,
+    "area_name": "Koyambedu",
+    "city": "Chennai",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "pincode": "600107",
+    "boundary_type": "polygon",
+    "latitude": 13.0694,
+    "longitude": 80.1948,
+    "radius_meters": 4000,
+    "is_serviceable": true,
+    "is_active": true,
+    "coverage_status": "active",
+    "delivery_charge": 0,
+    "minimum_order_amount": 149,
+    "estimated_delivery_time": "25-35 minutes",
+    "delivery_time": "25-35 minutes",
+    "delivery_type": "doorstep",
+    "boundary_coordinates": [
+      {
+        "lat": 13.1044,
+        "lng": 80.1948
+      },
+      {
+        "lat": 13.0869,
+        "lng": 80.22511
+      },
+      {
+        "lat": 13.0519,
+        "lng": 80.22511
+      },
+      {
+        "lat": 13.0344,
+        "lng": 80.1948
+      },
+      {
+        "lat": 13.0519,
+        "lng": 80.16449
+      },
+      {
+        "lat": 13.0869,
+        "lng": 80.16449
+      }
+    ],
+    "boundary_polygon": [
+      {
+        "lat": 13.1044,
+        "lng": 80.1948
+      },
+      {
+        "lat": 13.0869,
+        "lng": 80.22511
+      },
+      {
+        "lat": 13.0519,
+        "lng": 80.22511
+      },
+      {
+        "lat": 13.0344,
+        "lng": 80.1948
+      },
+      {
+        "lat": 13.0519,
+        "lng": 80.16449
+      },
+      {
+        "lat": 13.0869,
+        "lng": 80.16449
+      }
+    ],
+    "created_at": "2026-11-12T10:10:55.750Z",
+    "updated_at": "2026-11-12T10:10:55.750Z"
+  },
+  {
+    "id": 4,
+    "location_id": 4,
     "area_name": "Maduravoyal",
     "city": "Chennai",
     "state": "Tamil Nadu",
+    "country": "India",
     "pincode": "600095",
     "boundary_type": "polygon",
     "latitude": 13.0637,
@@ -451,9 +238,12 @@
     "radius_meters": 4000,
     "is_serviceable": true,
     "is_active": true,
+    "coverage_status": "active",
     "delivery_charge": 0,
     "minimum_order_amount": 149,
     "estimated_delivery_time": "25-35 minutes",
+    "delivery_time": "25-35 minutes",
+    "delivery_type": "doorstep",
     "boundary_coordinates": [
       {
         "lat": 13.0987,
@@ -480,24 +270,580 @@
         "lng": 80.13579
       }
     ],
-    "created_at": "2026-11-12T06:25:07.504Z",
-    "updated_at": "2026-11-12T06:25:07.504Z"
+    "boundary_polygon": [
+      {
+        "lat": 13.0987,
+        "lng": 80.1661
+      },
+      {
+        "lat": 13.0812,
+        "lng": 80.19641
+      },
+      {
+        "lat": 13.0462,
+        "lng": 80.19641
+      },
+      {
+        "lat": 13.0287,
+        "lng": 80.1661
+      },
+      {
+        "lat": 13.0462,
+        "lng": 80.13579
+      },
+      {
+        "lat": 13.0812,
+        "lng": 80.13579
+      }
+    ],
+    "created_at": "2026-11-12T10:10:55.750Z",
+    "updated_at": "2026-11-12T10:10:55.750Z"
+  },
+  {
+    "id": 5,
+    "location_id": 5,
+    "area_name": "Oragadam",
+    "city": "Chennai / Kanchipuram",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "pincode": "603109",
+    "boundary_type": "polygon",
+    "latitude": 12.8342,
+    "longitude": 79.9575,
+    "radius_meters": 5000,
+    "is_serviceable": true,
+    "is_active": true,
+    "coverage_status": "active",
+    "delivery_charge": 30,
+    "minimum_order_amount": 199,
+    "estimated_delivery_time": "30-45 minutes",
+    "delivery_time": "30-45 minutes",
+    "delivery_type": "doorstep",
+    "boundary_coordinates": [
+      {
+        "lat": 12.8692,
+        "lng": 79.9575
+      },
+      {
+        "lat": 12.8517,
+        "lng": 79.98781
+      },
+      {
+        "lat": 12.8167,
+        "lng": 79.98781
+      },
+      {
+        "lat": 12.7992,
+        "lng": 79.9575
+      },
+      {
+        "lat": 12.8167,
+        "lng": 79.92719
+      },
+      {
+        "lat": 12.8517,
+        "lng": 79.92719
+      }
+    ],
+    "boundary_polygon": [
+      {
+        "lat": 12.8692,
+        "lng": 79.9575
+      },
+      {
+        "lat": 12.8517,
+        "lng": 79.98781
+      },
+      {
+        "lat": 12.8167,
+        "lng": 79.98781
+      },
+      {
+        "lat": 12.7992,
+        "lng": 79.9575
+      },
+      {
+        "lat": 12.8167,
+        "lng": 79.92719
+      },
+      {
+        "lat": 12.8517,
+        "lng": 79.92719
+      }
+    ],
+    "created_at": "2026-11-12T10:10:55.750Z",
+    "updated_at": "2026-11-12T10:10:55.750Z"
+  },
+  {
+    "id": 6,
+    "location_id": 6,
+    "area_name": "Padapai",
+    "city": "Chennai / Kanchipuram",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "pincode": "601301",
+    "boundary_type": "polygon",
+    "latitude": 12.8988,
+    "longitude": 80.0152,
+    "radius_meters": 5000,
+    "is_serviceable": true,
+    "is_active": true,
+    "coverage_status": "active",
+    "delivery_charge": 30,
+    "minimum_order_amount": 199,
+    "estimated_delivery_time": "35-50 minutes",
+    "delivery_time": "35-50 minutes",
+    "delivery_type": "doorstep",
+    "boundary_coordinates": [
+      {
+        "lat": 12.9338,
+        "lng": 80.0152
+      },
+      {
+        "lat": 12.9163,
+        "lng": 80.04551
+      },
+      {
+        "lat": 12.8813,
+        "lng": 80.04551
+      },
+      {
+        "lat": 12.8638,
+        "lng": 80.0152
+      },
+      {
+        "lat": 12.8813,
+        "lng": 79.98489
+      },
+      {
+        "lat": 12.9163,
+        "lng": 79.98489
+      }
+    ],
+    "boundary_polygon": [
+      {
+        "lat": 12.9338,
+        "lng": 80.0152
+      },
+      {
+        "lat": 12.9163,
+        "lng": 80.04551
+      },
+      {
+        "lat": 12.8813,
+        "lng": 80.04551
+      },
+      {
+        "lat": 12.8638,
+        "lng": 80.0152
+      },
+      {
+        "lat": 12.8813,
+        "lng": 79.98489
+      },
+      {
+        "lat": 12.9163,
+        "lng": 79.98489
+      }
+    ],
+    "created_at": "2026-11-12T10:10:55.750Z",
+    "updated_at": "2026-11-12T10:10:55.750Z"
+  },
+  {
+    "id": 7,
+    "location_id": 7,
+    "area_name": "Porur",
+    "city": "Chennai",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "pincode": "600116",
+    "boundary_type": "polygon",
+    "latitude": 13.0382,
+    "longitude": 80.1565,
+    "radius_meters": 4500,
+    "is_serviceable": true,
+    "is_active": true,
+    "coverage_status": "active",
+    "delivery_charge": 0,
+    "minimum_order_amount": 149,
+    "estimated_delivery_time": "25-35 minutes",
+    "delivery_time": "25-35 minutes",
+    "delivery_type": "doorstep",
+    "boundary_coordinates": [
+      {
+        "lat": 13.0732,
+        "lng": 80.1565
+      },
+      {
+        "lat": 13.0557,
+        "lng": 80.18681
+      },
+      {
+        "lat": 13.0207,
+        "lng": 80.18681
+      },
+      {
+        "lat": 13.0032,
+        "lng": 80.1565
+      },
+      {
+        "lat": 13.0207,
+        "lng": 80.12619
+      },
+      {
+        "lat": 13.0557,
+        "lng": 80.12619
+      }
+    ],
+    "boundary_polygon": [
+      {
+        "lat": 13.0732,
+        "lng": 80.1565
+      },
+      {
+        "lat": 13.0557,
+        "lng": 80.18681
+      },
+      {
+        "lat": 13.0207,
+        "lng": 80.18681
+      },
+      {
+        "lat": 13.0032,
+        "lng": 80.1565
+      },
+      {
+        "lat": 13.0207,
+        "lng": 80.12619
+      },
+      {
+        "lat": 13.0557,
+        "lng": 80.12619
+      }
+    ],
+    "created_at": "2026-11-12T10:10:55.750Z",
+    "updated_at": "2026-11-12T10:10:55.750Z"
+  },
+  {
+    "id": 8,
+    "location_id": 8,
+    "area_name": "Sriperumbudur",
+    "city": "Kanchipuram",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "pincode": "602105",
+    "boundary_type": "polygon",
+    "latitude": 12.9691,
+    "longitude": 79.9482,
+    "radius_meters": 6000,
+    "is_serviceable": true,
+    "is_active": true,
+    "coverage_status": "active",
+    "delivery_charge": 30,
+    "minimum_order_amount": 199,
+    "estimated_delivery_time": "30-45 minutes",
+    "delivery_time": "30-45 minutes",
+    "delivery_type": "doorstep",
+    "boundary_coordinates": [
+      {
+        "lat": 13.0041,
+        "lng": 79.9482
+      },
+      {
+        "lat": 12.9866,
+        "lng": 79.97851
+      },
+      {
+        "lat": 12.9516,
+        "lng": 79.97851
+      },
+      {
+        "lat": 12.9341,
+        "lng": 79.9482
+      },
+      {
+        "lat": 12.9516,
+        "lng": 79.91789
+      },
+      {
+        "lat": 12.9866,
+        "lng": 79.91789
+      }
+    ],
+    "boundary_polygon": [
+      {
+        "lat": 13.0041,
+        "lng": 79.9482
+      },
+      {
+        "lat": 12.9866,
+        "lng": 79.97851
+      },
+      {
+        "lat": 12.9516,
+        "lng": 79.97851
+      },
+      {
+        "lat": 12.9341,
+        "lng": 79.9482
+      },
+      {
+        "lat": 12.9516,
+        "lng": 79.91789
+      },
+      {
+        "lat": 12.9866,
+        "lng": 79.91789
+      }
+    ],
+    "created_at": "2026-11-12T10:10:55.750Z",
+    "updated_at": "2026-11-12T10:10:55.750Z"
+  },
+  {
+    "id": 9,
+    "location_id": 9,
+    "area_name": "Vadapalani",
+    "city": "Chennai",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "pincode": "600026",
+    "boundary_type": "polygon",
+    "latitude": 13.05,
+    "longitude": 80.2121,
+    "radius_meters": 3500,
+    "is_serviceable": true,
+    "is_active": true,
+    "coverage_status": "active",
+    "delivery_charge": 0,
+    "minimum_order_amount": 149,
+    "estimated_delivery_time": "20-30 minutes",
+    "delivery_time": "20-30 minutes",
+    "delivery_type": "doorstep",
+    "boundary_coordinates": [
+      {
+        "lat": 13.085,
+        "lng": 80.2121
+      },
+      {
+        "lat": 13.0675,
+        "lng": 80.24241
+      },
+      {
+        "lat": 13.0325,
+        "lng": 80.24241
+      },
+      {
+        "lat": 13.015,
+        "lng": 80.2121
+      },
+      {
+        "lat": 13.0325,
+        "lng": 80.18179
+      },
+      {
+        "lat": 13.0675,
+        "lng": 80.18179
+      }
+    ],
+    "boundary_polygon": [
+      {
+        "lat": 13.085,
+        "lng": 80.2121
+      },
+      {
+        "lat": 13.0675,
+        "lng": 80.24241
+      },
+      {
+        "lat": 13.0325,
+        "lng": 80.24241
+      },
+      {
+        "lat": 13.015,
+        "lng": 80.2121
+      },
+      {
+        "lat": 13.0325,
+        "lng": 80.18179
+      },
+      {
+        "lat": 13.0675,
+        "lng": 80.18179
+      }
+    ],
+    "created_at": "2026-11-12T10:10:55.750Z",
+    "updated_at": "2026-11-12T10:10:55.750Z"
+  },
+  {
+    "id": 10,
+    "location_id": 10,
+    "area_name": "Valasaravakkam",
+    "city": "Chennai",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "pincode": "600087",
+    "boundary_type": "polygon",
+    "latitude": 13.0403,
+    "longitude": 80.1723,
+    "radius_meters": 4000,
+    "is_serviceable": true,
+    "is_active": true,
+    "coverage_status": "active",
+    "delivery_charge": 0,
+    "minimum_order_amount": 149,
+    "estimated_delivery_time": "25-35 minutes",
+    "delivery_time": "25-35 minutes",
+    "delivery_type": "doorstep",
+    "boundary_coordinates": [
+      {
+        "lat": 13.0753,
+        "lng": 80.1723
+      },
+      {
+        "lat": 13.0578,
+        "lng": 80.20261
+      },
+      {
+        "lat": 13.0228,
+        "lng": 80.20261
+      },
+      {
+        "lat": 13.0053,
+        "lng": 80.1723
+      },
+      {
+        "lat": 13.0228,
+        "lng": 80.14199
+      },
+      {
+        "lat": 13.0578,
+        "lng": 80.14199
+      }
+    ],
+    "boundary_polygon": [
+      {
+        "lat": 13.0753,
+        "lng": 80.1723
+      },
+      {
+        "lat": 13.0578,
+        "lng": 80.20261
+      },
+      {
+        "lat": 13.0228,
+        "lng": 80.20261
+      },
+      {
+        "lat": 13.0053,
+        "lng": 80.1723
+      },
+      {
+        "lat": 13.0228,
+        "lng": 80.14199
+      },
+      {
+        "lat": 13.0578,
+        "lng": 80.14199
+      }
+    ],
+    "created_at": "2026-11-12T10:10:55.750Z",
+    "updated_at": "2026-11-12T10:10:55.750Z"
+  },
+  {
+    "id": 11,
+    "location_id": 11,
+    "area_name": "Virugambakkam",
+    "city": "Chennai",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "pincode": "600092",
+    "boundary_type": "polygon",
+    "latitude": 13.0537,
+    "longitude": 80.1916,
+    "radius_meters": 4000,
+    "is_serviceable": true,
+    "is_active": true,
+    "coverage_status": "active",
+    "delivery_charge": 0,
+    "minimum_order_amount": 149,
+    "estimated_delivery_time": "20-30 minutes",
+    "delivery_time": "20-30 minutes",
+    "delivery_type": "doorstep",
+    "boundary_coordinates": [
+      {
+        "lat": 13.0887,
+        "lng": 80.1916
+      },
+      {
+        "lat": 13.0712,
+        "lng": 80.22191
+      },
+      {
+        "lat": 13.0362,
+        "lng": 80.22191
+      },
+      {
+        "lat": 13.0187,
+        "lng": 80.1916
+      },
+      {
+        "lat": 13.0362,
+        "lng": 80.16129
+      },
+      {
+        "lat": 13.0712,
+        "lng": 80.16129
+      }
+    ],
+    "boundary_polygon": [
+      {
+        "lat": 13.0887,
+        "lng": 80.1916
+      },
+      {
+        "lat": 13.0712,
+        "lng": 80.22191
+      },
+      {
+        "lat": 13.0362,
+        "lng": 80.22191
+      },
+      {
+        "lat": 13.0187,
+        "lng": 80.1916
+      },
+      {
+        "lat": 13.0362,
+        "lng": 80.16129
+      },
+      {
+        "lat": 13.0712,
+        "lng": 80.16129
+      }
+    ],
+    "created_at": "2026-11-12T10:10:55.750Z",
+    "updated_at": "2026-11-12T10:10:55.750Z"
   },
   {
     "id": 12,
+    "location_id": 12,
     "area_name": "Anna Nagar",
     "city": "Chennai",
     "state": "Tamil Nadu",
-    "pincode": "600040, 600101, 600102",
+    "country": "India",
+    "pincode": "600040",
     "boundary_type": "polygon",
     "latitude": 13.085,
     "longitude": 80.21,
     "radius_meters": 4500,
-    "is_serviceable": true,
-    "is_active": true,
+    "is_serviceable": false,
+    "is_active": false,
+    "coverage_status": "coming_soon",
     "delivery_charge": 0,
     "minimum_order_amount": 199,
-    "estimated_delivery_time": "25-40 minutes",
+    "estimated_delivery_time": "Coming Soon",
+    "delivery_time": "Coming Soon",
+    "delivery_type": "doorstep",
     "boundary_coordinates": [
       {
         "lat": 13.12,
@@ -524,24 +870,55 @@
         "lng": 80.17969
       }
     ],
-    "created_at": "2026-11-12T06:25:07.504Z",
-    "updated_at": "2026-11-12T06:25:07.504Z"
+    "boundary_polygon": [
+      {
+        "lat": 13.12,
+        "lng": 80.21
+      },
+      {
+        "lat": 13.1025,
+        "lng": 80.24031
+      },
+      {
+        "lat": 13.0675,
+        "lng": 80.24031
+      },
+      {
+        "lat": 13.05,
+        "lng": 80.21
+      },
+      {
+        "lat": 13.0675,
+        "lng": 80.17969
+      },
+      {
+        "lat": 13.1025,
+        "lng": 80.17969
+      }
+    ],
+    "created_at": "2026-11-12T10:10:55.750Z",
+    "updated_at": "2026-11-12T10:10:55.750Z"
   },
   {
     "id": 13,
+    "location_id": 13,
     "area_name": "T Nagar",
     "city": "Chennai",
     "state": "Tamil Nadu",
+    "country": "India",
     "pincode": "600017",
     "boundary_type": "polygon",
     "latitude": 13.0418,
     "longitude": 80.2341,
     "radius_meters": 4000,
-    "is_serviceable": true,
-    "is_active": true,
+    "is_serviceable": false,
+    "is_active": false,
+    "coverage_status": "coming_soon",
     "delivery_charge": 0,
     "minimum_order_amount": 149,
-    "estimated_delivery_time": "25-35 minutes",
+    "estimated_delivery_time": "Coming Soon",
+    "delivery_time": "Coming Soon",
+    "delivery_type": "doorstep",
     "boundary_coordinates": [
       {
         "lat": 13.0768,
@@ -568,24 +945,55 @@
         "lng": 80.20379
       }
     ],
-    "created_at": "2026-11-12T06:25:07.504Z",
-    "updated_at": "2026-11-12T06:25:07.504Z"
+    "boundary_polygon": [
+      {
+        "lat": 13.0768,
+        "lng": 80.2341
+      },
+      {
+        "lat": 13.0593,
+        "lng": 80.26441
+      },
+      {
+        "lat": 13.0243,
+        "lng": 80.26441
+      },
+      {
+        "lat": 13.0068,
+        "lng": 80.2341
+      },
+      {
+        "lat": 13.0243,
+        "lng": 80.20379
+      },
+      {
+        "lat": 13.0593,
+        "lng": 80.20379
+      }
+    ],
+    "created_at": "2026-11-12T10:10:55.750Z",
+    "updated_at": "2026-11-12T10:10:55.750Z"
   },
   {
     "id": 14,
+    "location_id": 14,
     "area_name": "Velachery",
     "city": "Chennai",
     "state": "Tamil Nadu",
+    "country": "India",
     "pincode": "600042",
     "boundary_type": "polygon",
     "latitude": 12.98,
     "longitude": 80.22,
     "radius_meters": 4500,
-    "is_serviceable": true,
-    "is_active": true,
+    "is_serviceable": false,
+    "is_active": false,
+    "coverage_status": "coming_soon",
     "delivery_charge": 0,
     "minimum_order_amount": 149,
-    "estimated_delivery_time": "25-35 minutes",
+    "estimated_delivery_time": "Coming Soon",
+    "delivery_time": "Coming Soon",
+    "delivery_type": "doorstep",
     "boundary_coordinates": [
       {
         "lat": 13.015,
@@ -612,24 +1020,55 @@
         "lng": 80.18969
       }
     ],
-    "created_at": "2026-11-12T06:25:07.504Z",
-    "updated_at": "2026-11-12T06:25:07.504Z"
+    "boundary_polygon": [
+      {
+        "lat": 13.015,
+        "lng": 80.22
+      },
+      {
+        "lat": 12.9975,
+        "lng": 80.25031
+      },
+      {
+        "lat": 12.9625,
+        "lng": 80.25031
+      },
+      {
+        "lat": 12.945,
+        "lng": 80.22
+      },
+      {
+        "lat": 12.9625,
+        "lng": 80.18969
+      },
+      {
+        "lat": 12.9975,
+        "lng": 80.18969
+      }
+    ],
+    "created_at": "2026-11-12T10:10:55.750Z",
+    "updated_at": "2026-11-12T10:10:55.750Z"
   },
   {
     "id": 15,
+    "location_id": 15,
     "area_name": "Adyar",
     "city": "Chennai",
     "state": "Tamil Nadu",
+    "country": "India",
     "pincode": "600020",
     "boundary_type": "polygon",
     "latitude": 13.0012,
     "longitude": 80.2565,
     "radius_meters": 4500,
-    "is_serviceable": true,
-    "is_active": true,
+    "is_serviceable": false,
+    "is_active": false,
+    "coverage_status": "coming_soon",
     "delivery_charge": 0,
     "minimum_order_amount": 199,
-    "estimated_delivery_time": "30-45 minutes",
+    "estimated_delivery_time": "Coming Soon",
+    "delivery_time": "Coming Soon",
+    "delivery_type": "doorstep",
     "boundary_coordinates": [
       {
         "lat": 13.0362,
@@ -656,7 +1095,33 @@
         "lng": 80.22619
       }
     ],
-    "created_at": "2026-11-12T06:25:07.504Z",
-    "updated_at": "2026-11-12T06:25:07.504Z"
+    "boundary_polygon": [
+      {
+        "lat": 13.0362,
+        "lng": 80.2565
+      },
+      {
+        "lat": 13.0187,
+        "lng": 80.28681
+      },
+      {
+        "lat": 12.9837,
+        "lng": 80.28681
+      },
+      {
+        "lat": 12.9662,
+        "lng": 80.2565
+      },
+      {
+        "lat": 12.9837,
+        "lng": 80.22619
+      },
+      {
+        "lat": 13.0187,
+        "lng": 80.22619
+      }
+    ],
+    "created_at": "2026-11-12T10:10:55.751Z",
+    "updated_at": "2026-11-12T10:10:55.751Z"
   }
 ]

@@ -1059,6 +1059,121 @@ router.put("/:id/collect-pickup", async (req, res) => {
     });
 });
 
+/* CUSTOMER DELIVERY PARTNER RATING */
+router.post("/:id/rate", async (req, res) => {
+    try {
+        const orderId = req.params.id;
+        const { rating, feedback, tags } = req.body;
+
+        const ratingNum = Number(rating);
+        if (isNaN(ratingNum) || ratingNum < 1 || ratingNum > 5) {
+            return res.status(400).json({ success: false, message: "Valid rating between 1 and 5 stars is required." });
+        }
+
+        // Find order from disk/DB
+        let order = (MOCK_ORDERS || []).find(o => o.id?.toString() === orderId.toString() || o.order_number === orderId);
+        try {
+            const dbRes = await pool.query("SELECT * FROM orders WHERE id = $1 OR order_number = $1", [orderId]);
+            if (dbRes.rows.length > 0) order = dbRes.rows[0];
+        } catch (_) {}
+
+        if (!order) {
+            return res.status(404).json({ success: false, message: "Order not found." });
+        }
+
+        if (order.order_status !== "delivered") {
+            return res.status(400).json({ success: false, message: "Ratings can only be submitted for delivered orders." });
+        }
+
+        if (order.rating) {
+            return res.status(400).json({ success: false, message: "This order has already been rated." });
+        }
+
+        const partnerId = order.partner_id || "THU-DP-0001";
+        const ratedAt = new Date().toISOString();
+
+        // Update order with rating
+        order.rating = ratingNum;
+        order.feedback = feedback || "";
+        order.rating_tags = tags || [];
+        order.rated_at = ratedAt;
+        saveOrders(MOCK_ORDERS);
+
+        try {
+            await pool.query(`
+                ALTER TABLE orders ADD COLUMN IF NOT EXISTS rating NUMERIC(3,2);
+                ALTER TABLE orders ADD COLUMN IF NOT EXISTS feedback TEXT;
+                ALTER TABLE orders ADD COLUMN IF NOT EXISTS rating_tags TEXT[];
+                ALTER TABLE orders ADD COLUMN IF NOT EXISTS rated_at TIMESTAMP;
+                UPDATE orders SET rating = $1, feedback = $2, rated_at = NOW() WHERE id = $3;
+            `, [ratingNum, feedback || "", order.id]);
+        } catch (_) {}
+
+        // Recalculate partner's real average rating across all their delivered rated orders
+        const partnersFile = path.resolve(__dirname, "..", "data", "delivery_partners.json");
+        let partners = [];
+        try {
+            if (fs.existsSync(partnersFile)) {
+                partners = JSON.parse(fs.readFileSync(partnersFile, "utf-8"));
+            }
+        } catch (_) {}
+
+        const partner = partners.find(p => p.partner_id === partnerId);
+        let newAverage = ratingNum;
+        let ratingsCount = 1;
+
+        if (partner) {
+            const allPartnerOrders = (MOCK_ORDERS || []).filter(o => o.partner_id === partnerId && o.rating > 0);
+            if (allPartnerOrders.length > 0) {
+                const sum = allPartnerOrders.reduce((acc, curr) => acc + Number(curr.rating), 0);
+                newAverage = Number((sum / allPartnerOrders.length).toFixed(2));
+                ratingsCount = allPartnerOrders.length;
+            }
+            partner.rating = newAverage;
+            partner.ratings_count = ratingsCount;
+            fs.writeFileSync(partnersFile, JSON.stringify(partners, null, 2), "utf-8");
+
+            try {
+                await pool.query(
+                    "UPDATE delivery_partners SET rating = $1 WHERE partner_id = $2",
+                    [newAverage, partnerId]
+                );
+            } catch (_) {}
+        }
+
+        // Real-time broadcast
+        try {
+            const { emitToAdmin, emitToPartner } = require("../services/socketService");
+            if (typeof emitToAdmin === "function") {
+                emitToAdmin("partner_rating_updated", {
+                    order_id: orderId,
+                    partner_id: partnerId,
+                    rating: newAverage,
+                    ratings_count: ratingsCount,
+                    feedback: feedback || ""
+                });
+            }
+            if (typeof emitToPartner === "function") {
+                emitToPartner(partnerId, "rating_received", {
+                    order_id: orderId,
+                    rating: ratingNum,
+                    new_average: newAverage,
+                    feedback: feedback || ""
+                });
+            }
+        } catch (_) {}
+
+        return res.json({
+            success: true,
+            message: "Thank you for rating your delivery partner!",
+            rating: ratingNum,
+            partner_average: newAverage
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 router.put("/:id/status", updateOrderStatusHandler);
 router.patch("/:id/status", updateOrderStatusHandler);
 

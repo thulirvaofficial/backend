@@ -7,9 +7,16 @@ const { pool } = require("../config/database");
 const {
     getSubscriptionDeliveries,
     updateSubscriptionDeliveryStatus,
+    claimSubscriptionDelivery,
     formatDateKey,
     formatReadableDate
 } = require("../services/subscriptionDeliveryService");
+const {
+    checkIn,
+    checkOut,
+    getTodayAttendance,
+    getPartnerAttendanceHistory
+} = require("../services/attendanceService");
 const {
     checkServiceability,
     getAllAreas
@@ -38,80 +45,7 @@ function loadPartners() {
             return JSON.parse(fs.readFileSync(PARTNERS_FILE, "utf-8"));
         }
     } catch {}
-    return [
-        {
-            partner_id: "THU-DP-0001",
-            name: "Kamesh Sundaram",
-            phone: "9840122334",
-            email: "kamesh.s@thulirva.in",
-            password_hash: "$2a$10$w0Bv60.n/Fq5N5Z00rXpYOCq3Yl2FjZ8H21FsmzVqL3p8Y2hIeOqS", // 123456
-            assigned_area: "Kanchipuram & Chennai South",
-            vehicle_type: "Electric Scooter",
-            vehicle_number: "TN 21 AB 1001",
-            current_latitude: 12.8342,
-            current_longitude: 79.7036,
-            is_online: true,
-            is_active: true,
-            is_blocked: false,
-            rating: 4.95,
-            total_deliveries_count: 1240,
-            active_orders_count: 1
-        },
-        {
-            partner_id: "THU-DP-0002",
-            name: "Murugan K",
-            phone: "9840233445",
-            email: "murugan.k@thulirva.in",
-            password_hash: "$2a$10$w0Bv60.n/Fq5N5Z00rXpYOCq3Yl2FjZ8H21FsmzVqL3p8Y2hIeOqS",
-            assigned_area: "Kanchipuram Central",
-            vehicle_type: "Motorcycle",
-            vehicle_number: "TN 21 BC 2002",
-            current_latitude: 12.8389,
-            current_longitude: 79.7082,
-            is_online: true,
-            is_active: true,
-            is_blocked: false,
-            rating: 4.88,
-            total_deliveries_count: 890,
-            active_orders_count: 0
-        },
-        {
-            partner_id: "THU-DP-0003",
-            name: "Senthil Nathan",
-            phone: "9840344556",
-            email: "senthil.n@thulirva.in",
-            password_hash: "$2a$10$w0Bv60.n/Fq5N5Z00rXpYOCq3Yl2FjZ8H21FsmzVqL3p8Y2hIeOqS",
-            assigned_area: "Chennai Central",
-            vehicle_type: "Scooter",
-            vehicle_number: "TN 02 CD 3003",
-            current_latitude: 13.0850,
-            current_longitude: 80.2100,
-            is_online: true,
-            is_active: true,
-            is_blocked: false,
-            rating: 4.92,
-            total_deliveries_count: 670,
-            active_orders_count: 0
-        },
-        {
-            partner_id: "THU-DP-0004",
-            name: "Vignesh Kumar",
-            phone: "9840455667",
-            email: "vignesh.k@thulirva.in",
-            password_hash: "$2a$10$w0Bv60.n/Fq5N5Z00rXpYOCq3Yl2FjZ8H21FsmzVqL3p8Y2hIeOqS",
-            assigned_area: "Chennai South",
-            vehicle_type: "Scooter",
-            vehicle_number: "TN 07 DE 4004",
-            current_latitude: 12.9800,
-            current_longitude: 80.2200,
-            is_online: false,
-            is_active: true,
-            is_blocked: false,
-            rating: 4.85,
-            total_deliveries_count: 510,
-            active_orders_count: 0
-        }
-    ];
+    return [];
 }
 
 function savePartners(partners) {
@@ -146,203 +80,6 @@ function authenticatePartner(req, res, next) {
         return res.status(401).json({ success: false, message: "Session expired or invalid token. Please log in again." });
     }
 }
-
-/**
- * Ensure seed product orders exist for Screen 4 matching:
- * Total: 18, Delivered: 14, Pending / To Deliver: 4.
- */
-function ensureSeedProductOrders() {
-    let orders = [];
-    try {
-        if (fs.existsSync(ORDERS_FILE)) {
-            orders = JSON.parse(fs.readFileSync(ORDERS_FILE, "utf-8"));
-        }
-    } catch {}
-
-    // Check if we already have the ORD9821 series
-    const hasScreen4Orders = orders.some(o => o.order_number === "ORD9821" || o.id === "ORD9821");
-    if (!hasScreen4Orders) {
-        const todayStr = formatDateKey(new Date());
-
-        const screen4Orders = [
-            {
-                id: 9821,
-                order_number: "ORD9821",
-                customer_name: "Besant Nagar Customer",
-                customer_phone: "9840198211",
-                address: "Besant Nagar, Chennai",
-                city: "Chennai",
-                pincode: "600090",
-                items: [
-                    { name: "Paneer (200 g)", quantity: 1, price: 95 },
-                    { name: "Ghee (250 g)", quantity: 1, price: 453 }
-                ],
-                total: 548,
-                payment_method: "UPI",
-                payment_status: "verified",
-                order_status: "processing", // "To Deliver"
-                delivery_type: "delivery",
-                partner_id: "THU-DP-0001",
-                created_at: `${todayStr}T08:30:00Z`
-            },
-            {
-                id: 9819,
-                order_number: "ORD9819",
-                customer_name: "Guindy Customer",
-                customer_phone: "9840198199",
-                address: "Guindy, Chennai",
-                city: "Chennai",
-                pincode: "600032",
-                items: [
-                    { name: "Curd (500 g)", quantity: 2, price: 149.5 }
-                ],
-                total: 299,
-                payment_method: "UPI",
-                payment_status: "verified",
-                order_status: "processing", // "To Deliver"
-                delivery_type: "delivery",
-                partner_id: "THU-DP-0001",
-                created_at: `${todayStr}T08:15:00Z`
-            },
-            {
-                id: 9817,
-                order_number: "ORD9817",
-                customer_name: "Saidapet Customer",
-                customer_phone: "9840198177",
-                address: "Saidapet, Chennai",
-                city: "Chennai",
-                pincode: "600015",
-                items: [
-                    { name: "Butter (250 g)", quantity: 2, price: 400 },
-                    { name: "Paneer (500 g)", quantity: 1, price: 399 }
-                ],
-                total: 1199,
-                payment_method: "UPI",
-                payment_status: "verified",
-                order_status: "delivered", // "Delivered"
-                delivered_at: `${todayStr} 07:50:00`,
-                delivery_type: "delivery",
-                partner_id: "THU-DP-0001",
-                created_at: `${todayStr}T07:10:00Z`
-            },
-            {
-                id: 9815,
-                order_number: "ORD9815",
-                customer_name: "Kotturpuram Customer",
-                customer_phone: "9840198155",
-                address: "Kotturpuram, Chennai",
-                city: "Chennai",
-                pincode: "600085",
-                items: [
-                    { name: "Paneer (200 g)", quantity: 1, price: 95 }
-                ],
-                total: 95,
-                payment_method: "Cash on Delivery",
-                payment_status: "paid",
-                order_status: "delivered",
-                delivered_at: `${todayStr} 08:45:00`,
-                delivery_type: "delivery",
-                partner_id: "THU-DP-0001",
-                created_at: `${todayStr}T07:20:00Z`
-            },
-            {
-                id: 9813,
-                order_number: "ORD9813",
-                customer_name: "Mylapore Customer",
-                customer_phone: "9840198133",
-                address: "Mylapore, Chennai",
-                city: "Chennai",
-                pincode: "600004",
-                items: [
-                    { name: "Ghee (250 g)", quantity: 1, price: 320 }
-                ],
-                total: 320,
-                payment_method: "UPI",
-                payment_status: "verified",
-                order_status: "delivered",
-                delivered_at: `${todayStr} 09:32:00`,
-                delivery_type: "delivery",
-                partner_id: "THU-DP-0001",
-                created_at: `${todayStr}T07:40:00Z`
-            },
-            {
-                id: 9820,
-                order_number: "ORD9820",
-                customer_name: "Thiruvanmiyur Customer",
-                customer_phone: "9840198200",
-                address: "Thiruvanmiyur, Chennai",
-                city: "Chennai",
-                pincode: "600041",
-                items: [
-                    { name: "Fresh Cow Milk (1 Litre)", quantity: 2, price: 160 }
-                ],
-                total: 320,
-                payment_method: "UPI",
-                payment_status: "verified",
-                order_status: "processing", // "To Deliver"
-                delivery_type: "delivery",
-                partner_id: "THU-DP-0001",
-                created_at: `${todayStr}T08:20:00Z`
-            },
-            {
-                id: 9822,
-                order_number: "ORD9822",
-                customer_name: "Adyar Customer",
-                customer_phone: "9840198222",
-                address: "Kasturba Nagar, Adyar, Chennai",
-                city: "Chennai",
-                pincode: "600020",
-                items: [
-                    { name: "Bilona Cow Ghee (500ml)", quantity: 1, price: 499 }
-                ],
-                total: 499,
-                payment_method: "UPI",
-                payment_status: "verified",
-                order_status: "processing", // "To Deliver"
-                delivery_type: "delivery",
-                partner_id: "THU-DP-0001",
-                created_at: `${todayStr}T08:45:00Z`
-            }
-        ];
-
-        // Add 11 more delivered orders to make delivered = 14 total and pending = 4 total (total 18)
-        const moreAreas = ["Alwarpet", "RA Puram", "Mandaveli", "Gopalapuram", "Royapettah", "Teynampet", "Egmore", "Kilpauk", "Chetpet", "Shenoy Nagar", "Anna Nagar"];
-        for (let i = 0; i < 11; i++) {
-            const num = 9801 + i;
-            const hour = String(7 + Math.floor(i / 6)).padStart(2, "0");
-            const min = String((i * 9) % 60).padStart(2, "0");
-            screen4Orders.push({
-                id: num,
-                order_number: `ORD${num}`,
-                customer_name: `Customer ${moreAreas[i]}`,
-                customer_phone: `9840${num}11`,
-                address: `${moreAreas[i]}, Chennai`,
-                city: "Chennai",
-                pincode: `6000${10 + i}`,
-                items: [
-                    { name: i % 2 === 0 ? "Fresh Paneer (200g)" : "Fresh Cow Milk (1 Litre)", quantity: 1, price: 150 }
-                ],
-                total: 180,
-                payment_method: "UPI",
-                payment_status: "verified",
-                order_status: "delivered",
-                delivered_at: `${todayStr} ${hour}:${min}:00`,
-                delivery_type: "delivery",
-                partner_id: "THU-DP-0001",
-                created_at: `${todayStr}T06:30:00Z`
-            });
-        }
-
-        // Prepend/merge screen4 orders into orders
-        orders = [...screen4Orders, ...orders];
-        try {
-            if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-            fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2), "utf-8");
-            console.log(`[+] Seeded 18 Product Orders (14 Delivered, 4 Pending) matching Screen 4 reference.`);
-        } catch {}
-    }
-}
-ensureSeedProductOrders();
 
 /* ============================================================
    1. PARTNER REGISTRATION & AUTHENTICATION
@@ -504,6 +241,13 @@ const registerPartnerHandler = async (req, res) => {
             console.error("[PARTNER REGISTER DB INSERT ERROR]", dbErr.message);
         }
 
+        // Save Aadhaar KYC documents if provided during registration
+        if (req.body.aadhaar_front || req.body.aadhaar_back) {
+            savePartnerKycFiles(partner_id, req.body.aadhaar_front, req.body.aadhaar_back);
+            newPartner.kyc_status = "pending_verification";
+            newPartner.kyc_submitted_at = new Date().toISOString();
+        }
+
         // Add to local JSON cache
         MOCK_PARTNERS.push(newPartner);
         savePartners(MOCK_PARTNERS);
@@ -521,7 +265,8 @@ const registerPartnerHandler = async (req, res) => {
             success: true,
             message: "Registration submitted successfully! Your application is pending admin approval.",
             partner_id,
-            registration_status: "pending_approval"
+            registration_status: "pending_approval",
+            kyc_status: newPartner.kyc_status || "pending_verification"
         });
     } catch (err) {
         console.error("[PARTNER REGISTRATION ERROR]", err.message);
@@ -531,6 +276,65 @@ const registerPartnerHandler = async (req, res) => {
 
 router.post("/register", registerPartnerHandler);
 router.post("/auth/register", registerPartnerHandler);
+
+/**
+ * POST /api/delivery/kyc/upload & /api/delivery-partner/kyc/upload
+ * Upload Aadhaar card front and back documents
+ */
+const uploadPartnerKycHandler = async (req, res) => {
+    try {
+        const { partner_id, partnerId, aadhaar_front, aadhaar_back } = req.body;
+        const id = (partner_id || partnerId || (req.partner && req.partner.partner_id) || "").trim();
+
+        if (!id) {
+            return res.status(400).json({ success: false, message: "partner_id is required" });
+        }
+
+        if (!aadhaar_front && !aadhaar_back) {
+            return res.status(400).json({
+                success: false,
+                message: "Please provide aadhaar_front or aadhaar_back image data."
+            });
+        }
+
+        const docs = savePartnerKycFiles(id, aadhaar_front, aadhaar_back);
+
+        let partners = loadPartners();
+        const p = partners.find(x => x.partner_id === id);
+        if (p) {
+            p.kyc_status = "pending_verification";
+            p.kyc_submitted_at = new Date().toISOString();
+            p.updated_at = new Date().toISOString();
+            savePartners(partners);
+        }
+
+        try {
+            await pool.query(`
+                UPDATE delivery_partners
+                SET kyc_status = 'pending_verification', updated_at = NOW()
+                WHERE partner_id = $1
+            `, [id]);
+        } catch {}
+
+        emitToAdmin("partner:kyc_uploaded", {
+            partner_id: id,
+            timestamp: new Date().toISOString()
+        });
+
+        return res.json({
+            success: true,
+            message: "Aadhaar KYC documents uploaded successfully. Awaiting operations approval.",
+            partner_id: id,
+            kyc_status: "pending_verification",
+            documents: docs
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+router.post("/kyc/upload", uploadPartnerKycHandler);
+router.post("/auth/kyc/upload", uploadPartnerKycHandler);
 
 /**
  * POST /api/delivery/login & /api/delivery-partners/auth/login
@@ -714,12 +518,17 @@ const heartbeatHandler = async (req, res) => {
             `, [Boolean(is_online), latitude ? Number(latitude) : null, longitude ? Number(longitude) : null, partnerId]);
         } catch {}
 
-        const partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+        let partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+        if (!partner) {
+            MOCK_PARTNERS = loadPartners();
+            partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+        }
         if (partner) {
             partner.is_online = Boolean(is_online);
             partner.last_active_at = new Date().toISOString();
             if (latitude) partner.current_latitude = Number(latitude);
             if (longitude) partner.current_longitude = Number(longitude);
+            savePartners(MOCK_PARTNERS);
         }
 
         // Return active dispatch offer if any
@@ -760,7 +569,7 @@ router.post("/auth/forgot-password", (req, res) => res.redirect(307, "../forgot-
  */
 router.get("/profile", authenticatePartner, async (req, res) => {
     const partnerId = req.partner.partner_id;
-    let partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+    let partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId) || loadPartners().find(p => p.partner_id === partnerId);
 
     try {
         const dbRes = await pool.query("SELECT * FROM delivery_partners WHERE partner_id = $1", [partnerId]);
@@ -782,7 +591,7 @@ router.get("/profile", authenticatePartner, async (req, res) => {
 
     const subsData = await getSubscriptionDeliveries(formatDateKey(new Date()), partnerId);
     const completedSubs = (subsData.deliveries || []).filter(d => d.status === "delivered").length;
-    const calculatedTrips = (partner.total_deliveries_count || 0) + completedOrders + completedSubs;
+    const calculatedTrips = (Number(partner.total_deliveries_count) || 0) + completedOrders + completedSubs;
 
     return res.json({
         success: true,
@@ -791,19 +600,302 @@ router.get("/profile", authenticatePartner, async (req, res) => {
             name: partner.name,
             phone: partner.phone,
             email: partner.email,
+            profile_photo: partner.profile_photo || null,
+            address: partner.address || "",
+            city: partner.city || "Chennai",
+            pincode: partner.pincode || "",
             assigned_area: partner.assigned_area,
             vehicle_type: partner.vehicle_type,
             vehicle_number: partner.vehicle_number,
+            emergency_contact: partner.emergency_contact || null,
             current_latitude: partner.current_latitude,
             current_longitude: partner.current_longitude,
-            is_online: partner.is_online,
-            is_active: partner.is_active,
-            rating: partner.rating || 4.95,
+            is_online: Boolean(partner.is_online),
+            is_active: Boolean(partner.is_active),
+            rating: partner.rating || 5.0,
             primary_hub: partner.primary_hub || "Thulirva South Distribution Hub, Chennai",
             account_status: partner.is_active ? "Active • Verified" : "Pending Verification",
             total_deliveries_count: calculatedTrips
         }
     });
+});
+
+/**
+ * PUT /api/delivery/profile & POST /api/delivery/profile/update
+ * Update partner profile details
+ */
+const updatePartnerProfileHandler = async (req, res) => {
+    try {
+        const partnerId = req.partner.partner_id;
+        const {
+            name, phone, email, address, city, pincode,
+            vehicle_type, vehicle_number, emergency_contact
+        } = req.body;
+
+        let partners = loadPartners();
+        let partner = partners.find(p => p.partner_id === partnerId);
+        if (!partner) {
+            partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+        }
+        if (!partner) {
+            return res.status(404).json({ success: false, message: "Partner profile not found." });
+        }
+
+        if (name && name.trim()) partner.name = name.trim();
+        if (phone && phone.trim()) partner.phone = phone.trim();
+        if (email && email.trim()) partner.email = email.trim();
+        if (address !== undefined) partner.address = address.trim();
+        if (city !== undefined) partner.city = city.trim();
+        if (pincode !== undefined) partner.pincode = pincode.trim();
+        if (vehicle_type && vehicle_type.trim()) partner.vehicle_type = vehicle_type.trim();
+        if (vehicle_number && vehicle_number.trim()) partner.vehicle_number = vehicle_number.trim();
+        if (emergency_contact !== undefined) partner.emergency_contact = emergency_contact ? emergency_contact.trim() : null;
+        partner.updated_at = new Date().toISOString();
+
+        savePartners(partners);
+        MOCK_PARTNERS = partners;
+
+        try {
+            await pool.query(`
+                UPDATE delivery_partners
+                SET name = COALESCE($1, name),
+                    phone = COALESCE($2, phone),
+                    email = COALESCE($3, email),
+                    address = COALESCE($4, address),
+                    city = COALESCE($5, city),
+                    pincode = COALESCE($6, pincode),
+                    vehicle_type = COALESCE($7, vehicle_type),
+                    vehicle_number = COALESCE($8, vehicle_number),
+                    emergency_contact = COALESCE($9, emergency_contact),
+                    updated_at = NOW()
+                WHERE partner_id = $10
+            `, [
+                name ? name.trim() : null,
+                phone ? phone.trim() : null,
+                email ? email.trim() : null,
+                address !== undefined ? address.trim() : null,
+                city !== undefined ? city.trim() : null,
+                pincode !== undefined ? pincode.trim() : null,
+                vehicle_type ? vehicle_type.trim() : null,
+                vehicle_number ? vehicle_number.trim() : null,
+                emergency_contact ? emergency_contact.trim() : null,
+                partnerId
+            ]);
+        } catch (_) {}
+
+        return res.json({
+            success: true,
+            message: "Profile updated successfully.",
+            partner: {
+                partner_id: partner.partner_id,
+                name: partner.name,
+                phone: partner.phone,
+                email: partner.email,
+                profile_photo: partner.profile_photo || null,
+                address: partner.address || "",
+                city: partner.city || "Chennai",
+                pincode: partner.pincode || "",
+                assigned_area: partner.assigned_area,
+                vehicle_type: partner.vehicle_type,
+                vehicle_number: partner.vehicle_number,
+                emergency_contact: partner.emergency_contact || null,
+                is_online: Boolean(partner.is_online),
+                is_active: Boolean(partner.is_active),
+                rating: partner.rating || 5.0
+            }
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+router.put("/profile", authenticatePartner, updatePartnerProfileHandler);
+router.post("/profile/update", authenticatePartner, updatePartnerProfileHandler);
+
+/**
+ * POST /api/delivery/profile/photo
+ * Upload or replace delivery partner profile photo
+ */
+router.post("/profile/photo", authenticatePartner, async (req, res) => {
+    try {
+        const partnerId = req.partner.partner_id;
+        const { photo, photo_base64 } = req.body;
+        const photoData = photo_base64 || photo;
+
+        if (!photoData) {
+            return res.status(400).json({ success: false, message: "Photo data (base64) is required." });
+        }
+
+        const partnersDir = path.resolve(__dirname, "..", "public", "uploads", "partners");
+        if (!fs.existsSync(partnersDir)) fs.mkdirSync(partnersDir, { recursive: true });
+
+        const filename = `profile_${partnerId}_${Date.now()}.jpg`;
+        const cleanBase64 = photoData.replace(/^data:image\/\w+;base64,/, "");
+        const filePath = path.join(partnersDir, filename);
+        fs.writeFileSync(filePath, Buffer.from(cleanBase64, "base64"));
+
+        const photoUrl = `/uploads/partners/${filename}`;
+
+        // Update in memory / JSON store
+        const partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+        if (partner) {
+            partner.profile_photo = photoUrl;
+            partner.updated_at = new Date().toISOString();
+            savePartners(MOCK_PARTNERS);
+        }
+
+        // Update in PostgreSQL
+        try {
+            await pool.query(
+                "UPDATE delivery_partners SET profile_photo = $1, updated_at = NOW() WHERE partner_id = $2",
+                [photoUrl, partnerId]
+            );
+        } catch (_) {}
+
+        return res.json({
+            success: true,
+            message: "Profile photo uploaded successfully.",
+            profile_photo: photoUrl
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * DELETE /api/delivery/profile/photo
+ * Remove delivery partner profile photo
+ */
+router.delete("/profile/photo", authenticatePartner, async (req, res) => {
+    try {
+        const partnerId = req.partner.partner_id;
+
+        const partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+        if (partner) {
+            partner.profile_photo = null;
+            partner.updated_at = new Date().toISOString();
+            savePartners(MOCK_PARTNERS);
+        }
+
+        try {
+            await pool.query(
+                "UPDATE delivery_partners SET profile_photo = NULL, updated_at = NOW() WHERE partner_id = $1",
+                [partnerId]
+            );
+        } catch (_) {}
+
+        return res.json({
+            success: true,
+            message: "Profile photo removed successfully."
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/* ============================================================
+   DAILY PHOTO ATTENDANCE ENDPOINTS
+============================================================ */
+
+/**
+ * POST /api/delivery/attendance/check-in
+ * Check in with live camera selfie & GPS location
+ */
+router.post("/attendance/check-in", authenticatePartner, async (req, res) => {
+    try {
+        const partnerId = req.partner.partner_id;
+        const partnerName = req.partner.name;
+        const { photo, photo_base64, latitude, longitude, is_camera } = req.body;
+
+        const result = await checkIn({
+            partner_id: partnerId,
+            partner_name: partnerName,
+            photo_base64: photo_base64 || photo,
+            latitude,
+            longitude,
+            is_camera: is_camera !== undefined ? is_camera : true
+        });
+
+        if (!result.success) {
+            return res.status(400).json(result);
+        }
+
+        // Mark partner online upon check-in
+        const partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+        if (partner) {
+            partner.is_online = true;
+            savePartners(MOCK_PARTNERS);
+        }
+
+        try {
+            if (typeof emitToAdmin === "function") {
+                emitToAdmin("attendance_checked_in", result.attendance);
+            }
+        } catch (_) {}
+
+        return res.status(201).json(result);
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * POST /api/delivery/attendance/check-out
+ * Check out with photo, GPS location & working hours calculation
+ */
+router.post("/attendance/check-out", authenticatePartner, async (req, res) => {
+    try {
+        const partnerId = req.partner.partner_id;
+        const { photo, photo_base64, latitude, longitude } = req.body;
+
+        const result = await checkOut({
+            partner_id: partnerId,
+            photo_base64: photo_base64 || photo,
+            latitude,
+            longitude
+        });
+
+        if (!result.success) {
+            return res.status(400).json(result);
+        }
+
+        // Mark partner offline upon checkout
+        const partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+        if (partner) {
+            partner.is_online = false;
+            savePartners(MOCK_PARTNERS);
+        }
+
+        try {
+            if (typeof emitToAdmin === "function") {
+                emitToAdmin("attendance_checked_out", result.attendance);
+            }
+        } catch (_) {}
+
+        return res.json(result);
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * GET /api/delivery/attendance/today
+ * Check today's attendance status
+ */
+router.get("/attendance/today", authenticatePartner, (req, res) => {
+    const partnerId = req.partner.partner_id;
+    const result = getTodayAttendance(partnerId);
+    return res.json(result);
+});
+
+/**
+ * GET /api/delivery/attendance/history
+ * List partner's historical attendance records
+ */
+router.get("/attendance/history", authenticatePartner, (req, res) => {
+    const partnerId = req.partner.partner_id;
+    const result = getPartnerAttendanceHistory(partnerId);
+    return res.json(result);
 });
 
 /**
@@ -872,12 +964,18 @@ router.post("/location", authenticatePartner, async (req, res) => {
         `, [partnerId, lat, lng, speed, heading, accuracy]);
     } catch {}
 
-    const partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+    let partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+    if (!partner) {
+        MOCK_PARTNERS = loadPartners();
+        partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId);
+    }
     if (partner) {
         partner.current_latitude = lat;
         partner.current_longitude = lng;
         partner.speed = speed;
         partner.heading = heading;
+        partner.last_active_at = new Date().toISOString();
+        savePartners(MOCK_PARTNERS);
     }
 
     emitToAdmin("delivery:location:update", {
@@ -936,16 +1034,16 @@ router.get("/dashboard", authenticatePartner, async (req, res) => {
         const earningsToday = Math.round(ordersDelivered * 35 + subDelivered * 30);
 
         // Partner name & status
-        const partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId) || {
-            name: req.partner.name || "Kamesh Sundaram",
-            is_online: true
+        const partner = MOCK_PARTNERS.find(p => p.partner_id === partnerId) || loadPartners().find(p => p.partner_id === partnerId) || {
+            name: req.partner.name || "Delivery Partner",
+            is_online: false
         };
 
         return res.json({
             success: true,
             dashboard: {
-                partner_name: partner.name || "Kamesh",
-                is_online: partner.is_online !== false,
+                partner_name: partner.name || req.partner.name || "Delivery Partner",
+                is_online: Boolean(partner.is_online),
                 date_label: dateLabel,
                 today_deliveries: {
                     subscription_total: subTotal,
@@ -979,13 +1077,13 @@ router.get("/dashboard", authenticatePartner, async (req, res) => {
  */
 const getSubscriptionsHandler = async (req, res) => {
     try {
-        const partnerId = req.partner.partner_id;
         const { date, search } = req.query;
         const targetDate = date ? new Date(date) : new Date();
         const dateKey = formatDateKey(targetDate);
         const dateLabel = formatReadableDate(targetDate);
 
-        const result = await getSubscriptionDeliveries(dateKey, partnerId);
+        // Pass partner object to respect AREA_ALLOCATION_ENABLED business rule
+        const result = await getSubscriptionDeliveries(dateKey, req.partner);
         let items = result.deliveries || [];
 
         if (search && search.trim()) {
@@ -1005,7 +1103,9 @@ const getSubscriptionsHandler = async (req, res) => {
             stats: {
                 total: result.total,
                 delivered: result.delivered,
-                pending: result.pending
+                pending: result.pending,
+                out_for_delivery: result.outForDelivery || 0,
+                failed: result.failed || 0
             },
             deliveries: items
         });
@@ -1018,22 +1118,70 @@ router.get("/subscriptions", authenticatePartner, getSubscriptionsHandler);
 router.get("/subscription-deliveries", authenticatePartner, getSubscriptionsHandler);
 
 /**
+ * POST /api/delivery/subscriptions/:id/claim
+ * Atomic Claiming of a Subscription Delivery Task
+ */
+router.post("/subscriptions/:id/claim", authenticatePartner, async (req, res) => {
+    try {
+        const id = req.params.id;
+        const partnerId = req.partner.partner_id;
+        const partnerName = req.partner.name;
+
+        const result = await claimSubscriptionDelivery(id, partnerId, partnerName);
+        if (!result.success) {
+            return res.status(result.conflict ? 409 : 400).json(result);
+        }
+
+        try {
+            if (typeof emitToAdmin === "function") {
+                emitToAdmin("subscription_delivery_claimed", {
+                    delivery_id: id,
+                    partner_id: partnerId,
+                    partner_name: partnerName,
+                    claimed_at: new Date().toISOString()
+                });
+            }
+        } catch (_) {}
+
+        return res.json({
+            success: true,
+            message: "Subscription delivery task claimed successfully.",
+            delivery: result.delivery
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
  * PUT /api/delivery/subscriptions/:id/status
- * Mark delivered or failed
+ * Mark delivered or failed (with partner ownership check)
  */
 router.put("/subscriptions/:id/status", authenticatePartner, async (req, res) => {
     try {
         const id = req.params.id;
+        const partnerId = req.partner.partner_id;
         const { status, notes, failed_reason } = req.body;
 
         if (!status) {
             return res.status(400).json({ success: false, message: "Status required ('delivered' or 'failed')" });
         }
 
-        const result = await updateSubscriptionDeliveryStatus(id, status, notes, failed_reason);
+        const result = await updateSubscriptionDeliveryStatus(id, status, notes, failed_reason, partnerId);
         if (!result.success) {
-            return res.status(404).json(result);
+            return res.status(result.conflict ? 409 : 404).json(result);
         }
+
+        try {
+            if (typeof emitToAdmin === "function") {
+                emitToAdmin("subscription_delivery_updated", {
+                    delivery_id: id,
+                    status,
+                    partner_id: partnerId,
+                    delivered_at: result.delivery?.delivered_at
+                });
+            }
+        } catch (_) {}
 
         return res.json({
             success: true,

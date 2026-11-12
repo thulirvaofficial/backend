@@ -179,6 +179,7 @@ const INITIAL_15_AREAS = [
         radius_meters: 4000,
         is_serviceable: true,
         is_active: true,
+        coverage_status: "active",
         delivery_charge: 0,
         minimum_order_amount: 149,
         estimated_delivery_time: "25-35 minutes"
@@ -193,11 +194,12 @@ const INITIAL_15_AREAS = [
         latitude: 13.0850,
         longitude: 80.2100,
         radius_meters: 4500,
-        is_serviceable: true,
-        is_active: true,
+        is_serviceable: false,
+        is_active: false,
+        coverage_status: "coming_soon",
         delivery_charge: 0,
         minimum_order_amount: 199,
-        estimated_delivery_time: "25-40 minutes"
+        estimated_delivery_time: "Coming Soon"
     },
     {
         id: 13,
@@ -209,11 +211,12 @@ const INITIAL_15_AREAS = [
         latitude: 13.0418,
         longitude: 80.2341,
         radius_meters: 4000,
-        is_serviceable: true,
-        is_active: true,
+        is_serviceable: false,
+        is_active: false,
+        coverage_status: "coming_soon",
         delivery_charge: 0,
         minimum_order_amount: 149,
-        estimated_delivery_time: "25-35 minutes"
+        estimated_delivery_time: "Coming Soon"
     },
     {
         id: 14,
@@ -225,11 +228,12 @@ const INITIAL_15_AREAS = [
         latitude: 12.9800,
         longitude: 80.2200,
         radius_meters: 4500,
-        is_serviceable: true,
-        is_active: true,
+        is_serviceable: false,
+        is_active: false,
+        coverage_status: "coming_soon",
         delivery_charge: 0,
         minimum_order_amount: 149,
-        estimated_delivery_time: "25-35 minutes"
+        estimated_delivery_time: "Coming Soon"
     },
     {
         id: 15,
@@ -241,11 +245,12 @@ const INITIAL_15_AREAS = [
         latitude: 13.0012,
         longitude: 80.2565,
         radius_meters: 4500,
-        is_serviceable: true,
-        is_active: true,
+        is_serviceable: false,
+        is_active: false,
+        coverage_status: "coming_soon",
         delivery_charge: 0,
         minimum_order_amount: 199,
-        estimated_delivery_time: "30-45 minutes"
+        estimated_delivery_time: "Coming Soon"
     }
 ];
 
@@ -261,10 +266,20 @@ function generatePolygonForCenter(lat, lng, delta = 0.035) {
     ];
 }
 
-// Populate polygon coordinates for all initial areas
+// Populate polygon coordinates & standardized fields for all initial areas
 INITIAL_15_AREAS.forEach(area => {
+    area.location_id = area.id;
+    area.country = "India";
+    area.delivery_type = "doorstep";
+    area.delivery_time = area.estimated_delivery_time;
+    if (area.is_active === undefined) area.is_active = true;
+    if (area.is_serviceable === undefined) area.is_serviceable = true;
+    if (!area.coverage_status) {
+        area.coverage_status = area.is_active && area.is_serviceable ? "active" : "coming_soon";
+    }
     area.boundary_coordinates = generatePolygonForCenter(area.latitude, area.longitude);
-    area.created_at = new Date().toISOString();
+    area.boundary_polygon = area.boundary_coordinates;
+    area.created_at = area.created_at || new Date().toISOString();
     area.updated_at = new Date().toISOString();
 });
 
