@@ -291,6 +291,102 @@ async function initializeDatabase() {
             );
         `);
 
+        // ============================================================
+        // SERVICEABLE AREAS TABLE (Central Dynamic Serviceability System)
+        // ============================================================
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS serviceable_areas (
+                id SERIAL PRIMARY KEY,
+                area_name VARCHAR(150) NOT NULL,
+                city VARCHAR(100) NOT NULL,
+                state VARCHAR(100) DEFAULT 'Tamil Nadu',
+                pincode VARCHAR(255) NOT NULL,
+                boundary_type VARCHAR(50) DEFAULT 'polygon',
+                boundary_coordinates JSONB,
+                latitude NUMERIC(10,7) NOT NULL,
+                longitude NUMERIC(10,7) NOT NULL,
+                radius_meters NUMERIC(10,2) DEFAULT 5000,
+                is_serviceable BOOLEAN DEFAULT true,
+                is_active BOOLEAN DEFAULT true,
+                delivery_charge NUMERIC(10,2) DEFAULT 0,
+                minimum_order_amount NUMERIC(10,2) DEFAULT 0,
+                estimated_delivery_time VARCHAR(100) DEFAULT '30-45 minutes',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // Migration: ensure address, order, and subscription geo columns exist
+        const geoCols = [
+            "ALTER TABLE addresses ADD COLUMN IF NOT EXISTS street VARCHAR(255)",
+            "ALTER TABLE addresses ADD COLUMN IF NOT EXISTS area VARCHAR(255)",
+            "ALTER TABLE addresses ADD COLUMN IF NOT EXISTS landmark VARCHAR(255)",
+            "ALTER TABLE addresses ADD COLUMN IF NOT EXISTS delivery_instructions TEXT",
+            "ALTER TABLE addresses ADD COLUMN IF NOT EXISTS latitude NUMERIC(10,7)",
+            "ALTER TABLE addresses ADD COLUMN IF NOT EXISTS longitude NUMERIC(10,7)",
+            "ALTER TABLE addresses ADD COLUMN IF NOT EXISTS serviceable_area_id INTEGER",
+            "ALTER TABLE addresses ADD COLUMN IF NOT EXISTS is_serviceable BOOLEAN DEFAULT true",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS latitude NUMERIC(10,7)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS longitude NUMERIC(10,7)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS landmark VARCHAR(255)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_instructions TEXT",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS serviceable_area_id INTEGER",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS latitude NUMERIC(10,7)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS longitude NUMERIC(10,7)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS landmark VARCHAR(255)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS delivery_instructions TEXT",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS serviceable_area_id INTEGER"
+        ];
+        for (const sql of geoCols) {
+            await pool.query(sql).catch(e => console.warn("Geo migration warn:", e.message));
+        }
+
+        // Seed 15 Thulirva Serviceable Areas if table is empty
+        try {
+            const areaCheck = await pool.query("SELECT COUNT(*) FROM serviceable_areas");
+            if (Number(areaCheck.rows[0]?.count || 0) === 0) {
+                const initial15 = [
+                    ["Oragadam", "Chennai / Kanchipuram", "Tamil Nadu", "603109", 12.8342, 79.9575, 5000, 30, 199, "30-45 minutes"],
+                    ["Padapai", "Chennai / Kanchipuram", "Tamil Nadu", "601301", 12.8988, 80.0152, 5000, 30, 199, "35-50 minutes"],
+                    ["Sriperumbudur", "Kanchipuram", "Tamil Nadu", "602105", 12.9691, 79.9482, 6000, 30, 199, "30-45 minutes"],
+                    ["Valasaravakkam", "Chennai", "Tamil Nadu", "600087", 13.0403, 80.1723, 4000, 0, 149, "25-35 minutes"],
+                    ["Porur", "Chennai", "Tamil Nadu", "600116", 13.0382, 80.1565, 4500, 0, 149, "25-35 minutes"],
+                    ["Virugambakkam", "Chennai", "Tamil Nadu", "600092", 13.0537, 80.1916, 4000, 0, 149, "20-30 minutes"],
+                    ["Vadapalani", "Chennai", "Tamil Nadu", "600026", 13.0500, 80.2121, 3500, 0, 149, "20-30 minutes"],
+                    ["Koyambedu", "Chennai", "Tamil Nadu", "600107", 13.0694, 80.1948, 4000, 0, 149, "25-35 minutes"],
+                    ["KK Nagar", "Chennai", "Tamil Nadu", "600078", 13.0410, 80.1994, 3500, 0, 149, "20-30 minutes"],
+                    ["Alapakkam", "Chennai", "Tamil Nadu", "600116", 13.0475, 80.1601, 3500, 0, 149, "25-35 minutes"],
+                    ["Maduravoyal", "Chennai", "Tamil Nadu", "600095", 13.0637, 80.1661, 4000, 0, 149, "25-35 minutes"],
+                    ["Anna Nagar", "Chennai", "Tamil Nadu", "600040, 600101, 600102", 13.0850, 80.2100, 4500, 0, 199, "25-40 minutes"],
+                    ["T Nagar", "Chennai", "Tamil Nadu", "600017", 13.0418, 80.2341, 4000, 0, 149, "25-35 minutes"],
+                    ["Velachery", "Chennai", "Tamil Nadu", "600042", 12.9800, 80.2200, 4500, 0, 149, "25-35 minutes"],
+                    ["Adyar", "Chennai", "Tamil Nadu", "600020", 13.0012, 80.2565, 4500, 0, 199, "30-45 minutes"]
+                ];
+
+                for (const [name, city, state, pin, lat, lng, rad, charge, minOrd, time] of initial15) {
+                    const polygon = [
+                        { lat: Number((lat + 0.035).toFixed(6)), lng: Number(lng.toFixed(6)) },
+                        { lat: Number((lat + 0.017).toFixed(6)), lng: Number((lng + 0.030).toFixed(6)) },
+                        { lat: Number((lat - 0.017).toFixed(6)), lng: Number((lng + 0.030).toFixed(6)) },
+                        { lat: Number((lat - 0.035).toFixed(6)), lng: Number(lng.toFixed(6)) },
+                        { lat: Number((lat - 0.017).toFixed(6)), lng: Number((lng - 0.030).toFixed(6)) },
+                        { lat: Number((lat + 0.017).toFixed(6)), lng: Number((lng - 0.030).toFixed(6)) }
+                    ];
+
+                    await pool.query(`
+                        INSERT INTO serviceable_areas (
+                            area_name, city, state, pincode, boundary_type, boundary_coordinates,
+                            latitude, longitude, radius_meters, is_serviceable, is_active,
+                            delivery_charge, minimum_order_amount, estimated_delivery_time
+                        ) VALUES ($1,$2,$3,$4,'polygon',$5,$6,$7,$8,true,true,$9,$10,$11)
+                    `, [name, city, state, pin, JSON.stringify(polygon), lat, lng, rad, charge, minOrd, time]);
+                }
+                console.log("[+] Initialized 15 default Thulirva Serviceable Areas in database");
+            }
+        } catch (e) {
+            console.warn("Serviceable areas seed warn:", e.message);
+        }
+
         // Seed 11 delivery locations specified by the user
         const locCheck = await pool.query("SELECT COUNT(*) FROM delivery_locations");
         if (Number(locCheck.rows[0].count) === 0) {
@@ -700,6 +796,167 @@ async function initializeDatabase() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
+
+        // ============================================================
+        // 7. DELIVERY PARTNER ECOSYSTEM TABLES
+        // ============================================================
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS delivery_partners (
+                id SERIAL PRIMARY KEY,
+                partner_id VARCHAR(50) UNIQUE NOT NULL,
+                name VARCHAR(150) NOT NULL,
+                phone VARCHAR(30) UNIQUE NOT NULL,
+                email VARCHAR(200),
+                password VARCHAR(255) NOT NULL,
+                profile_photo TEXT,
+                address TEXT,
+                city VARCHAR(100) DEFAULT 'Chennai',
+                pincode VARCHAR(20),
+                assigned_area VARCHAR(150) DEFAULT 'Chennai Central',
+                vehicle_type VARCHAR(50) DEFAULT 'Scooter',
+                vehicle_number VARCHAR(50) DEFAULT 'TN 21 AB 1234',
+                driving_licence TEXT,
+                identity_documents TEXT,
+                emergency_contact VARCHAR(50),
+                registration_status VARCHAR(50) DEFAULT 'pending_approval',
+                rejection_reason TEXT,
+                is_online BOOLEAN DEFAULT false,
+                is_active BOOLEAN DEFAULT false,
+                is_blocked BOOLEAN DEFAULT false,
+                current_latitude NUMERIC(10,7) DEFAULT 13.0827,
+                current_longitude NUMERIC(10,7) DEFAULT 80.2707,
+                last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                location_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                active_orders_count INTEGER DEFAULT 0,
+                max_active_orders INTEGER DEFAULT 1,
+                rating NUMERIC(3,2) DEFAULT 5.0,
+                total_deliveries_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // Migration columns for existing databases
+        const dpColumns = [
+            "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS registration_status VARCHAR(50) DEFAULT 'pending_approval'",
+            "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS rejection_reason TEXT",
+            "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS city VARCHAR(100) DEFAULT 'Chennai'",
+            "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS pincode VARCHAR(20)",
+            "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS driving_licence TEXT",
+            "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS identity_documents TEXT",
+            "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS emergency_contact VARCHAR(50)",
+            "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+            "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS location_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+            "UPDATE delivery_partners SET registration_status = 'approved', is_active = true WHERE registration_status IS NULL OR registration_status = ''"
+        ];
+        for (const colSql of dpColumns) {
+            try { await pool.query(colSql); } catch {}
+        }
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS dispatch_offers (
+                id SERIAL PRIMARY KEY,
+                order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+                subscription_id VARCHAR(50) REFERENCES subscriptions(id) ON DELETE CASCADE,
+                delivery_type VARCHAR(50) DEFAULT 'order',
+                partner_id VARCHAR(50) REFERENCES delivery_partners(partner_id) ON DELETE CASCADE,
+                status VARCHAR(50) DEFAULT 'pending',
+                offer_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                response_time TIMESTAMP,
+                rejection_reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS delivery_assignments (
+                id SERIAL PRIMARY KEY,
+                assignment_id VARCHAR(50) UNIQUE NOT NULL,
+                order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+                subscription_id VARCHAR(50) REFERENCES subscriptions(id) ON DELETE CASCADE,
+                delivery_type VARCHAR(50) NOT NULL DEFAULT 'order',
+                partner_id VARCHAR(50) REFERENCES delivery_partners(partner_id) ON DELETE CASCADE,
+                status VARCHAR(50) DEFAULT 'assigned',
+                assigned_by VARCHAR(50) DEFAULT 'smart_dispatch',
+                pickup_time TIMESTAMP,
+                delivered_time TIMESTAMP,
+                failed_reason TEXT,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS daily_subscription_deliveries (
+                id SERIAL PRIMARY KEY,
+                daily_id VARCHAR(50) UNIQUE NOT NULL,
+                subscription_id VARCHAR(50) REFERENCES subscriptions(id) ON DELETE CASCADE,
+                delivery_date DATE NOT NULL,
+                partner_id VARCHAR(50) REFERENCES delivery_partners(partner_id) ON DELETE SET NULL,
+                customer_name VARCHAR(150) NOT NULL,
+                customer_phone VARCHAR(30) NOT NULL,
+                address TEXT NOT NULL,
+                product_name VARCHAR(200) NOT NULL,
+                quantity INTEGER DEFAULT 1,
+                delivery_slot VARCHAR(50) DEFAULT '6:00 AM - 7:00 AM',
+                status VARCHAR(50) DEFAULT 'pending',
+                delivered_at TIMESTAMP,
+                failed_reason TEXT,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT unique_sub_delivery_date UNIQUE (subscription_id, delivery_date)
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS partner_location_history (
+                id SERIAL PRIMARY KEY,
+                partner_id VARCHAR(50) NOT NULL,
+                latitude NUMERIC(10,7) NOT NULL,
+                longitude NUMERIC(10,7) NOT NULL,
+                speed NUMERIC(6,2) DEFAULT 0,
+                heading NUMERIC(6,2) DEFAULT 0,
+                accuracy NUMERIC(6,2) DEFAULT 0,
+                recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_audit_logs (
+                id SERIAL PRIMARY KEY,
+                admin_name VARCHAR(150) DEFAULT 'Admin Operations',
+                action VARCHAR(100) NOT NULL,
+                details TEXT,
+                ip_address VARCHAR(50),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // Seed 4 Delivery Partner test accounts if table is empty
+        const dpCheck = await pool.query("SELECT COUNT(*) FROM delivery_partners");
+        if (Number(dpCheck.rows[0].count) === 0) {
+            const bcrypt = require("bcryptjs");
+            const defaultHashedPassword = await bcrypt.hash("123456", 10);
+
+            const initialPartners = [
+                ['THU-DP-0001', 'Kamesh Sundaram', '9840122334', 'kamesh.s@thulirva.in', defaultHashedPassword, 'Kanchipuram Main Hub', 'Kanchipuram', 'Scooter', 'TN 21 AB 1001', 12.8342, 79.7036],
+                ['THU-DP-0002', 'Murugan K', '9840233445', 'murugan.k@thulirva.in', defaultHashedPassword, 'Walajabad Road, Kanchipuram', 'Kanchipuram', 'Motorcycle', 'TN 21 BC 2002', 12.8389, 79.7082],
+                ['THU-DP-0003', 'Senthil Nathan', '9840344556', 'senthil.n@thulirva.in', defaultHashedPassword, 'Anna Nagar West, Chennai', 'Chennai Central', 'Scooter', 'TN 02 CD 3003', 13.0850, 80.2100],
+                ['THU-DP-0004', 'Vignesh Kumar', '9840455667', 'vignesh.k@thulirva.in', defaultHashedPassword, 'Velachery Main Road, Chennai', 'Chennai South', 'Scooter', 'TN 07 DE 4004', 12.9800, 80.2200]
+            ];
+
+            for (const [pid, name, phone, email, pass, addr, area, vtype, vnum, lat, lng] of initialPartners) {
+                await pool.query(`
+                    INSERT INTO delivery_partners (
+                        partner_id, name, phone, email, password, address, assigned_area, vehicle_type, vehicle_number, current_latitude, current_longitude, is_online, is_active, is_blocked, registration_status
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, false, true, false, 'approved')
+                    ON CONFLICT (partner_id) DO NOTHING
+                `, [pid, name, phone, email, pass, addr, area, vtype, vnum, lat, lng]);
+            }
+            console.log("[+] Initialized 4 default Delivery Partners (password: 123456)");
+        }
 
         console.log("[+] Database tables ready");
     } catch (error) {

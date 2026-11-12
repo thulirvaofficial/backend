@@ -49,10 +49,25 @@ router.get("/user/:userId", async (req, res) => {
 
 /* ADD NEW ADDRESS */
 router.post("/", async (req, res) => {
-    const { user_id, name, phone, address, city, state, pincode, is_default } = req.body;
+    const {
+        user_id, name, phone, address, city, state, pincode, is_default,
+        street, area, landmark, delivery_instructions, latitude, longitude
+    } = req.body;
+
     if (!name || !phone || !address || !pincode) {
         return res.status(400).json({ success: false, message: "Name, phone, address and pincode are required" });
     }
+
+    // Check serviceability
+    const { checkServiceability } = require("../services/serviceabilityService");
+    const sCheck = await checkServiceability({
+        latitude: latitude,
+        longitude: longitude,
+        pincode: pincode
+    });
+
+    const is_serviceable = sCheck.serviceable;
+    const serviceable_area_id = sCheck.area ? sCheck.area.id : null;
 
     const newAddr = {
         id: Date.now(),
@@ -60,24 +75,37 @@ router.post("/", async (req, res) => {
         name,
         phone,
         address,
-        city: city || "Chennai",
-        state: state || "Tamil Nadu",
+        street: street || "",
+        area: area || "",
+        landmark: landmark || "",
+        delivery_instructions: delivery_instructions || "",
+        city: city || (sCheck.area ? sCheck.area.city : "Chennai"),
+        state: state || (sCheck.area ? sCheck.area.state : "Tamil Nadu"),
         pincode,
+        latitude: latitude ? Number(latitude) : null,
+        longitude: longitude ? Number(longitude) : null,
+        serviceable_area_id,
+        is_serviceable,
         is_default: Boolean(is_default),
         created_at: new Date().toISOString()
     };
 
     try {
-        if (newAddr.is_default) {
+        if (newAddr.is_default && newAddr.user_id) {
             await pool.query("UPDATE addresses SET is_default = false WHERE user_id = $1", [newAddr.user_id]);
         }
         const result = await pool.query(`
-            INSERT INTO addresses (user_id, name, phone, address, city, state, pincode, is_default)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO addresses (
+                user_id, name, phone, address, street, area, landmark, delivery_instructions,
+                city, state, pincode, latitude, longitude, serviceable_area_id, is_serviceable, is_default
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             RETURNING *
-        `, [newAddr.user_id, name, phone, address, newAddr.city, newAddr.state, pincode, newAddr.is_default]);
+        `, [
+            newAddr.user_id, name, phone, address, newAddr.street, newAddr.area, newAddr.landmark, newAddr.delivery_instructions,
+            newAddr.city, newAddr.state, pincode, newAddr.latitude, newAddr.longitude, serviceable_area_id, is_serviceable, newAddr.is_default
+        ]);
         if (result.rows.length) {
-            return res.json({ success: true, address: result.rows[0], message: "Address added successfully" });
+            return res.json({ success: true, address: result.rows[0], serviceable: is_serviceable, message: "Address added successfully" });
         }
     } catch {}
 
@@ -86,13 +114,29 @@ router.post("/", async (req, res) => {
     }
     MOCK_ADDRESSES.unshift(newAddr);
 
-    res.json({ success: true, address: newAddr, message: "Address added successfully" });
+    res.json({ success: true, address: newAddr, serviceable: is_serviceable, message: "Address added successfully" });
 });
 
 /* UPDATE ADDRESS */
 router.put("/:id", async (req, res) => {
     const id = parseInt(req.params.id);
-    const { name, phone, address, city, state, pincode, is_default } = req.body;
+    const {
+        name, phone, address, city, state, pincode, is_default,
+        street, area, landmark, delivery_instructions, latitude, longitude
+    } = req.body;
+
+    let is_serviceable = undefined;
+    let serviceable_area_id = undefined;
+    if (latitude || longitude || pincode) {
+        const { checkServiceability } = require("../services/serviceabilityService");
+        const sCheck = await checkServiceability({
+            latitude,
+            longitude,
+            pincode
+        });
+        is_serviceable = sCheck.serviceable;
+        serviceable_area_id = sCheck.area ? sCheck.area.id : null;
+    }
 
     try {
         const result = await pool.query(`
@@ -103,10 +147,24 @@ router.put("/:id", async (req, res) => {
                 city = COALESCE($4, city),
                 state = COALESCE($5, state),
                 pincode = COALESCE($6, pincode),
-                is_default = COALESCE($7, is_default)
-            WHERE id = $8
+                is_default = COALESCE($7, is_default),
+                street = COALESCE($8, street),
+                area = COALESCE($9, area),
+                landmark = COALESCE($10, landmark),
+                delivery_instructions = COALESCE($11, delivery_instructions),
+                latitude = COALESCE($12, latitude),
+                longitude = COALESCE($13, longitude),
+                serviceable_area_id = COALESCE($14, serviceable_area_id),
+                is_serviceable = COALESCE($15, is_serviceable)
+            WHERE id = $16
             RETURNING *
-        `, [name, phone, address, city, state, pincode, is_default, id]);
+        `, [
+            name, phone, address, city, state, pincode, is_default,
+            street, area, landmark, delivery_instructions,
+            latitude ? Number(latitude) : null,
+            longitude ? Number(longitude) : null,
+            serviceable_area_id, is_serviceable, id
+        ]);
         if (result.rows.length) {
             return res.json({ success: true, address: result.rows[0], message: "Address updated successfully" });
         }
@@ -120,6 +178,14 @@ router.put("/:id", async (req, res) => {
         if (city !== undefined) addr.city = city;
         if (state !== undefined) addr.state = state;
         if (pincode !== undefined) addr.pincode = pincode;
+        if (street !== undefined) addr.street = street;
+        if (area !== undefined) addr.area = area;
+        if (landmark !== undefined) addr.landmark = landmark;
+        if (delivery_instructions !== undefined) addr.delivery_instructions = delivery_instructions;
+        if (latitude !== undefined) addr.latitude = Number(latitude);
+        if (longitude !== undefined) addr.longitude = Number(longitude);
+        if (is_serviceable !== undefined) addr.is_serviceable = is_serviceable;
+        if (serviceable_area_id !== undefined) addr.serviceable_area_id = serviceable_area_id;
         if (is_default !== undefined) addr.is_default = Boolean(is_default);
     }
 

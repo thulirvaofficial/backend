@@ -193,10 +193,29 @@ router.post("/", async (req, res) => {
             }
         }
 
+        let serviceableAreaId = null;
         if (order_type !== "pickup") {
             const addrVal = validateAddress(address);
             if (!addrVal.valid) {
                 return res.status(400).json({ success: false, message: addrVal.message });
+            }
+
+            // Server-Side Serviceability Validation
+            const { checkServiceability } = require("../services/serviceabilityService");
+            const sCheck = await checkServiceability({
+                latitude: req.body.latitude || req.body.lat,
+                longitude: req.body.longitude || req.body.lng,
+                pincode: pincode
+            });
+            if (!sCheck.serviceable) {
+                return res.status(400).json({
+                    success: false,
+                    serviceable: false,
+                    message: "Sorry! Thulirva is not available in your area yet. We're working hard to bring fresh dairy products to your doorstep."
+                });
+            }
+            if (sCheck.area) {
+                serviceableAreaId = sCheck.area.id;
             }
         }
 
@@ -407,6 +426,11 @@ router.post("/", async (req, res) => {
             city: city || (order_type === "pickup" ? "Kanchipuram" : "Chennai"),
             state: state || "Tamil Nadu",
             pincode: pincode || (order_type === "pickup" ? "631601" : "600001"),
+            latitude: req.body.latitude || req.body.lat || null,
+            longitude: req.body.longitude || req.body.lng || null,
+            landmark: req.body.landmark || "",
+            delivery_instructions: req.body.delivery_instructions || req.body.instructions || "",
+            serviceable_area_id: serviceableAreaId,
             subtotal,
             delivery_charge: delivery,
             discount_amount,
@@ -507,10 +531,67 @@ async function getOrdersWithItems(whereClause = "", params = []) {
 /* ADMIN ALL ORDERS */
 router.get("/admin/all", async (req, res) => {
     try {
+        const includeSubs = req.query.include_subscriptions === "true" || req.query.type === "all";
         const orders = await getOrdersWithItems();
         const dbIds = new Set(orders.map(o => o.id.toString()));
         const memOrders = (MOCK_ORDERS || []).filter(o => !dbIds.has(o.id.toString()));
-        const allOrders = [...orders, ...memOrders];
+        
+        // Strict Product Orders partition: NEVER include subscriptions unless explicitly requested with include_subscriptions=true
+        let allOrders = [...orders, ...memOrders].filter(o => {
+            const isSub = (o.delivery_type === "subscription" || o.order_type === "subscription" || (o.id && o.id.toString().startsWith("SUB-")));
+            return !isSub;
+        }).map(o => ({
+            ...o,
+            order_type: "product"
+        }));
+
+        if (includeSubs) {
+            try {
+                const subRes = await pool.query("SELECT * FROM subscriptions ORDER BY created_at DESC");
+                const subRows = subRes.rows || [];
+                const subDbIds = new Set(subRows.map(r => r.id.toString()));
+                const subsFilePath = path.resolve(__dirname, "..", "data", "mock_subscriptions.json");
+                let memSubs = [];
+                if (fs.existsSync(subsFilePath)) {
+                    try { memSubs = JSON.parse(fs.readFileSync(subsFilePath, "utf8")); } catch (_) {}
+                }
+                const extraSubs = (memSubs || []).filter(m => !subDbIds.has(m.id.toString()));
+                const mappedSubs = [...subRows, ...extraSubs].map(s => ({
+                    id: s.id,
+                    user_id: s.user_id,
+                    customer_name: s.customer_name,
+                    customer_phone: s.customer_phone,
+                    customer_email: s.customer_email,
+                    total: Number(s.total_price) || 0,
+                    delivery_type: "subscription",
+                    order_type: "subscription",
+                    payment_method: s.payment_method || "UPI Direct",
+                    payment_status: s.payment_status || "Pending",
+                    order_status: s.status || "Active",
+                    transaction_id: s.transaction_id || "",
+                    payment_proof: s.payment_proof || "",
+                    created_at: s.created_at || s.start_date,
+                    items: [{
+                        id: s.id,
+                        product_name: s.product_name,
+                        name: s.product_name,
+                        price: Number(s.total_price) || 0,
+                        quantity: Number(s.quantity) || 1,
+                        weight: `${s.frequency || "Daily"} • ${s.time_period || "Monthly"}`,
+                        total: Number(s.total_price) || 0
+                    }],
+                    subscription_plan_name: s.product_name,
+                    subscription_frequency: s.frequency,
+                    subscription_quantity: s.quantity,
+                    subscription_delivery_slot: s.delivery_slot,
+                    address: s.address,
+                    city: s.city,
+                    raw_subscription: s
+                }));
+                allOrders = [...allOrders, ...mappedSubs];
+            } catch (_) {}
+        }
+
         allOrders.sort((a, b) => {
             const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
             const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
@@ -521,7 +602,8 @@ router.get("/admin/all", async (req, res) => {
         });
         return res.json({ success: true, orders: allOrders });
     } catch (err) {
-        res.json({ success: true, orders: MOCK_ORDERS || [] });
+        const prodMocks = (MOCK_ORDERS || []).filter(o => o.order_type !== "subscription" && !String(o.id).startsWith("SUB-"));
+        res.json({ success: true, orders: prodMocks });
     }
 });
 
@@ -606,13 +688,15 @@ router.get("/user/:identifier", async (req, res) => {
             whereClauses.push(`LOWER(COALESCE(user_id::text, '')) = $1 OR LOWER(customer_email) = $1`);
         }
 
-        const whereSql = `WHERE (${whereClauses.join(" OR ")})`;
+        const whereSql = `WHERE (${whereClauses.join(" OR ")}) AND (LOWER(COALESCE(delivery_type, '')) != 'subscription')`;
         const orders = await getOrdersWithItems(whereSql, params);
         
-        // Merge in-memory / disk orders safely
+        // Merge in-memory / disk orders safely (strictly product orders only)
         const dbIds = new Set(orders.map(o => o.id.toString()));
         const memOrders = (MOCK_ORDERS || []).filter(o => {
             if (dbIds.has(o.id.toString())) return false;
+            if ((o.delivery_type || "").toLowerCase() === "subscription") return false;
+            if (o.id && o.id.toString().startsWith("SUB-")) return false;
             const oUid = (o.user_id || o.userId || "").toString().trim();
             const oEmail = (o.customer_email || o.customerEmail || "").toLowerCase().trim();
             const oPhone = (o.customer_phone || o.customerPhone || "").replace(/\D/g, "");
@@ -729,6 +813,12 @@ const updateOrderStatusHandler = async (req, res) => {
 /* VERIFY PAYMENT (ADMIN / PAYMENT STAFF) */
 const verifyPaymentHandler = async (req, res) => {
     const rawId = req.params.id;
+    if (rawId && rawId.toString().startsWith("SUB-")) {
+        return res.status(400).json({
+            success: false,
+            message: `ID ${rawId} is a subscription. Please use /api/subscriptions/${rawId.toString().replace('SUB-', '')}/verify-payment`
+        });
+    }
     const numId = parseInt(rawId);
     const id = isNaN(numId) ? -1 : numId;
     const verifiedBy = req.body.verified_by || req.body.staff_name || "THULIRVA Operations";
@@ -793,6 +883,12 @@ router.post("/:id/verify-payment", verifyPaymentHandler);
 /* REJECT PAYMENT (ADMIN / PAYMENT STAFF) */
 const rejectPaymentHandler = async (req, res) => {
     const rawId = req.params.id;
+    if (rawId && rawId.toString().startsWith("SUB-")) {
+        return res.status(400).json({
+            success: false,
+            message: `ID ${rawId} is a subscription. Please use /api/subscriptions/${rawId.toString().replace('SUB-', '')}/reject-payment`
+        });
+    }
     const numId = parseInt(rawId);
     const id = isNaN(numId) ? -1 : numId;
     const reason = req.body.rejection_reason || req.body.reason || "Payment proof mismatch or invalid transaction reference";

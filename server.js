@@ -1,4 +1,5 @@
 const express = require("express");
+const http = require("http");
 const path = require("path");
 const cors = require("cors");
 require("dotenv").config();
@@ -10,6 +11,10 @@ const {
 const {
     initFirebaseAdmin
 } = require("./services/firebaseAdmin");
+
+const {
+    initSocketServer
+} = require("./services/socketService");
 
 const authRoutes =
     require("./routes/auth");
@@ -54,6 +59,15 @@ const bannerRoutes =
 
 const offerRoutes =
     require("./routes/offers");
+
+const deliveryRoutes =
+    require("./routes/delivery");
+
+const adminDeliveryRoutes =
+    require("./routes/adminDelivery");
+
+const serviceabilityRoutes =
+    require("./routes/serviceability");
 
 
 const app = express();
@@ -152,6 +166,46 @@ app.use(
     offerRoutes
 );
 
+app.use(
+    "/api/delivery",
+    deliveryRoutes
+);
+
+app.use(
+    "/api/delivery-partner",
+    deliveryRoutes
+);
+
+app.use(
+    "/api/delivery-partners",
+    deliveryRoutes
+);
+
+app.use(
+    "/api/admin/delivery",
+    adminDeliveryRoutes
+);
+
+app.use(
+    "/api/admin/delivery-partners",
+    adminDeliveryRoutes
+);
+
+app.use(
+    "/api/serviceability",
+    serviceabilityRoutes
+);
+
+app.use(
+    "/api/serviceable-areas",
+    serviceabilityRoutes
+);
+
+app.use(
+    "/api/admin/serviceable-areas",
+    serviceabilityRoutes
+);
+
 
 /* ============================================================
    FRONTEND & STATIC ASSETS (Common for Website, Admin & Mobile App)
@@ -226,7 +280,10 @@ app.get(
 ============================================================ */
 
 function startServer() {
-    const server = app.listen(
+    const server = http.createServer(app);
+    initSocketServer(server);
+
+    server.listen(
         PORT,
         () => {
             console.log("");
@@ -251,7 +308,7 @@ function startServer() {
             );
             console.log("");
             console.log(
-                "Server running..."
+                "Server running with Socket.IO..."
             );
             console.log("");
         }

@@ -591,6 +591,10 @@ async function createSubscriptionInternal(inputData) {
         address: inputData.address || "Doorstep Address, Kanchipuram",
         city: inputData.city || "Kanchipuram",
         pincode: inputData.pincode || "631601",
+        latitude: inputData.latitude || inputData.lat || null,
+        longitude: inputData.longitude || inputData.lng || null,
+        landmark: inputData.landmark || "",
+        delivery_instructions: inputData.delivery_instructions || inputData.instructions || "",
         payment_method: inputData.payment_method || "UPI Direct Payment (7904880944@superyes)",
         payment_status: payment_status,
         paymentStatus: payment_status,
@@ -850,6 +854,12 @@ const deleteSubHandler = async (req, res) => {
 /* APPROVE / VERIFY SUBSCRIPTION PAYMENT (Admin) */
 const verifyPaymentHandler = async (req, res) => {
     const id = req.params.id;
+    if (id && (id.toString().startsWith("THU-") || id.toString().startsWith("ORD-"))) {
+        return res.status(400).json({
+            success: false,
+            message: `ID ${id} is a product order. Please use /api/orders/${id}/verify-payment`
+        });
+    }
     const verifiedBy = req.user?.name || req.body?.admin_name || "Admin Operations";
     let sub = null;
     try {
@@ -892,6 +902,12 @@ const verifyPaymentHandler = async (req, res) => {
 /* REJECT SUBSCRIPTION PAYMENT (Admin) */
 const rejectPaymentHandler = async (req, res) => {
     const id = req.params.id;
+    if (id && (id.toString().startsWith("THU-") || id.toString().startsWith("ORD-"))) {
+        return res.status(400).json({
+            success: false,
+            message: `ID ${id} is a product order. Please use /api/orders/${id}/reject-payment`
+        });
+    }
     const { reason } = req.body || {};
     const rejectionReason = reason || "Payment verification failed or receipt was invalid";
     let sub = null;
