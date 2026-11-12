@@ -86,6 +86,65 @@ function authenticatePartner(req, res, next) {
 ============================================================ */
 
 /**
+ * Helper: Save Delivery Partner KYC Aadhaar front and back documents
+ * Persists images to DATA_DIR/kyc_documents/<partnerId>/aadhaar_front.<ext>
+ * Supports Base64 Data URLs (JPEG, PNG, WebP) and raw Base64
+ * Returns document access URLs
+ */
+function savePartnerKycFiles(partnerId, frontData, backData) {
+    if (!partnerId) return { frontSaved: false, backSaved: false, frontUrl: null, backUrl: null };
+
+    const kycDir = path.join(DATA_DIR, "kyc_documents", partnerId);
+    if (!fs.existsSync(kycDir)) {
+        try {
+            fs.mkdirSync(kycDir, { recursive: true });
+        } catch (dirErr) {
+            console.error(`[KYC MKDIR ERROR] ${partnerId}:`, dirErr.message);
+        }
+    }
+
+    const writeImage = (data, prefix) => {
+        if (!data || typeof data !== "string") return false;
+        try {
+            let ext = "jpg";
+            let cleanBase64 = data.trim();
+            if (cleanBase64.includes("base64,")) {
+                if (cleanBase64.includes("data:image/png")) ext = "png";
+                else if (cleanBase64.includes("data:image/webp")) ext = "webp";
+                else if (cleanBase64.includes("data:image/jpeg") || cleanBase64.includes("data:image/jpg")) ext = "jpg";
+                cleanBase64 = cleanBase64.replace(/^data:image\/[a-zA-Z0-9.+_-]+;base64,/, "");
+            }
+            const buffer = Buffer.from(cleanBase64, "base64");
+            if (!buffer || buffer.length === 0) return false;
+
+            // Remove any existing variant files before saving new file
+            ["jpg", "jpeg", "png", "webp"].forEach(e => {
+                const old = path.join(kycDir, `${prefix}.${e}`);
+                if (fs.existsSync(old)) {
+                    try { fs.unlinkSync(old); } catch (_) {}
+                }
+            });
+
+            fs.writeFileSync(path.join(kycDir, `${prefix}.${ext}`), buffer);
+            return true;
+        } catch (e) {
+            console.error(`[KYC WRITE ERROR] ${partnerId} (${prefix}):`, e.message);
+            return false;
+        }
+    };
+
+    const frontSaved = frontData ? writeImage(frontData, "aadhaar_front") : false;
+    const backSaved = backData ? writeImage(backData, "aadhaar_back") : false;
+
+    return {
+        frontSaved,
+        backSaved,
+        frontUrl: `/api/admin/delivery/partners/${partnerId}/kyc/front`,
+        backUrl: `/api/admin/delivery/partners/${partnerId}/kyc/back`
+    };
+}
+
+/**
  * POST /api/delivery/register & /api/delivery-partners/auth/register
  * Real delivery partner registration with DB persistence
  */
@@ -243,9 +302,19 @@ const registerPartnerHandler = async (req, res) => {
 
         // Save Aadhaar KYC documents if provided during registration
         if (req.body.aadhaar_front || req.body.aadhaar_back) {
-            savePartnerKycFiles(partner_id, req.body.aadhaar_front, req.body.aadhaar_back);
+            const kycDocs = savePartnerKycFiles(partner_id, req.body.aadhaar_front, req.body.aadhaar_back);
             newPartner.kyc_status = "pending_verification";
             newPartner.kyc_submitted_at = new Date().toISOString();
+            newPartner.aadhaar_front_url = kycDocs.frontUrl;
+            newPartner.aadhaar_back_url = kycDocs.backUrl;
+
+            try {
+                await pool.query(`
+                    UPDATE delivery_partners
+                    SET kyc_status = $1, kyc_submitted_at = NOW(), aadhaar_front_url = $2, aadhaar_back_url = $3
+                    WHERE partner_id = $4
+                `, [newPartner.kyc_status, newPartner.aadhaar_front_url, newPartner.aadhaar_back_url, partner_id]);
+            } catch (_) {}
         }
 
         // Add to local JSON cache
@@ -266,7 +335,9 @@ const registerPartnerHandler = async (req, res) => {
             message: "Registration submitted successfully! Your application is pending admin approval.",
             partner_id,
             registration_status: "pending_approval",
-            kyc_status: newPartner.kyc_status || "pending_verification"
+            kyc_status: newPartner.kyc_status || "pending_verification",
+            aadhaar_front_url: newPartner.aadhaar_front_url || null,
+            aadhaar_back_url: newPartner.aadhaar_back_url || null
         });
     } catch (err) {
         console.error("[PARTNER REGISTRATION ERROR]", err.message);
@@ -305,15 +376,17 @@ const uploadPartnerKycHandler = async (req, res) => {
             p.kyc_status = "pending_verification";
             p.kyc_submitted_at = new Date().toISOString();
             p.updated_at = new Date().toISOString();
+            p.aadhaar_front_url = docs.frontUrl;
+            p.aadhaar_back_url = docs.backUrl;
             savePartners(partners);
         }
 
         try {
             await pool.query(`
                 UPDATE delivery_partners
-                SET kyc_status = 'pending_verification', updated_at = NOW()
+                SET kyc_status = 'pending_verification', updated_at = NOW(), aadhaar_front_url = $2, aadhaar_back_url = $3
                 WHERE partner_id = $1
-            `, [id]);
+            `, [id, docs.frontUrl, docs.backUrl]);
         } catch {}
 
         emitToAdmin("partner:kyc_uploaded", {
@@ -335,6 +408,38 @@ const uploadPartnerKycHandler = async (req, res) => {
 
 router.post("/kyc/upload", uploadPartnerKycHandler);
 router.post("/auth/kyc/upload", uploadPartnerKycHandler);
+
+/**
+ * GET /api/delivery/partners/:id/kyc/:type
+ * Document serving endpoint for delivery partner route
+ */
+router.get("/partners/:id/kyc/:type", (req, res) => {
+    try {
+        const { id: partnerId, type } = req.params;
+        const cleanType = type === "back" ? "back" : "front";
+        const kycDir = path.join(DATA_DIR, "kyc_documents", partnerId);
+
+        const possibleFiles = [
+            path.join(kycDir, `aadhaar_${cleanType}.jpg`),
+            path.join(kycDir, `aadhaar_${cleanType}.jpeg`),
+            path.join(kycDir, `aadhaar_${cleanType}.png`),
+            path.join(kycDir, `aadhaar_${cleanType}.webp`)
+        ];
+
+        for (const file of possibleFiles) {
+            if (fs.existsSync(file)) {
+                return res.sendFile(file);
+            }
+        }
+
+        return res.status(404).json({
+            success: false,
+            message: `KYC document (${cleanType}) not uploaded for partner ${partnerId}`
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
 
 /**
  * POST /api/delivery/login & /api/delivery-partners/auth/login

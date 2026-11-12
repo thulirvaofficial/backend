@@ -847,6 +847,10 @@ async function initializeDatabase() {
             "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS emergency_contact VARCHAR(50)",
             "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
             "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS location_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+            "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS kyc_status VARCHAR(50) DEFAULT 'pending_verification'",
+            "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS kyc_submitted_at TIMESTAMP",
+            "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS aadhaar_front_url TEXT",
+            "ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS aadhaar_back_url TEXT",
             "UPDATE delivery_partners SET registration_status = 'approved', is_active = true WHERE registration_status IS NULL OR registration_status = ''"
         ];
         for (const colSql of dpColumns) {
