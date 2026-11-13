@@ -89,9 +89,9 @@ router.get("/", async (req, res) => {
 });
 
 /**
- * PUT /api/v1/orders/:id/status
+ * PUT & POST /api/v1/orders/:id/status
  */
-router.put("/:id/status", async (req, res) => {
+const updateOrderStatusHandler = async (req, res) => {
     try {
         const id = req.params.id;
         const { status, partner_id, notes } = req.body;
@@ -99,6 +99,15 @@ router.put("/:id/status", async (req, res) => {
         const order = orders.find(o => o.id?.toString() === id.toString() || o.order_number === id);
 
         if (!order) return res.status(404).json({ success: false, message: "Order not found." });
+
+        // Issue 2: Permanently lock delivered orders
+        if (order.order_status === "delivered" || order.status === "delivered") {
+            return res.status(400).json({
+                success: false,
+                error_code: "ORDER_LOCKED",
+                message: "Order has already been delivered and locked. Duplicate completion or status editing is prevented."
+            });
+        }
 
         order.order_status = status;
         order.status = status;
@@ -132,6 +141,9 @@ router.put("/:id/status", async (req, res) => {
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }
-});
+};
+
+router.put("/:id/status", updateOrderStatusHandler);
+router.post("/:id/status", updateOrderStatusHandler);
 
 module.exports = router;

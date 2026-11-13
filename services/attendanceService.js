@@ -154,8 +154,27 @@ async function checkIn({ partner_id, partner_name, photo_base64, latitude, longi
         ]);
     } catch (_) {}
 
-    // Emit live update to Admin App
+    // Mark partner online in database
     try {
+        await pool.query(
+            "UPDATE delivery_partners SET is_online = true, updated_at = NOW() WHERE partner_id = $1",
+            [newRecord.partner_id]
+        );
+        const { getPartnerById, savePartner } = require("./deliveryPartnerService");
+        const partner = await getPartnerById(newRecord.partner_id);
+        if (partner) {
+            partner.is_online = true;
+            await savePartner(partner);
+        }
+    } catch (_) {}
+
+    // Emit live update to Admin App & Website
+    try {
+        emitToAdmin("partner:status:changed", {
+            partnerId: newRecord.partner_id,
+            is_online: true,
+            timestamp: new Date().toISOString()
+        });
         emitToAdmin("partner:attendance_check_in", {
             partner_id: newRecord.partner_id,
             partner_name: newRecord.partner_name,
@@ -196,6 +215,21 @@ async function checkOut({ partner_id, photo_base64, latitude, longitude }) {
         };
     }
 
+    // Guard: Block checkout if partner has active assigned deliveries
+    try {
+        const activeRes = await pool.query(
+            "SELECT id, order_status FROM orders WHERE partner_id = $1 AND LOWER(COALESCE(order_status, '')) IN ('assigned', 'accepted', 'in_transit', 'out_for_delivery')",
+            [partner_id]
+        );
+        if (activeRes.rows && activeRes.rows.length > 0) {
+            return {
+                success: false,
+                has_active_deliveries: true,
+                message: `Cannot check out: You have ${activeRes.rows.length} active delivery in progress. Complete all assigned orders before ending your shift.`
+            };
+        }
+    } catch (_) {}
+
     let photoUrl = null;
     if (photo_base64) {
         const filename = `checkout_${partner_id}_${Date.now()}.jpg`;
@@ -231,6 +265,32 @@ async function checkOut({ partner_id, photo_base64, latitude, longitude }) {
             record.check_out_location.latitude, record.check_out_location.longitude,
             hours, record.id
         ]);
+        // Set partner status to offline in delivery_partners table & disk store
+        await pool.query(
+            "UPDATE delivery_partners SET is_online = false, updated_at = NOW() WHERE partner_id = $1",
+            [partner_id]
+        );
+        const { getPartnerById, savePartner } = require("./deliveryPartnerService");
+        const partner = await getPartnerById(partner_id);
+        if (partner) {
+            partner.is_online = false;
+            await savePartner(partner);
+        }
+    } catch (_) {}
+
+    // Emit live update to Admin App & Website
+    try {
+        emitToAdmin("partner:status:changed", {
+            partnerId: partner_id,
+            is_online: false,
+            timestamp: new Date().toISOString()
+        });
+        emitToAdmin("partner:attendance_check_out", {
+            partner_id,
+            check_out_time: record.check_out_time,
+            working_hours: hours,
+            status: "checked_out"
+        });
     } catch (_) {}
 
     return {

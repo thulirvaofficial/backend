@@ -375,12 +375,26 @@ async function updateSubscriptionDeliveryStatus(deliveryId, status, notes = "", 
     const nowIso = new Date().toISOString();
 
     try {
+        // Issue 2: Check if already delivered and locked in DB
+        const checkRes = await pool.query(
+            "SELECT status FROM daily_subscription_deliveries WHERE (daily_id = $1 OR id::text = $1 OR subscription_id = $1)",
+            [deliveryId.toString()]
+        );
+        if (checkRes.rows.length > 0 && checkRes.rows[0].status === "delivered") {
+            return {
+                success: false,
+                error_code: "DELIVERY_LOCKED",
+                message: "Subscription delivery has already been completed and locked. Status cannot be modified."
+            };
+        }
+
         const res = await pool.query(`
             UPDATE daily_subscription_deliveries
             SET status = $1, delivered_at = $2, notes = $3, failed_reason = $4,
                 partner_id = COALESCE(partner_id, $5)
             WHERE (daily_id = $6 OR id::text = $6 OR subscription_id = $6)
               AND (partner_id IS NULL OR partner_id = $5 OR $5 IS NULL)
+              AND status != 'delivered'
             RETURNING *
         `, [status, isDelivered ? new Date() : null, notes, failedReason, partnerId, deliveryId.toString()]);
 
@@ -401,6 +415,15 @@ async function updateSubscriptionDeliveryStatus(deliveryId, status, notes = "", 
 
     if (!item) {
         return { success: false, message: `Subscription delivery record '${deliveryId}' not found.` };
+    }
+
+    // Issue 2: Permanently lock delivered subscription in disk store
+    if (item.status === "delivered") {
+        return {
+            success: false,
+            error_code: "DELIVERY_LOCKED",
+            message: "Subscription delivery has already been completed and locked. Status cannot be modified."
+        };
     }
 
     if (partnerId && item.claimed_by && item.claimed_by !== partnerId) {

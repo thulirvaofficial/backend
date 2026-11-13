@@ -165,11 +165,19 @@ async function sendNotification({
 
         if (tokens.length > 0 && messaging && isReady) {
             let targetChannelId;
+            const isPartnerTarget = (userId && (userId.toString().startsWith("THU-DP") || userId.toString().startsWith("DP-") || userId.toString().startsWith("partner"))) ||
+                type.includes("delivery") || type.includes("offer") || type.includes("assignment");
+
             if (forAdmin) {
                 if (type.includes("order") || type.includes("pickup")) targetChannelId = "thulirva_admin_orders_channel_v2";
                 else if (type.includes("sub")) targetChannelId = "thulirva_admin_subscriptions_channel_v2";
                 else if (type.includes("pay")) targetChannelId = "thulirva_admin_payments_channel_v2";
                 else targetChannelId = "thulirva_admin_channel_v2";
+            } else if (isPartnerTarget) {
+                if (type.includes("sub")) targetChannelId = "subscription_deliveries";
+                else if (type.includes("pay") || type.includes("earn") || type.includes("settle")) targetChannelId = "payment_updates";
+                else if (type.includes("emergency") || type.includes("alert")) targetChannelId = "emergency_alerts";
+                else targetChannelId = "delivery_assignments";
             } else {
                 if (type.includes("order")) targetChannelId = "thulirva_orders_channel_v2";
                 else if (type.includes("sub")) targetChannelId = "thulirva_subscriptions_channel_v2";

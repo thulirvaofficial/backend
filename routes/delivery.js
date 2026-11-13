@@ -1020,6 +1020,24 @@ const updatePartnerStatusHandler = async (req, res) => {
     const partnerId = req.partner.partner_id;
     const is_online = req.body.is_online !== undefined ? req.body.is_online : req.body.isOnline;
 
+    // Issue 6: Block going offline if active deliveries exist
+    if (!Boolean(is_online) && !req.body.force) {
+        try {
+            const activeRes = await pool.query(
+                "SELECT id, order_status FROM orders WHERE partner_id = $1 AND LOWER(COALESCE(order_status, '')) IN ('assigned', 'accepted', 'in_transit', 'out_for_delivery')",
+                [partnerId]
+            );
+            if (activeRes.rows && activeRes.rows.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    has_active_deliveries: true,
+                    active_count: activeRes.rows.length,
+                    message: `Cannot go offline while you have ${activeRes.rows.length} active delivery in progress. Complete all assigned orders before ending your shift.`
+                });
+            }
+        } catch (_) {}
+    }
+
     try {
         await pool.query(
             "UPDATE delivery_partners SET is_online = $1, updated_at = NOW() WHERE partner_id = $2",
