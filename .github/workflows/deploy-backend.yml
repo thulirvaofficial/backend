@@ -26,47 +26,31 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            echo "=== SYSTEM DIAGNOSTIC START ==="
+            npm install --omit=dev
+
+            echo "=== SYSTEM RESTART & VERIFY ==="
             sudo bash -c '
               exec > /var/www/thulirva/website/admin/diag.txt 2>&1
               echo "=== DATE & USER ==="
               date
               whoami
-              pwd
 
-              echo "=== SYSTEMD SERVICES ==="
-              systemctl list-units --type=service --state=running | grep -E "pm2|node|thulirva|backend" || true
-              find /etc/systemd/system -name "*pm2*" -o -name "*thulirva*" -o -name "*node*" -o -name "*backend*" || true
+              # Restart in ubuntu user PM2 daemon
+              su - ubuntu -c "cd /var/www/thulirva/backend && (pm2 delete backend || true) && pm2 start server.js --name backend --update-env && pm2 save" || true
 
-              echo "=== PS AUX NODE & PM2 ==="
-              ps aux | grep -E "node|pm2|server" | grep -v grep || true
+              # Also restart in root PM2 daemon if running
+              (pm2 delete backend || true) && pm2 start /var/www/thulirva/backend/server.js --name backend --update-env && pm2 save || true
 
-              echo "=== PM2 ENVIRONMENTS ==="
-              pm2 list || true
-              su - ubuntu -c "pm2 list" 2>/dev/null || true
-
-              echo "=== CHECKING DIRECTORY FILES ==="
-              ls -la /var/www/thulirva/backend/
-
-              echo "=== RUNNING NODE SERVER TEST ==="
-              cd /var/www/thulirva/backend
-              timeout 5 node server.js || echo "Node test exited with: $?"
-
-              echo "=== STARTING VIA PM2 AS ROOT ==="
-              pm2 delete all || true
-              pm2 start server.js --name backend --update-env
-              pm2 save
-
-              sleep 3
+              sleep 4
 
               echo "=== LISTENING PORTS AFTER START ==="
               ss -tlpn
 
-              echo "=== PM2 STATUS AFTER START ==="
-              pm2 list
+              echo "=== PM2 STATUS (ROOT) ==="
+              pm2 list || true
 
-              echo "=== PM2 LOGS AFTER START ==="
-              pm2 logs backend --lines 60 --nostream || true
+              echo "=== PM2 STATUS (UBUNTU) ==="
+              su - ubuntu -c "pm2 list" || true
 
               echo "=== LOCAL CURL TESTS AFTER START ==="
               curl -s -i http://127.0.0.1:5500/api || echo "Curl 5500 failed"
