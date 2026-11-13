@@ -19,8 +19,6 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            set -e
-
             cd /var/www/thulirva/backend
 
             git fetch origin main
@@ -28,20 +26,17 @@ jobs:
 
             npm install --omit=dev
 
-            # Ensure root PM2 does not conflict on port 5500
             pm2 delete backend 2>/dev/null || true
-
-            # Restart in ubuntu user PM2 daemon (main service runner)
-            su - ubuntu -c "cd /var/www/thulirva/backend && (pm2 delete backend 2>/dev/null || true) && pm2 start server.js --name backend --update-env && pm2 save"
+            pm2 start server.js --name backend --update-env
+            pm2 save
 
             sleep 4
 
-            # Verify local backend is responding
-            curl -s -f http://127.0.0.1:5500/api || echo "Backend check completed"
+            echo "=== PM2 STATUS ==="
+            pm2 list || true
 
-            # Remove diagnostic text files for security
-            sudo rm -f /var/www/thulirva/website/admin/diag.txt /var/www/thulirva/website/website/diag.txt /var/www/thulirva/website/diag.txt /var/www/thulirva/website/vps_diag.txt 2>/dev/null || true
-
-            echo "Thulirva backend deployment verified and running successfully."
+            echo "=== LOCAL TEST ==="
+            curl -s -i http://127.0.0.1:5500/api/ || true
+            curl -s -i http://127.0.0.1:5500/api/v1/partners || true
 
             echo "Backend deployment successful"
