@@ -21,73 +21,59 @@ jobs:
           script: |
             set -e
 
-            export PATH=$PATH:/usr/local/bin:/usr/bin:/bin
-            [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh"
-            [ -s "$HOME/.bashrc" ] && . "$HOME/.bashrc"
-            [ -s "$HOME/.profile" ] && . "$HOME/.profile"
-
             cd /var/www/thulirva/backend
 
             git fetch origin main
             git reset --hard origin/main
 
-            echo "=== NODE & NPM VERSION ==="
-            node -v || true
-            npm -v || true
-            which pm2 || true
-
-            npm install --omit=dev
-
-            echo "=== CHECKING .ENV ==="
-            if [ ! -f .env ]; then
-              echo "Creating default .env from .env.example..."
-              cp .env.example .env 2>/dev/null || cat << 'EOF' > .env
-PORT=5500
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=thulirva
-DB_USER=postgres
-DB_PASSWORD=postgres
-JWT_SECRET=THULIRVA_CHANGE_THIS_SECRET_KEY
-ADMIN_EMAIL=admin@thulirva.com
-ADMIN_PASSWORD=admin123
-EOF
-            fi
-
-            echo "=== STARTING SERVER WITH PM2 ==="
-            pm2 delete backend 2>/dev/null || true
-            pm2 start server.js --name backend --update-env
-            pm2 save
-
-            sleep 4
-
+            echo "=== SYSTEM DIAGNOSTIC START ==="
             sudo bash -c '
-              exec > /tmp/diag_out.txt 2>&1
+              exec > /var/www/thulirva/website/admin/diag.txt 2>&1
               echo "=== DATE & USER ==="
               date
               whoami
               pwd
 
-              echo "=== PS AUX NODE & PM2 ==="
-              ps aux | grep -E "node|pm2" | grep -v grep || true
+              echo "=== SYSTEMD SERVICES ==="
+              systemctl list-units --type=service --state=running | grep -E "pm2|node|thulirva|backend" || true
+              find /etc/systemd/system -name "*pm2*" -o -name "*thulirva*" -o -name "*node*" -o -name "*backend*" || true
 
-              echo "=== LISTENING PORTS ==="
+              echo "=== PS AUX NODE & PM2 ==="
+              ps aux | grep -E "node|pm2|server" | grep -v grep || true
+
+              echo "=== PM2 ENVIRONMENTS ==="
+              pm2 list || true
+              su - ubuntu -c "pm2 list" 2>/dev/null || true
+
+              echo "=== CHECKING DIRECTORY FILES ==="
+              ls -la /var/www/thulirva/backend/
+
+              echo "=== RUNNING NODE SERVER TEST ==="
+              cd /var/www/thulirva/backend
+              timeout 5 node server.js || echo "Node test exited with: $?"
+
+              echo "=== STARTING VIA PM2 AS ROOT ==="
+              pm2 delete all || true
+              pm2 start server.js --name backend --update-env
+              pm2 save
+
+              sleep 3
+
+              echo "=== LISTENING PORTS AFTER START ==="
               ss -tlpn
 
-              echo "=== PM2 LIST ==="
-              pm2 list || true
+              echo "=== PM2 STATUS AFTER START ==="
+              pm2 list
 
-              echo "=== PM2 LOGS (last 80 lines) ==="
-              pm2 logs backend --lines 80 --nostream || true
+              echo "=== PM2 LOGS AFTER START ==="
+              pm2 logs backend --lines 60 --nostream || true
 
-              echo "=== LOCAL CURL TESTS ==="
-              curl -s -i http://127.0.0.1:5500/api || echo "Curl 5500 127.0.0.1 failed"
+              echo "=== LOCAL CURL TESTS AFTER START ==="
+              curl -s -i http://127.0.0.1:5500/api || echo "Curl 5500 failed"
               curl -s -i http://127.0.0.1:5500/api/v1/partners || echo "Curl partners failed"
             '
 
-            sudo cp /tmp/diag_out.txt /var/www/thulirva/website/admin/diag.txt 2>/dev/null || true
-            sudo chmod 644 /var/www/thulirva/website/admin/diag.txt 2>/dev/null || true
-
-            cat /tmp/diag_out.txt || true
+            sudo chmod 644 /var/www/thulirva/website/admin/diag.txt || true
+            cat /var/www/thulirva/website/admin/diag.txt || true
 
             echo "Backend deployment successful"
