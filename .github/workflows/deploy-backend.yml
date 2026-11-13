@@ -34,18 +34,42 @@ jobs:
 
             sleep 3
 
-            {
-              echo "=== PM2 STATUS ==="
-              pm2 status || true
-              echo "=== PM2 LOGS ==="
-              pm2 logs backend --lines 40 --nostream || true
+            sudo bash -c '
+              exec > /tmp/diag_out.txt 2>&1
+              echo "=== DATE & USER ==="
+              date
+              whoami
+              pwd
+
               echo "=== LISTENING PORTS ==="
-              sudo ss -tlpn || sudo netstat -tlpn || true
-              echo "=== NGINX SITES ==="
-              sudo cat /etc/nginx/sites-enabled/* || true
+              ss -tlpn
+
+              echo "=== PM2 LIST ==="
+              pm2 list || su - ubuntu -c "pm2 list"
+
+              echo "=== PM2 LOGS (last 60 lines) ==="
+              pm2 logs backend --lines 60 --nostream || su - ubuntu -c "pm2 logs backend --lines 60 --nostream"
+
+              echo "=== NGINX SITES-ENABLED ==="
+              cat /etc/nginx/sites-enabled/*
+
+              echo "=== NGINX ERROR LOG ==="
+              tail -n 40 /var/log/nginx/error.log || true
+
               echo "=== LOCAL CURL TESTS ==="
-              curl -i http://127.0.0.1:5500/api || true
-              curl -i http://127.0.0.1:5000/api || true
-            } > /var/www/thulirva/website/vps_diag.txt 2>&1 || true
+              curl -s -i http://127.0.0.1:5500/api || echo "Curl 5500 127.0.0.1 failed"
+              curl -s -i http://127.0.0.1:5000/api || echo "Curl 5000 127.0.0.1 failed"
+              curl -s -i http://localhost:5500/api || echo "Curl 5500 localhost failed"
+              curl -s -i http://localhost:5000/api || echo "Curl 5000 localhost failed"
+            '
+
+            # Copy diagnostic output to all possible web roots so it can be viewed over HTTP
+            sudo cp /tmp/diag_out.txt /var/www/thulirva/website/admin/diag.txt 2>/dev/null || true
+            sudo cp /tmp/diag_out.txt /var/www/thulirva/website/website/diag.txt 2>/dev/null || true
+            sudo cp /tmp/diag_out.txt /var/www/thulirva/website/diag.txt 2>/dev/null || true
+            sudo cp /tmp/diag_out.txt /var/www/html/diag.txt 2>/dev/null || true
+            sudo chmod 644 /var/www/thulirva/website/admin/diag.txt /var/www/thulirva/website/website/diag.txt /var/www/thulirva/website/diag.txt /var/www/html/diag.txt 2>/dev/null || true
+
+            cat /tmp/diag_out.txt || true
 
             echo "Backend deployment successful"
