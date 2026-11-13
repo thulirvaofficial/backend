@@ -102,4 +102,40 @@ router.get("/admin/all", optionalAdminAuth, async (req, res) => {
     }
 });
 
+/**
+ * GET /api/v1/attendance (Root alias for admin attendance list)
+ */
+router.get("/", optionalAdminAuth, async (req, res) => {
+    try {
+        const { date, partner_id, search, filter } = req.query;
+        const result = await getAdminAttendanceList({
+            filter: filter || (date ? "custom" : "all"),
+            start_date: date || null,
+            end_date: date || null,
+            partner_id: partner_id || null,
+            search: search || null
+        });
+        return res.json(result);
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * GET /api/v1/attendance/today (Today's attendance)
+ */
+router.get("/today", optionalAdminAuth, async (req, res) => {
+    try {
+        const today = new Date().toISOString().split("T")[0];
+        const result = await getAdminAttendanceList({
+            filter: "today",
+            start_date: today,
+            end_date: today
+        });
+        return res.json(result);
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 module.exports = router;

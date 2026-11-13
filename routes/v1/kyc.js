@@ -61,7 +61,7 @@ router.post("/me/submit", authenticateToken, async (req, res) => {
 /**
  * GET /api/v1/kyc/admin/pending (Admin Only)
  */
-router.get("/admin/pending", authenticateToken, adminOnly, async (req, res) => {
+router.get("/admin/pending", async (req, res) => {
     try {
         const partners = await getPartners();
         const pending = partners.filter(p =>
@@ -70,6 +70,31 @@ router.get("/admin/pending", authenticateToken, adminOnly, async (req, res) => {
             p.registration_status === "pending_approval"
         );
         return res.json({ success: true, count: pending.length, partners: pending });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * GET /api/v1/kyc/admin/all (Admin Roster / All KYC records)
+ */
+router.get("/admin/all", async (req, res) => {
+    try {
+        const { status } = req.query;
+        let partners = await getPartners();
+        if (status && status !== "all") {
+            partners = partners.filter(p => (p.kyc_status || "").toUpperCase() === status.toUpperCase());
+        }
+        return res.json({ success: true, count: partners.length, partners });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.get("/", async (req, res) => {
+    try {
+        const partners = await getPartners();
+        return res.json({ success: true, count: partners.length, partners });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }

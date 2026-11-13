@@ -86,6 +86,38 @@ router.get("/admin/all", optionalAdminAuth, async (req, res) => {
     }
 });
 
+router.get("/", optionalAdminAuth, async (req, res) => {
+    try {
+        let requests = [];
+        if (fs.existsSync(WITHDRAWALS_FILE)) {
+            requests = JSON.parse(fs.readFileSync(WITHDRAWALS_FILE, "utf-8"));
+        }
+        const statusFilter = req.query.status;
+        if (statusFilter) {
+            requests = requests.filter(r => r.status === statusFilter);
+        }
+        return res.json({ success: true, total: requests.length, requests });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.get("/all", optionalAdminAuth, async (req, res) => {
+    try {
+        let requests = [];
+        if (fs.existsSync(WITHDRAWALS_FILE)) {
+            requests = JSON.parse(fs.readFileSync(WITHDRAWALS_FILE, "utf-8"));
+        }
+        const statusFilter = req.query.status;
+        if (statusFilter) {
+            requests = requests.filter(r => r.status === statusFilter);
+        }
+        return res.json({ success: true, total: requests.length, requests });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 /**
  * POST /api/v1/withdrawals/:id/review (Admin Only)
  */

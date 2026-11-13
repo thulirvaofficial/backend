@@ -303,28 +303,49 @@ app.use("/admin/images", express.static(path.resolve(adminPath, "images")));
    API STATUS
 ============================================================ */
 
-app.get(
-    "/api",
-    (req, res) => {
+const apiStatusHandler = (req, res) => {
+    res.json({
+        project: "THULIRVA",
+        message: "THULIRVA API is running",
+        status: "online",
+        version: "1.0.0",
+        timestamp: new Date().toISOString()
+    });
+};
 
-        res.json({
+app.get("/api", apiStatusHandler);
+app.get("/api/", apiStatusHandler);
 
-            project:
-                "THULIRVA",
 
-            message:
-                "THULIRVA API is running",
+/* ============================================================
+   API 404 CATCH-ALL (Guarantees pure JSON, never HTML)
+============================================================ */
 
-            status:
-                "online",
+app.all("/api/*", (req, res) => {
+    res.status(404).json({
+        success: false,
+        error: "ENDPOINT_NOT_FOUND",
+        message: `API endpoint ${req.method} ${req.originalUrl} was not found on this server.`,
+        path: req.originalUrl,
+        method: req.method
+    });
+});
 
-            version:
-                "1.0.0"
+/* ============================================================
+   GLOBAL ERROR HANDLER FOR API (Always returns JSON)
+============================================================ */
 
+app.use((err, req, res, next) => {
+    console.error("[API ERROR]", err);
+    if (req.originalUrl && req.originalUrl.startsWith("/api")) {
+        return res.status(err.status || 500).json({
+            success: false,
+            error: "INTERNAL_ERROR",
+            message: err.message || "An unexpected internal server error occurred."
         });
-
     }
-);
+    next(err);
+});
 
 
 /* ============================================================
