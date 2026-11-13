@@ -74,7 +74,12 @@ function saveOrdersToDisk(orders) {
 
 let MOCK_ORDERS = loadOrdersFromDisk();
 
-router.getOrders = () => MOCK_ORDERS;
+function getMockOrders() {
+    MOCK_ORDERS = loadOrdersFromDisk();
+    return MOCK_ORDERS;
+}
+
+router.getOrders = () => getMockOrders();
 
 /* CREATE ORDER */
 router.post("/", async (req, res) => {
@@ -180,7 +185,7 @@ router.post("/", async (req, res) => {
         // Order Idempotency Guard (Prevents double order submission for same payment reference)
         if (transaction_id && transaction_id.trim().length > 3) {
             const cleanTx = transaction_id.trim().toLowerCase();
-            const existingOrder = MOCK_ORDERS.find(o => 
+            const existingOrder = getMockOrders().find(o => 
                 ((o.transaction_id || o.transactionId || "").trim().toLowerCase() === cleanTx)
             );
             if (existingOrder) {
@@ -401,7 +406,7 @@ router.post("/", async (req, res) => {
             // Only fall back if database is completely offline/unreachable
         }
 
-        const finalId = createdOrderId || (MOCK_ORDERS.length ? Math.max(...MOCK_ORDERS.map(o => o.id)) + 1 : 1001);
+        const finalId = createdOrderId || (getMockOrders().length ? Math.max(...getMockOrders().map(o => o.id)) + 1 : 1001);
 
         const orderData = {
             id: finalId,
@@ -449,8 +454,7 @@ router.post("/", async (req, res) => {
             items: items || []
         };
 
-        MOCK_ORDERS.unshift(orderData);
-        saveOrdersToDisk(MOCK_ORDERS);
+        const curMocks = getMockOrders(); curMocks.unshift(orderData); saveOrdersToDisk(curMocks);
 
         // Safely increment coupon usage count on successful order placement
         if (coupon_code) {
@@ -491,6 +495,47 @@ router.post("/", async (req, res) => {
 });
 
 /* HELPER: Fetch orders with their items from PostgreSQL */
+const { getPartnerById } = require("../services/deliveryPartnerService");
+
+async function enrichOrderWithPartner(order) {
+    if (!order) return order;
+    const partnerId = order.partner_id || order.delivery_partner_id || null;
+    if (partnerId) {
+        try {
+            const partner = await getPartnerById(partnerId);
+            if (partner) {
+                return {
+                    ...order,
+                    partner_id: partner.partner_id,
+                    partner_name: partner.name,
+                    partner_phone: partner.phone,
+                    partner_photo: partner.profile_photo || null,
+                    partner_vehicle: `${partner.vehicle_type || 'Electric Scooter'} (${partner.vehicle_number || ''})`.trim(),
+                    partner_rating: Number(partner.rating) || 5.0,
+                    partner_latitude: partner.current_latitude ? Number(partner.current_latitude) : null,
+                    partner_longitude: partner.current_longitude ? Number(partner.current_longitude) : null
+                };
+            }
+        } catch (_) {}
+    }
+    return {
+        ...order,
+        partner_id: null,
+        partner_name: null,
+        partner_phone: null,
+        partner_photo: null,
+        partner_vehicle: null,
+        partner_rating: null,
+        partner_latitude: null,
+        partner_longitude: null
+    };
+}
+
+async function enrichOrdersWithPartners(orders) {
+    if (!Array.isArray(orders)) return [];
+    return await Promise.all(orders.map(enrichOrderWithPartner));
+}
+
 async function getOrdersWithItems(whereClause = "", params = []) {
     try {
         const sql = `SELECT * FROM orders ${whereClause} ORDER BY created_at DESC`;
@@ -534,7 +579,7 @@ router.get("/admin/all", async (req, res) => {
         const includeSubs = req.query.include_subscriptions === "true" || req.query.type === "all";
         const orders = await getOrdersWithItems();
         const dbIds = new Set(orders.map(o => o.id.toString()));
-        const memOrders = (MOCK_ORDERS || []).filter(o => !dbIds.has(o.id.toString()));
+        const memOrders = (getMockOrders() || []).filter(o => !dbIds.has(o.id.toString()));
         
         // Strict Product Orders partition: NEVER include subscriptions unless explicitly requested with include_subscriptions=true
         let allOrders = [...orders, ...memOrders].filter(o => {
@@ -600,10 +645,12 @@ router.get("/admin/all", async (req, res) => {
             const idB = parseInt(b.id, 10) || 0;
             return idB - idA;
         });
-        return res.json({ success: true, orders: allOrders });
+        const enrichedAll = await enrichOrdersWithPartners(allOrders);
+        return res.json({ success: true, orders: enrichedAll });
     } catch (err) {
-        const prodMocks = (MOCK_ORDERS || []).filter(o => o.order_type !== "subscription" && !String(o.id).startsWith("SUB-"));
-        res.json({ success: true, orders: prodMocks });
+        const prodMocks = (getMockOrders() || []).filter(o => o.order_type !== "subscription" && !String(o.id).startsWith("SUB-"));
+        const enrichedMocks = await enrichOrdersWithPartners(prodMocks);
+        res.json({ success: true, orders: enrichedMocks });
     }
 });
 
@@ -612,7 +659,7 @@ router.get("/admin/verifications", async (req, res) => {
     try {
         const orders = await getOrdersWithItems();
         const dbIds = new Set(orders.map(o => o.id.toString()));
-        const memOrders = (MOCK_ORDERS || []).filter(o => !dbIds.has(o.id.toString()));
+        const memOrders = (getMockOrders() || []).filter(o => !dbIds.has(o.id.toString()));
         const allOrders = [...orders, ...memOrders];
         allOrders.sort((a, b) => {
             const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -624,7 +671,7 @@ router.get("/admin/verifications", async (req, res) => {
         });
         return res.json({ success: true, orders: allOrders });
     } catch (err) {
-        res.json({ success: true, orders: MOCK_ORDERS || [] });
+        res.json({ success: true, orders: getMockOrders() || [] });
     }
 });
 
@@ -633,11 +680,11 @@ router.get("/admin/pickup", async (req, res) => {
     try {
         const orders = await getOrdersWithItems("WHERE LOWER(COALESCE(delivery_type, '')) = 'pickup'");
         const dbIds = new Set(orders.map(o => o.id.toString()));
-        const memPickups = MOCK_ORDERS.filter(o => (o.delivery_type === "pickup" || o.is_pickup === true) && !dbIds.has(o.id.toString()));
+        const memPickups = getMockOrders().filter(o => (o.delivery_type === "pickup" || o.is_pickup === true) && !dbIds.has(o.id.toString()));
         return res.json({ success: true, orders: [...orders, ...memPickups] });
     } catch {}
 
-    const pickupList = MOCK_ORDERS.filter(o => o.delivery_type === "pickup" || o.is_pickup === true);
+    const pickupList = getMockOrders().filter(o => o.delivery_type === "pickup" || o.is_pickup === true);
     res.json({ success: true, orders: pickupList });
 });
 
@@ -693,7 +740,7 @@ router.get("/user/:identifier", async (req, res) => {
         
         // Merge in-memory / disk orders safely (strictly product orders only)
         const dbIds = new Set(orders.map(o => o.id.toString()));
-        const memOrders = (MOCK_ORDERS || []).filter(o => {
+        const memOrders = (getMockOrders() || []).filter(o => {
             if (dbIds.has(o.id.toString())) return false;
             if ((o.delivery_type || "").toLowerCase() === "subscription") return false;
             if (o.id && o.id.toString().startsWith("SUB-")) return false;
@@ -717,7 +764,8 @@ router.get("/user/:identifier", async (req, res) => {
             return idB - idA;
         });
 
-        return res.json({ success: true, orders: allUserOrders });
+        const enrichedUserOrders = await enrichOrdersWithPartners(allUserOrders);
+        return res.json({ success: true, orders: enrichedUserOrders });
     } catch (err) {
         console.error("[ORDERS USER QUERY ERROR]", err.message);
         return res.json({ success: true, orders: [] });
@@ -741,28 +789,33 @@ router.get("/:id", async (req, res) => {
                 "SELECT * FROM order_status_history WHERE order_id = $1 ORDER BY created_at ASC",
                 [orders[0].id]
             ).catch(() => ({ rows: [] }));
-            return res.json({ success: true, order: orders[0], history: histRes.rows });
+            const enriched = await enrichOrderWithPartner(orders[0]);
+            return res.json({ success: true, order: enriched, history: histRes.rows });
         }
     } catch {}
 
-    const mem = MOCK_ORDERS.find(o => o.id == idParam || o.order_number == idParam);
+    const mem = getMockOrders().find(o => o.id == idParam || o.order_number == idParam);
     if (mem) {
-        return res.json({ success: true, order: mem, history: [] });
+        const enriched = await enrichOrderWithPartner(mem);
+        return res.json({ success: true, order: enriched, history: [] });
     }
     res.status(404).json({ success: false, message: "Order not found" });
 });
 
 async function getOrderForNotification(id) {
     try {
-        const res = await pool.query("SELECT * FROM orders WHERE id = $1", [id]);
+        const res = await pool.query("SELECT * FROM orders WHERE id::text = $1 OR order_number = $1", [id.toString()]);
         if (res.rows.length) return res.rows[0];
     } catch {}
-    return MOCK_ORDERS.find(o => o.id === id) || null;
+    const diskList = getMockOrders();
+    return diskList.find(o => o.id?.toString() === id?.toString() || o.order_number === id?.toString()) || null;
 }
 
 /* UPDATE ORDER STATUS (PUT & PATCH supported) */
 const updateOrderStatusHandler = async (req, res) => {
-    const id = parseInt(req.params.id);
+    const rawId = req.params.id;
+    const numId = parseInt(rawId);
+    const id = isNaN(numId) ? rawId : numId;
     const status = req.body.status || req.body.order_status;
     const payment_status = req.body.payment_status;
     const comment = req.body.comment || `Status updated to ${status}`;
@@ -770,41 +823,87 @@ const updateOrderStatusHandler = async (req, res) => {
     try {
         if (status && payment_status) {
             await pool.query(
-                `UPDATE orders SET order_status = $1, payment_status = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
-                [status, payment_status, id]
+                `UPDATE orders 
+                 SET order_status = $1, payment_status = $2,
+                     delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
+                     updated_at = CURRENT_TIMESTAMP 
+                 WHERE id::text = $3 OR order_number = $3`,
+                [status, payment_status, rawId.toString()]
             );
         } else if (status) {
             await pool.query(
-                `UPDATE orders SET order_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
-                [status, id]
+                `UPDATE orders 
+                 SET order_status = $1, 
+                     delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
+                     updated_at = CURRENT_TIMESTAMP 
+                 WHERE id::text = $2 OR order_number = $2`,
+                [status, rawId.toString()]
             );
         } else if (payment_status) {
             await pool.query(
-                `UPDATE orders SET payment_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
-                [payment_status, id]
+                `UPDATE orders SET payment_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id::text = $2 OR order_number = $2`,
+                [payment_status, rawId.toString()]
             );
         }
 
         if (status) {
             await pool.query(
-                `INSERT INTO order_status_history (order_id, status, comment) VALUES ($1, $2, $3)`,
-                [id, status, comment]
+                `INSERT INTO order_status_history (order_id, status, comment) 
+                 SELECT id, $1, $2 FROM orders WHERE id::text = $3 OR order_number = $3 LIMIT 1`,
+                [status, comment, rawId.toString()]
             ).catch(() => {});
         }
     } catch (err) {
         console.error("Order status update DB error:", err.message);
     }
 
-    const order = await getOrderForNotification(id);
+    const currentOrders = getMockOrders();
+    let order = currentOrders.find(o => o.id?.toString() === rawId.toString() || o.order_number === rawId.toString());
+    if (!order) {
+        order = await getOrderForNotification(rawId);
+        if (order) currentOrders.unshift(order);
+    }
+
     if (order) {
-        if (status) order.order_status = status;
+        if (status) {
+            order.order_status = status;
+            order.status = status;
+            if (status === "delivered") {
+                order.delivered_at = new Date().toISOString();
+                if (order.partner_id) {
+                    try {
+                        const { getPartnerById, savePartner } = require("../services/deliveryPartnerService");
+                        const partner = await getPartnerById(order.partner_id);
+                        if (partner) {
+                            partner.total_deliveries_count = (partner.total_deliveries_count || 0) + 1;
+                            partner.today_deliveries_count = (partner.today_deliveries_count || 0) + 1;
+                            await savePartner(partner);
+                        }
+                    } catch (_) {}
+                }
+            }
+        }
         if (payment_status) order.payment_status = payment_status;
+        saveOrdersToDisk(currentOrders);
+
+        // Real-time Socket Updates
+        try {
+            const { emitToAdmin, emitToCustomer, emitToPartner } = require("../services/socketService");
+            emitToAdmin("order:updated", { order_id: rawId, status, partner_id: order.partner_id });
+            emitToAdmin("delivery:status:update", { order_id: rawId, status, partner_id: order.partner_id });
+            if (order.partner_id) {
+                emitToPartner(order.partner_id, "order:status_updated", { order_id: rawId, status });
+            }
+            if (order.user_id) {
+                emitToCustomer(order.user_id, "order:status_updated", { order_id: rawId, status });
+            }
+        } catch (_) {}
+
         if (status) {
             notifyOrderStatusChange(order, status).catch(e => {
                 console.error("[NOTIFY STATUS CHANGE ERROR]", e.message);
             });
         }
-        saveOrdersToDisk(MOCK_ORDERS);
     }
 
     res.json({ success: true, message: "Order updated successfully", order });
@@ -854,7 +953,7 @@ const verifyPaymentHandler = async (req, res) => {
         });
     }
 
-    const memOrder = MOCK_ORDERS.find(o => o.id == rawId || o.id == id || o.order_number == rawId);
+    const memOrder = getMockOrders().find(o => o.id == rawId || o.id == id || o.order_number == rawId);
     if (memOrder) {
         memOrder.payment_status = "verified";
         memOrder.order_status = memOrder.delivery_type === "pickup" ? "ready_for_pickup" : "processing";
@@ -872,7 +971,7 @@ const verifyPaymentHandler = async (req, res) => {
             console.error("[NOTIFY PAYMENT VERIFIED ERROR]", e.message);
         });
         sendPaymentNotification({ orderOrSub: order, status: "verified", amount: order.total }).catch(() => {});
-        saveOrdersToDisk(MOCK_ORDERS);
+        saveOrdersToDisk(getMockOrders());
     }
 
     res.json({ success: true, message: "Payment verified successfully", order });
@@ -917,7 +1016,7 @@ const rejectPaymentHandler = async (req, res) => {
         ).catch(e => console.error("Reject fallback error:", e.message));
     }
 
-    const memOrder = MOCK_ORDERS.find(o => o.id == rawId || o.id == id || o.order_number == rawId);
+    const memOrder = getMockOrders().find(o => o.id == rawId || o.id == id || o.order_number == rawId);
     if (memOrder) {
         memOrder.payment_status = "rejected";
         memOrder.rejection_reason = reason;
@@ -931,7 +1030,7 @@ const rejectPaymentHandler = async (req, res) => {
             console.error("[NOTIFY PAYMENT REJECTED ERROR]", e.message);
         });
         sendPaymentNotification({ orderOrSub: order, status: "rejected", amount: order.total, reason }).catch(() => {});
-        saveOrdersToDisk(MOCK_ORDERS);
+        saveOrdersToDisk(getMockOrders());
     }
 
     res.json({ success: true, message: "Payment rejected", reason, order });
@@ -1071,7 +1170,7 @@ router.post("/:id/rate", async (req, res) => {
         }
 
         // Find order from disk/DB
-        let order = (MOCK_ORDERS || []).find(o => o.id?.toString() === orderId.toString() || o.order_number === orderId);
+        let order = (getMockOrders() || []).find(o => o.id?.toString() === orderId.toString() || o.order_number === orderId);
         try {
             const dbRes = await pool.query("SELECT * FROM orders WHERE id = $1 OR order_number = $1", [orderId]);
             if (dbRes.rows.length > 0) order = dbRes.rows[0];
@@ -1097,7 +1196,7 @@ router.post("/:id/rate", async (req, res) => {
         order.feedback = feedback || "";
         order.rating_tags = tags || [];
         order.rated_at = ratedAt;
-        saveOrders(MOCK_ORDERS);
+        saveOrdersToDisk(getMockOrders());
 
         try {
             await pool.query(`
@@ -1123,7 +1222,7 @@ router.post("/:id/rate", async (req, res) => {
         let ratingsCount = 1;
 
         if (partner) {
-            const allPartnerOrders = (MOCK_ORDERS || []).filter(o => o.partner_id === partnerId && o.rating > 0);
+            const allPartnerOrders = (getMockOrders() || []).filter(o => o.partner_id === partnerId && o.rating > 0);
             if (allPartnerOrders.length > 0) {
                 const sum = allPartnerOrders.reduce((acc, curr) => acc + Number(curr.rating), 0);
                 newAverage = Number((sum / allPartnerOrders.length).toFixed(2));
@@ -1176,5 +1275,6 @@ router.post("/:id/rate", async (req, res) => {
 
 router.put("/:id/status", updateOrderStatusHandler);
 router.patch("/:id/status", updateOrderStatusHandler);
+router.post("/:id/status", updateOrderStatusHandler);
 
 module.exports = router;

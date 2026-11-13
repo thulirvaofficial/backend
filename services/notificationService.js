@@ -1,3 +1,5 @@
+const fs = require("fs");
+const path = require("path");
 const { pool } = require("../config/database");
 const { initFirebaseAdmin, admin, isFirebaseInitialized, getMessaging } = require("./firebaseAdmin");
 const { getDeviceTokens, deactivateToken } = require("./tokenStore");
@@ -5,10 +7,59 @@ const { getDeviceTokens, deactivateToken } = require("./tokenStore");
 // Initialize Firebase Admin on startup (safe, non-blocking)
 initFirebaseAdmin();
 
-// In-memory notifications fallback
-const IN_APP_NOTIFICATIONS = [];
+const DATA_DIR = path.resolve(__dirname, "..", "data");
+const NOTIFICATIONS_FILE = path.join(DATA_DIR, "notifications.json");
+
+function loadNotificationsFromDisk() {
+    try {
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+        if (fs.existsSync(NOTIFICATIONS_FILE)) {
+            const data = fs.readFileSync(NOTIFICATIONS_FILE, "utf-8");
+            return JSON.parse(data);
+        }
+    } catch (e) {
+        console.warn("[NOTIFICATIONS DISK LOAD WARN]:", e.message);
+    }
+    return [];
+}
+
+function saveNotificationsToDisk(notifs) {
+    try {
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+        fs.writeFileSync(NOTIFICATIONS_FILE, JSON.stringify(notifs.slice(0, 500), null, 2), "utf-8");
+    } catch (e) {
+        console.warn("[NOTIFICATIONS DISK SAVE WARN]:", e.message);
+    }
+}
+
+// In-memory notifications fallback initialized from disk
+const IN_APP_NOTIFICATIONS = loadNotificationsFromDisk();
 // Persistent in-memory diagnostic logs for admin panel & debugging
 const NOTIFICATION_DISPATCH_LOGS = [];
+
+function markNotificationAsRead(id, userId = null) {
+    const notif = IN_APP_NOTIFICATIONS.find(n => n.id?.toString() === id?.toString());
+    if (notif) {
+        notif.is_read = true;
+        saveNotificationsToDisk(IN_APP_NOTIFICATIONS);
+    }
+    return true;
+}
+
+function markAllNotificationsAsRead(userId = null) {
+    const uid = userId ? userId.toString().toLowerCase() : null;
+    IN_APP_NOTIFICATIONS.forEach(n => {
+        if (!uid || (n.user_id && n.user_id.toString().toLowerCase() === uid) || n.user_id === "all" || n.user_id === "delivery_partners") {
+            n.is_read = true;
+        }
+    });
+    saveNotificationsToDisk(IN_APP_NOTIFICATIONS);
+    return true;
+}
 
 /**
  * Send and log a notification to a specific user or all admins
@@ -37,6 +88,7 @@ async function sendNotification({
 
     IN_APP_NOTIFICATIONS.unshift(payload);
     if (IN_APP_NOTIFICATIONS.length > 300) IN_APP_NOTIFICATIONS.pop();
+    saveNotificationsToDisk(IN_APP_NOTIFICATIONS);
 
     // 1. Persist notification to database for in-app history
     try {
@@ -188,7 +240,7 @@ async function sendNotification({
                             [badTokens]
                         );
                         console.log(`[FCM CLEANUP] Deactivated ${badTokens.length} expired device tokens.`);
-                    } catch {}
+                    } catch { }
                 }
             }
         } else {
@@ -219,8 +271,8 @@ async function sendNotification({
                 logEntry.failure_count,
                 logEntry.errors.length ? JSON.stringify(logEntry.errors) : (logEntry.failure_count > 0 ? "FCM failure" : null)
             ]
-        ).catch(() => {});
-    } catch (_) {}
+        ).catch(() => { });
+    } catch (_) { }
 
     return payload;
 
@@ -343,7 +395,7 @@ async function sendSubscriptionNotification({ subscription, event }) {
                 type: "new_subscription",
                 targetId: subId,
                 forAdmin: true
-            }).catch(() => {});
+            }).catch(() => { });
             break;
         case "paused":
             title = "Subscription Paused ⏸️";
@@ -354,7 +406,7 @@ async function sendSubscriptionNotification({ subscription, event }) {
                 type: "subscription_paused",
                 targetId: subId,
                 forAdmin: true
-            }).catch(() => {});
+            }).catch(() => { });
             break;
         case "resumed":
             title = "Subscription Resumed! ▶️";
@@ -365,7 +417,7 @@ async function sendSubscriptionNotification({ subscription, event }) {
                 type: "subscription_resumed",
                 targetId: subId,
                 forAdmin: true
-            }).catch(() => {});
+            }).catch(() => { });
             break;
         case "cancelled":
             title = "Subscription Cancelled ❌";
@@ -376,7 +428,7 @@ async function sendSubscriptionNotification({ subscription, event }) {
                 type: "subscription_cancelled",
                 targetId: subId,
                 forAdmin: true
-            }).catch(() => {});
+            }).catch(() => { });
             break;
         case "expiring":
             title = "Subscription Expiring Soon ⏳";
@@ -510,6 +562,10 @@ module.exports = {
     sendSubscriptionNotification,
     sendPaymentNotification,
     sendPickupNotification,
+    markNotificationAsRead,
+    markAllNotificationsAsRead,
+    loadNotificationsFromDisk,
+    saveNotificationsToDisk,
     IN_APP_NOTIFICATIONS,
     NOTIFICATION_DISPATCH_LOGS
 };

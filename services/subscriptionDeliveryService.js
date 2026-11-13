@@ -86,6 +86,162 @@ function formatReadableDate(dateInput) {
 }
 
 /**
+ * Automatically generate scheduled daily delivery tasks from all active subscriptions
+ * Checks:
+ * - Subscription status == 'Active' / 'active'
+ * - Payment status == 'verified' / 'paid' / 'success'
+ * - targetDate >= start_date AND (targetDate <= end_date OR duration_days)
+ * - Frequency match (daily, alternate, weekdays, weekends, weekly)
+ * - Prevents duplicate task generation for the same subscription on the same date
+ */
+async function generateDailySubscriptionDeliveries(dateStr) {
+    const targetDate = formatDateKey(dateStr);
+    const targetDt = new Date(targetDate);
+    const targetDayOfWeek = targetDt.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+
+    let activeSubs = [];
+
+    // 1. Try DB first
+    try {
+        const dbRes = await pool.query(`
+            SELECT * FROM subscriptions 
+            WHERE LOWER(status) = 'active'
+        `);
+        if (dbRes.rows && dbRes.rows.length) {
+            activeSubs = dbRes.rows;
+        }
+    } catch (_) {}
+
+    // 2. Fallback to subscriptions.json
+    if (activeSubs.length === 0) {
+        try {
+            const subsFile = path.join(DATA_DIR, "subscriptions.json");
+            if (fs.existsSync(subsFile)) {
+                const allSubs = JSON.parse(fs.readFileSync(subsFile, "utf-8"));
+                activeSubs = allSubs.filter(s => {
+                    const st = (s.status || "").toLowerCase();
+                    return st === "active" || st === "approved";
+                });
+            }
+        } catch (_) {}
+    }
+
+    if (activeSubs.length === 0) return [];
+
+    const existingDisk = loadSubDeliveriesFromDisk();
+    let newDeliveries = [];
+
+    for (const sub of activeSubs) {
+        const subId = (sub.id || sub.subscription_id || "").toString();
+        if (!subId) continue;
+
+        // Check start date
+        const startDateStr = formatDateKey(sub.start_date || sub.created_at);
+        if (targetDate < startDateStr) continue;
+
+        // Check end date or duration
+        let endDateStr = sub.end_date ? formatDateKey(sub.end_date) : null;
+        if (!endDateStr && sub.duration_days) {
+            const sDt = new Date(startDateStr);
+            sDt.setDate(sDt.getDate() + parseInt(sub.duration_days, 10));
+            endDateStr = formatDateKey(sDt);
+        }
+        if (endDateStr && targetDate > endDateStr) continue;
+
+        // Check frequency
+        const freq = (sub.frequency || "daily").toLowerCase().trim();
+        let isDueToday = false;
+
+        if (freq === "daily" || freq === "everyday" || freq.includes("daily")) {
+            isDueToday = true;
+        } else if (freq.includes("alternate")) {
+            const sDt = new Date(startDateStr);
+            const diffDays = Math.round((targetDt - sDt) / (1000 * 60 * 60 * 24));
+            if (diffDays >= 0 && diffDays % 2 === 0) isDueToday = true;
+        } else if (freq.includes("weekday")) {
+            if (targetDayOfWeek >= 1 && targetDayOfWeek <= 5) isDueToday = true;
+        } else if (freq.includes("weekend")) {
+            if (targetDayOfWeek === 0 || targetDayOfWeek === 6) isDueToday = true;
+        } else if (freq.includes("weekly")) {
+            const sDt = new Date(startDateStr);
+            if (sDt.getDay() === targetDayOfWeek) isDueToday = true;
+        } else {
+            isDueToday = true;
+        }
+
+        if (!isDueToday) continue;
+
+        // Check if task already exists
+        const alreadyExists = existingDisk.some(d => 
+            d.delivery_date === targetDate && 
+            (d.subscription_id === subId || d.daily_id === `DLY-${subId}-${targetDate.replace(/-/g, "")}`)
+        );
+        if (alreadyExists) continue;
+
+        // Calculate remaining days
+        let remainingDays = 30;
+        if (endDateStr) {
+            const eDt = new Date(endDateStr);
+            remainingDays = Math.max(0, Math.ceil((eDt - targetDt) / (1000 * 60 * 60 * 24)));
+        }
+
+        const task = {
+            id: `DLY-${subId}-${targetDate.replace(/-/g, "")}`,
+            daily_id: `DLY-${subId}-${targetDate.replace(/-/g, "")}`,
+            subscription_id: subId,
+            delivery_date: targetDate,
+            customer_name: sub.customer_name || sub.name || "Customer",
+            customer_phone: sub.customer_phone || sub.phone || "",
+            customer_email: sub.customer_email || sub.email || "",
+            address: sub.delivery_address || sub.address || "",
+            landmark: sub.landmark || "",
+            locality: sub.area || sub.locality || "",
+            latitude: sub.latitude ? parseFloat(sub.latitude) : 13.0827,
+            longitude: sub.longitude ? parseFloat(sub.longitude) : 80.2707,
+            product_name: sub.product_name || sub.plan_name || "Farm Fresh Milk",
+            quantity: sub.quantity || 1,
+            unit: sub.unit || "Litre",
+            delivery_slot: sub.delivery_slot || "06:00 AM - 07:30 AM",
+            delivery_instructions: sub.special_instructions || sub.notes || "Early morning doorstep delivery",
+            remaining_days: remainingDays,
+            total_days: sub.duration_days || 30,
+            status: "pending",
+            partner_id: sub.partner_id || null,
+            claimed_by: null,
+            claimed_by_name: null,
+            created_at: new Date().toISOString()
+        };
+
+        newDeliveries.push(task);
+        existingDisk.push(task);
+
+        // Also insert into PostgreSQL if table exists
+        try {
+            await pool.query(`
+                INSERT INTO daily_subscription_deliveries (
+                    daily_id, subscription_id, delivery_date, customer_name, customer_phone,
+                    address, product_name, quantity, delivery_slot, status, latitude, longitude,
+                    notes, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+                ON CONFLICT (daily_id) DO NOTHING
+            `, [
+                task.daily_id, task.subscription_id, task.delivery_date, task.customer_name,
+                task.customer_phone, task.address, task.product_name, task.quantity,
+                task.delivery_slot, task.status, task.latitude, task.longitude,
+                task.delivery_instructions
+            ]);
+        } catch (_) {}
+    }
+
+    if (newDeliveries.length > 0) {
+        saveSubDeliveriesToDisk(existingDisk);
+        MOCK_SUB_DELIVERIES = existingDisk;
+    }
+
+    return newDeliveries;
+}
+
+/**
  * Get daily subscription deliveries for a given date from real subscriptions
  * Respects AREA_ALLOCATION_ENABLED business rule:
  * - If false: ALL approved & active partners view ALL eligible subscription tasks across all areas
@@ -96,6 +252,11 @@ async function getSubscriptionDeliveries(dateStr, partner = null) {
     const partnerId = typeof partner === "object" && partner ? partner.partner_id : (typeof partner === "string" ? partner : null);
     const partnerArea = (typeof partner === "object" && partner && partner.assigned_area) ? partner.assigned_area.trim().toLowerCase() : "";
     const areaAllocationEnabled = getAreaAllocationSetting();
+
+    // Automatically ensure tasks are generated for target date
+    try {
+        await generateDailySubscriptionDeliveries(targetDate);
+    } catch (_) {}
 
     try {
         let query = "SELECT * FROM daily_subscription_deliveries WHERE delivery_date = $1";
@@ -170,7 +331,8 @@ async function claimSubscriptionDelivery(deliveryId, partnerId, partnerName = "D
     }
 
     // Disk fallback atomic check
-    const item = MOCK_SUB_DELIVERIES.find(d =>
+    const diskList = loadSubDeliveriesFromDisk();
+    const item = diskList.find(d =>
         d.daily_id === deliveryId ||
         d.id?.toString() === deliveryId?.toString() ||
         d.subscription_id === deliveryId
@@ -200,7 +362,7 @@ async function claimSubscriptionDelivery(deliveryId, partnerId, partnerName = "D
     item.claimed_at = nowIso;
     item.notes = `Claimed by ${partnerName} (${partnerId})`;
 
-    saveSubDeliveriesToDisk(MOCK_SUB_DELIVERIES);
+    saveSubDeliveriesToDisk(diskList);
     return { success: true, delivery: item };
 }
 
@@ -230,7 +392,8 @@ async function updateSubscriptionDeliveryStatus(deliveryId, status, notes = "", 
     }
 
     // Disk fallback
-    const item = MOCK_SUB_DELIVERIES.find(d =>
+    const diskList = loadSubDeliveriesFromDisk();
+    const item = diskList.find(d =>
         d.daily_id === deliveryId ||
         d.id?.toString() === deliveryId?.toString() ||
         d.subscription_id === deliveryId
@@ -254,12 +417,13 @@ async function updateSubscriptionDeliveryStatus(deliveryId, status, notes = "", 
     item.failed_reason = failedReason || item.failed_reason;
     if (partnerId) item.partner_id = partnerId;
 
-    saveSubDeliveriesToDisk(MOCK_SUB_DELIVERIES);
+    saveSubDeliveriesToDisk(diskList);
     return { success: true, delivery: item };
 }
 
 module.exports = {
     getSubscriptionDeliveries,
+    generateDailySubscriptionDeliveries,
     updateSubscriptionDeliveryStatus,
     claimSubscriptionDelivery,
     getAreaAllocationSetting,

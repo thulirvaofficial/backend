@@ -1,1 +1,87 @@
-[]
+[
+  {
+    "id": "ATT-1794572123911-THU-DP-0009",
+    "date": "2026-11-13",
+    "partner_id": "THU-DP-0009",
+    "partner_name": "Vigneshwaran M",
+    "check_in_time": "2026-11-13T12:15:23.911Z",
+    "check_in_photo": "/uploads/attendance/checkin_THU-DP-0009_1794572123910.jpg",
+    "check_in_location": {
+      "latitude": 12.8025,
+      "longitude": 80.2233
+    },
+    "check_out_time": null,
+    "check_out_photo": null,
+    "check_out_location": null,
+    "working_hours": null,
+    "status": "checked_in"
+  },
+  {
+    "id": "ATT-1794572097329-THU-DP-0008",
+    "date": "2026-11-13",
+    "partner_id": "THU-DP-0008",
+    "partner_name": "Vigneshwaran M",
+    "check_in_time": "2026-11-13T12:14:57.329Z",
+    "check_in_photo": "/uploads/attendance/checkin_THU-DP-0008_1794572097319.jpg",
+    "check_in_location": {
+      "latitude": 12.8025,
+      "longitude": 80.2233
+    },
+    "check_out_time": null,
+    "check_out_photo": null,
+    "check_out_location": null,
+    "working_hours": null,
+    "status": "checked_in"
+  },
+  {
+    "id": "ATT-1794572031210-THU-DP-0007",
+    "date": "2026-11-13",
+    "partner_id": "THU-DP-0007",
+    "partner_name": "Vigneshwaran M",
+    "check_in_time": "2026-11-13T12:13:51.210Z",
+    "check_in_photo": "/uploads/attendance/checkin_THU-DP-0007_1794572031207.jpg",
+    "check_in_location": {
+      "latitude": 12.8025,
+      "longitude": 80.2233
+    },
+    "check_out_time": null,
+    "check_out_photo": null,
+    "check_out_location": null,
+    "working_hours": null,
+    "status": "checked_in"
+  },
+  {
+    "id": "ATT-1794571573059-THU-DP-0005",
+    "date": "2026-11-13",
+    "partner_id": "THU-DP-0005",
+    "partner_name": "Vigneshwaran M",
+    "check_in_time": "2026-11-13T12:06:13.059Z",
+    "check_in_photo": "/uploads/attendance/checkin_THU-DP-0005_1794571573058.jpg",
+    "check_in_location": {
+      "latitude": 12.8025,
+      "longitude": 80.2233
+    },
+    "check_out_time": null,
+    "check_out_photo": null,
+    "check_out_location": null,
+    "working_hours": null,
+    "status": "checked_in"
+  },
+  {
+    "id": "ATT-1794571531469-THU-DP-0004",
+    "date": "2026-11-13",
+    "partner_id": "THU-DP-0004",
+    "partner_name": "Vigneshwaran M",
+    "check_in_time": "2026-11-13T12:05:31.469Z",
+    "check_in_photo": "/uploads/attendance/checkin_THU-DP-0004_1794571531467.jpg",
+    "check_in_location": {
+      "latitude": 12.8025,
+      "longitude": 80.2233
+    },
+    "check_out_time": null,
+    "check_out_photo": null,
+    "check_out_location": null,
+    "working_hours": null,
+    "status": "checked_in"
+  }
+]

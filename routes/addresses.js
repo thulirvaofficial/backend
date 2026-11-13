@@ -72,18 +72,42 @@ if (!fs.existsSync(ADDRESSES_FILE)) saveAddresses(MOCK_ADDRESSES);
 /* GET USER ADDRESSES */
 router.get("/user/:userId", async (req, res) => {
     const userId = req.params.userId;
+    const { checkServiceability } = require("../services/serviceabilityService");
+
+    let addresses = [];
     try {
         const result = await pool.query(
             "SELECT * FROM addresses WHERE user_id = $1 ORDER BY is_default DESC, id DESC",
             [userId]
         );
         if (result.rows && result.rows.length) {
-            return res.json({ success: true, addresses: result.rows });
+            addresses = result.rows;
         }
     } catch {}
 
-    const list = MOCK_ADDRESSES.filter(a => String(a.user_id) === String(userId) || (userId === "all" && req.user?.role === "admin"));
-    res.json({ success: true, addresses: list });
+    if (addresses.length === 0) {
+        addresses = MOCK_ADDRESSES.filter(a => String(a.user_id) === String(userId) || (userId === "all" && req.user?.role === "admin"));
+    }
+
+    // Dynamically re-evaluate serviceability so newly enabled admin areas (like Thiruverkadu)
+    // are immediately serviceable for existing customer saved addresses
+    const verifiedAddresses = await Promise.all(addresses.map(async (addr) => {
+        const sCheck = await checkServiceability({
+            latitude: addr.latitude,
+            longitude: addr.longitude,
+            pincode: addr.pincode,
+            area_name: addr.area,
+            address: addr.address
+        });
+        return {
+            ...addr,
+            is_serviceable: sCheck.serviceable,
+            serviceable_area_id: sCheck.area ? sCheck.area.id : addr.serviceable_area_id,
+            serviceability_message: sCheck.message
+        };
+    }));
+
+    return res.json({ success: true, addresses: verifiedAddresses });
 });
 
 /* ADD NEW ADDRESS */
@@ -102,7 +126,9 @@ router.post("/", async (req, res) => {
     const sCheck = await checkServiceability({
         latitude: latitude,
         longitude: longitude,
-        pincode: pincode
+        pincode: pincode,
+        area_name: area,
+        address: address
     });
 
     const is_serviceable = sCheck.serviceable;

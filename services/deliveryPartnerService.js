@@ -51,9 +51,9 @@ async function getPartners({ status, area, includeDeleted = false } = {}) {
     try {
         let sql = `
             SELECT 
-                partner_id, name, phone, email, profile_photo, address, city, pincode, assigned_area,
+                partner_id, name, phone, email, password, password_hash, profile_photo, address, city, pincode, assigned_area,
                 vehicle_type, vehicle_number, driving_licence, identity_documents,
-                emergency_contact, registration_status, rejection_reason,
+                emergency_contact, registration_status, rejection_reason, kyc_status, aadhaar_front_url, aadhaar_back_url,
                 current_latitude, current_longitude, is_online, is_active, is_blocked,
                 rating, total_deliveries_count, active_orders_count, last_active_at,
                 location_updated_at, created_at, updated_at
@@ -105,6 +105,8 @@ async function getPartners({ status, area, includeDeleted = false } = {}) {
                 name: p.name,
                 phone: p.phone,
                 email: p.email,
+                password: p.password || null,
+                password_hash: p.password_hash || null,
                 profile_photo: p.profile_photo || null,
                 address: p.address || "",
                 city: p.city || "Chennai",
@@ -117,8 +119,14 @@ async function getPartners({ status, area, includeDeleted = false } = {}) {
                 emergency_contact: p.emergency_contact || null,
                 registration_status: p.registration_status || (p.is_active ? "approved" : "pending_approval"),
                 rejection_reason: p.rejection_reason || null,
-                current_latitude: p.current_latitude,
-                current_longitude: p.current_longitude,
+                kyc_status: p.kyc_status || (p.registration_status === "approved" || p.is_active ? "APPROVED" : "PENDING"),
+                aadhaar_front_url: p.aadhaar_front_url || null,
+                aadhaar_back_url: p.aadhaar_back_url || null,
+                current_latitude: p.current_latitude !== undefined && p.current_latitude !== null ? Number(p.current_latitude) : null,
+                current_longitude: p.current_longitude !== undefined && p.current_longitude !== null ? Number(p.current_longitude) : null,
+                speed: Number(p.speed) || 0,
+                heading: Number(p.heading) || 0,
+                accuracy: Number(p.accuracy) || 0,
                 is_online: Boolean(p.is_online),
                 is_active: Boolean(p.is_active),
                 is_blocked: Boolean(p.is_blocked),
@@ -126,6 +134,7 @@ async function getPartners({ status, area, includeDeleted = false } = {}) {
                 total_deliveries_count: p.total_deliveries_count || 0,
                 active_orders_count: p.active_orders_count || 0,
                 last_active_at: p.last_active_at || null,
+                location_updated_at: p.location_updated_at || null,
                 created_at: p.created_at || new Date().toISOString()
             }));
     }

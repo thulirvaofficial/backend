@@ -938,6 +938,143 @@ async function initializeDatabase() {
             );
         `);
 
+        // Financial Ledger & Wallet Balances (Integer Minor Units / Paise)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS partner_wallet_balances (
+                partner_id VARCHAR(50) PRIMARY KEY REFERENCES delivery_partners(partner_id) ON DELETE CASCADE,
+                lifetime_earned_paise BIGINT DEFAULT 0,
+                total_settled_paise BIGINT DEFAULT 0,
+                available_payable_paise BIGINT DEFAULT 0,
+                reserved_withdrawal_paise BIGINT DEFAULT 0,
+                pending_settlement_paise BIGINT DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS partner_earning_ledger (
+                id VARCHAR(100) PRIMARY KEY,
+                partner_id VARCHAR(50) NOT NULL REFERENCES delivery_partners(partner_id) ON DELETE CASCADE,
+                entry_type VARCHAR(50) NOT NULL,
+                reference_id VARCHAR(100) NOT NULL,
+                amount_paise BIGINT NOT NULL,
+                description TEXT,
+                is_settled BOOLEAN DEFAULT false,
+                settlement_id VARCHAR(100),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_ledger_partner_settled ON partner_earning_ledger(partner_id, is_settled);
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS partner_withdrawal_requests (
+                id VARCHAR(100) PRIMARY KEY,
+                request_id VARCHAR(100) UNIQUE NOT NULL,
+                partner_id VARCHAR(50) NOT NULL REFERENCES delivery_partners(partner_id) ON DELETE CASCADE,
+                amount_paise BIGINT NOT NULL,
+                status VARCHAR(50) DEFAULT 'pending',
+                bank_account_id VARCHAR(100),
+                notes TEXT,
+                reviewer_notes TEXT,
+                utr_number VARCHAR(100),
+                requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                reviewed_at TIMESTAMP,
+                settled_at TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS partner_settlements (
+                id VARCHAR(100) PRIMARY KEY,
+                settlement_id VARCHAR(100) UNIQUE NOT NULL,
+                partner_id VARCHAR(50) NOT NULL REFERENCES delivery_partners(partner_id) ON DELETE CASCADE,
+                period_start DATE NOT NULL,
+                period_end DATE NOT NULL,
+                total_orders_count INT DEFAULT 0,
+                total_subs_count INT DEFAULT 0,
+                gross_amount_paise BIGINT NOT NULL,
+                deductions_paise BIGINT DEFAULT 0,
+                net_amount_paise BIGINT NOT NULL,
+                payment_mode VARCHAR(100) DEFAULT 'Bank Transfer',
+                utr_number VARCHAR(100),
+                status VARCHAR(50) DEFAULT 'completed',
+                settled_by VARCHAR(150),
+                settled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                notes TEXT
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS partner_bank_accounts (
+                id VARCHAR(100) PRIMARY KEY,
+                partner_id VARCHAR(50) NOT NULL REFERENCES delivery_partners(partner_id) ON DELETE CASCADE,
+                account_holder_name VARCHAR(150) NOT NULL,
+                account_number VARCHAR(50) NOT NULL,
+                ifsc_code VARCHAR(20) NOT NULL,
+                bank_name VARCHAR(150) DEFAULT 'Bank',
+                branch_name VARCHAR(150),
+                passbook_url TEXT,
+                is_verified BOOLEAN DEFAULT false,
+                is_primary BOOLEAN DEFAULT true,
+                verified_at TIMESTAMP,
+                verified_by VARCHAR(150),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS partner_kyc_history (
+                id SERIAL PRIMARY KEY,
+                partner_id VARCHAR(50) NOT NULL,
+                status VARCHAR(50) NOT NULL,
+                rejection_reason TEXT,
+                notes TEXT,
+                changed_by VARCHAR(150),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS financial_audit_logs (
+                id SERIAL PRIMARY KEY,
+                action VARCHAR(100) NOT NULL,
+                partner_id VARCHAR(50) NOT NULL,
+                admin_name VARCHAR(150) DEFAULT 'System',
+                amount_paise BIGINT DEFAULT 0,
+                before_balance_paise BIGINT DEFAULT 0,
+                after_balance_paise BIGINT DEFAULT 0,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS distribution_hubs (
+                id SERIAL PRIMARY KEY,
+                code VARCHAR(50) UNIQUE NOT NULL,
+                name VARCHAR(150) NOT NULL,
+                address TEXT NOT NULL,
+                city VARCHAR(100) DEFAULT 'Chennai',
+                state VARCHAR(100) DEFAULT 'Tamil Nadu',
+                pincode VARCHAR(20) NOT NULL,
+                latitude NUMERIC(10,7) NOT NULL,
+                longitude NUMERIC(10,7) NOT NULL,
+                contact_phone VARCHAR(30),
+                is_active BOOLEAN DEFAULT true,
+                serviceable_radius_km INT DEFAULT 15,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS api_idempotency_keys (
+                key VARCHAR(255) PRIMARY KEY,
+                response_code INT NOT NULL,
+                response_body TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
         // Ensure delivery_partners table exists without injecting fake mock data
         console.log("[+] Database tables ready");
     } catch (error) {

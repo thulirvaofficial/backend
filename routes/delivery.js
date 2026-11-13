@@ -522,6 +522,7 @@ const loginPartnerHandler = async (req, res) => {
                 name: partner.name,
                 phone: partner.phone,
                 email: partner.email,
+                profile_photo: partner.profile_photo || null,
                 assigned_area: partner.assigned_area,
                 vehicle_type: partner.vehicle_type,
                 vehicle_number: partner.vehicle_number,
@@ -530,7 +531,8 @@ const loginPartnerHandler = async (req, res) => {
                 is_online: true,
                 rating: partner.rating || 5.0,
                 total_deliveries_count: partner.total_deliveries_count || 0,
-                registration_status: regStatus
+                registration_status: regStatus,
+                kyc_status: partner.kyc_status ? (partner.kyc_status === 'verified' ? 'APPROVED' : partner.kyc_status.toUpperCase()) : (regStatus === "approved" || partner.is_active ? "APPROVED" : "PENDING")
             }
         });
     } catch (err) {
@@ -679,7 +681,9 @@ router.get("/profile", authenticatePartner, async (req, res) => {
             is_active: Boolean(partner.is_active),
             rating: partner.rating || 5.0,
             primary_hub: partner.primary_hub || "Thulirva South Distribution Hub, Chennai",
-            account_status: partner.is_active ? "Active • Verified" : "Pending Verification",
+            account_status: (partner.is_active || partner.registration_status === 'approved') ? "Active • Verified" : "Pending Verification",
+            kyc_status: partner.kyc_status ? (partner.kyc_status === 'verified' ? 'APPROVED' : partner.kyc_status.toUpperCase()) : (partner.is_active || partner.registration_status === 'approved' ? 'APPROVED' : 'PENDING'),
+            registration_status: (partner.registration_status || (partner.is_active ? 'approved' : 'pending_approval')).toUpperCase(),
             total_deliveries_count: calculatedTrips
         }
     });
@@ -782,22 +786,50 @@ router.post("/profile/photo", authenticatePartner, async (req, res) => {
         const { photo, photo_base64 } = req.body;
         const photoData = photo_base64 || photo;
 
-        if (!photoData) {
+        if (!photoData || typeof photoData !== "string") {
             return res.status(400).json({ success: false, message: "Photo data (base64) is required." });
+        }
+
+        // Validate MIME type if data URI prefix is present
+        let ext = "jpg";
+        const mimeMatch = photoData.match(/^data:image\/(jpeg|jpg|png|webp);base64,/i);
+        if (mimeMatch) {
+            ext = mimeMatch[1].toLowerCase() === "jpeg" ? "jpg" : mimeMatch[1].toLowerCase();
+        } else if (photoData.startsWith("data:")) {
+            return res.status(400).json({ success: false, message: "Invalid image format. Allowed: JPG, PNG, WebP." });
+        }
+
+        const cleanBase64 = photoData.replace(/^data:image\/\w+;base64,/, "");
+        const buffer = Buffer.from(cleanBase64, "base64");
+
+        // Validate file size (max 5MB)
+        if (buffer.length > 5 * 1024 * 1024) {
+            return res.status(400).json({
+                success: false,
+                message: "Photo file size exceeds maximum limit of 5MB."
+            });
         }
 
         const partnersDir = path.resolve(__dirname, "..", "public", "uploads", "partners");
         if (!fs.existsSync(partnersDir)) fs.mkdirSync(partnersDir, { recursive: true });
 
-        const filename = `profile_${partnerId}_${Date.now()}.jpg`;
-        const cleanBase64 = photoData.replace(/^data:image\/\w+;base64,/, "");
+        // Retrieve existing partner to remove previous file if exists
+        const partner = await getPartnerById(partnerId);
+        if (partner && partner.profile_photo && typeof partner.profile_photo === "string") {
+            const oldBasename = path.basename(partner.profile_photo.split("?")[0]);
+            const oldPath = path.join(partnersDir, oldBasename);
+            if (fs.existsSync(oldPath)) {
+                try { fs.unlinkSync(oldPath); } catch (_) {}
+            }
+        }
+
+        const filename = `profile_${partnerId}_${Date.now()}.${ext}`;
         const filePath = path.join(partnersDir, filename);
-        fs.writeFileSync(filePath, Buffer.from(cleanBase64, "base64"));
+        fs.writeFileSync(filePath, buffer);
 
         const photoUrl = `/uploads/partners/${filename}`;
 
         // Update in central store
-        const partner = await getPartnerById(partnerId);
         if (partner) {
             partner.profile_photo = photoUrl;
             partner.updated_at = new Date().toISOString();
@@ -812,10 +844,32 @@ router.post("/profile/photo", authenticatePartner, async (req, res) => {
             );
         } catch (_) {}
 
+        emitToAdmin("partner:updated", {
+            partner_id: partnerId,
+            profile_photo: photoUrl,
+            updated_at: new Date().toISOString()
+        });
+
         return res.json({
             success: true,
             message: "Profile photo uploaded successfully.",
-            profile_photo: photoUrl
+            profile_photo: photoUrl,
+            partner: {
+                partner_id: partner.partner_id,
+                name: partner.name,
+                phone: partner.phone,
+                email: partner.email,
+                profile_photo: photoUrl,
+                assigned_area: partner.assigned_area,
+                vehicle_type: partner.vehicle_type,
+                vehicle_number: partner.vehicle_number,
+                current_latitude: partner.current_latitude,
+                current_longitude: partner.current_longitude,
+                is_online: Boolean(partner.is_online),
+                is_active: Boolean(partner.is_active),
+                kyc_status: partner.kyc_status ? (partner.kyc_status === 'verified' ? 'APPROVED' : partner.kyc_status.toUpperCase()) : (partner.is_active ? 'APPROVED' : 'PENDING'),
+                registration_status: (partner.registration_status || (partner.is_active ? 'approved' : 'pending_approval')).toUpperCase()
+            }
         });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
@@ -1311,13 +1365,14 @@ router.get("/orders", authenticatePartner, getOrdersHandler);
 router.get("/product-orders", authenticatePartner, getOrdersHandler);
 
 /**
- * PUT /api/delivery/orders/:id/status
+ * PUT & POST /api/delivery/orders/:id/status
  * Multi-stage workflow: accepted -> pickup_confirmed -> in_transit -> delivered / failed
  */
-router.put("/orders/:id/status", authenticatePartner, async (req, res) => {
+const updatePartnerOrderStatusHandler = async (req, res) => {
     try {
         const id = req.params.id;
         const { status, failed_reason, notes } = req.body;
+        const partnerId = req.partner.partner_id;
 
         let orders = [];
         try {
@@ -1326,12 +1381,31 @@ router.put("/orders/:id/status", authenticatePartner, async (req, res) => {
             }
         } catch {}
 
-        const order = orders.find(o => o.id?.toString() === id?.toString() || o.order_number === id);
+        let order = orders.find(o => o.id?.toString() === id?.toString() || o.order_number === id);
+
+        // Also query DB if not in file or to get complete order data
+        try {
+            const dbRes = await pool.query(
+                "SELECT * FROM orders WHERE id::text = $1 OR order_number = $1",
+                [id.toString()]
+            );
+            if (dbRes.rows && dbRes.rows.length) {
+                if (!order) {
+                    order = dbRes.rows[0];
+                    orders.unshift(order);
+                } else {
+                    Object.assign(order, dbRes.rows[0]);
+                }
+            }
+        } catch (_) {}
+
         if (!order) {
             return res.status(404).json({ success: false, message: "Order not found" });
         }
 
         order.order_status = status;
+        order.status = status;
+        order.partner_id = partnerId;
         if (status === "delivered") {
             order.delivered_at = new Date().toISOString();
         }
@@ -1342,12 +1416,59 @@ router.put("/orders/:id/status", authenticatePartner, async (req, res) => {
         try {
             await pool.query(`
                 UPDATE orders 
-                SET order_status = $1, updated_at = NOW()
-                WHERE id::text = $2 OR order_number = $2
-            `, [status, id]);
+                SET order_status = $1, partner_id = COALESCE(partner_id, $2),
+                    delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
+                    updated_at = NOW()
+                WHERE id::text = $3 OR order_number = $3
+            `, [status, partnerId, id.toString()]);
         } catch {}
 
+        // Log to order status history
+        try {
+            await pool.query(`
+                INSERT INTO order_status_history (order_id, status, notes, changed_by, created_at)
+                VALUES ($1, $2, $3, $4, NOW())
+            `, [order.id || id, status, notes || `Partner status update: ${status}`, `Partner ${partnerId}`]);
+        } catch (_) {}
+
+        // If delivered, increment partner delivery count
+        if (status === "delivered") {
+            try {
+                const partner = await getPartnerById(partnerId);
+                if (partner) {
+                    partner.total_deliveries_count = (partner.total_deliveries_count || 0) + 1;
+                    partner.today_deliveries_count = (partner.today_deliveries_count || 0) + 1;
+                    await savePartner(partner);
+                }
+                await pool.query(`
+                    UPDATE delivery_partners 
+                    SET total_deliveries_count = COALESCE(total_deliveries_count, 0) + 1,
+                        today_deliveries_count = COALESCE(today_deliveries_count, 0) + 1,
+                        updated_at = NOW()
+                    WHERE partner_id = $1
+                `, [partnerId]);
+            } catch (_) {}
+        }
+
         saveOrders(orders);
+
+        // Real-time Socket broadcasts
+        emitToAdmin("order:updated", { order_id: id, status, partner_id: partnerId });
+        emitToAdmin("delivery:status:update", { order_id: id, status, partner_id: partnerId });
+        if (order.user_id) {
+            emitToUser(order.user_id, "order:status_updated", { order_id: id, status });
+        }
+        try {
+            const { getIO } = require("../services/socketService");
+            const io = getIO();
+            if (io) io.emit("order:status_updated", { order_id: id, status, partner_id: partnerId });
+        } catch (_) {}
+
+        // Push notification to Customer
+        try {
+            const { notifyOrderStatusChange } = require("../services/notificationService");
+            notifyOrderStatusChange(order, status).catch(() => {});
+        } catch (_) {}
 
         return res.json({
             success: true,
@@ -1357,7 +1478,10 @@ router.put("/orders/:id/status", authenticatePartner, async (req, res) => {
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }
-});
+};
+
+router.put("/orders/:id/status", authenticatePartner, updatePartnerOrderStatusHandler);
+router.post("/orders/:id/status", authenticatePartner, updatePartnerOrderStatusHandler);
 
 function saveOrders(orders) {
     try {
@@ -1560,9 +1684,13 @@ router.get("/earnings", authenticatePartner, async (req, res) => {
         const now = new Date();
         const todayStr = formatDateKey(now);
 
-        const subsData = await getSubscriptionDeliveries(todayStr, partnerId);
-        const subDelivered = (subsData.deliveries || []).filter(d => d.status === "delivered").length;
+        // 1. Subscription deliveries
+        const subsData = await getSubscriptionDeliveries(todayStr, req.partner);
+        const subDeliveredToday = (subsData.deliveries || []).filter(d => 
+            (d.partner_id === partnerId || d.assigned_partner_id === partnerId) && d.status === "delivered"
+        ).length;
 
+        // 2. Product orders
         let orders = [];
         try {
             if (fs.existsSync(ORDERS_FILE)) {
@@ -1570,45 +1698,52 @@ router.get("/earnings", authenticatePartner, async (req, res) => {
             }
         } catch {}
 
+        const isToday = (dateStr) => {
+            if (!dateStr) return false;
+            try {
+                return formatDateKey(new Date(dateStr)) === todayStr;
+            } catch { return false; }
+        };
+
+        const isWithinDays = (dateStr, days) => {
+            if (!dateStr) return false;
+            try {
+                const diff = (now.getTime() - new Date(dateStr).getTime()) / (1000 * 3600 * 24);
+                return diff >= 0 && diff <= days;
+            } catch { return false; }
+        };
+
         const partnerOrders = orders.filter(o => {
             const isSub = (o.order_type === "subscription" || o.delivery_type === "subscription" || (o.id && o.id.toString().startsWith("SUB-")));
             if (isSub) return false;
-            return (!o.partner_id || o.partner_id === partnerId) && o.order_status === "delivered";
+            return o.partner_id === partnerId && (o.order_status === "delivered" || o.status === "delivered");
         });
-        const ordersDelivered = partnerOrders.length;
-        const totalDeliveredToday = subDelivered + ordersDelivered;
 
-        const basePayout = Math.round(ordersDelivered * 35 + subDelivered * 30);
-        const incentives = totalDeliveredToday >= 20 ? 200 : (totalDeliveredToday >= 10 ? 100 : 0);
-        const earningsToday = basePayout + incentives;
+        const ordersDeliveredToday = partnerOrders.filter(o => isToday(o.delivered_at || o.updated_at || o.created_at)).length;
+        const totalDeliveredToday = subDeliveredToday + ordersDeliveredToday;
 
-        const weeklyEarnings = Math.max(earningsToday * 6, earningsToday);
-        const monthlyEarnings = Math.max(earningsToday * 24, earningsToday);
+        const basePayoutToday = Math.round(ordersDeliveredToday * 40 + subDeliveredToday * 35);
+        const incentivesToday = totalDeliveredToday >= 20 ? 200 : (totalDeliveredToday >= 10 ? 100 : 0);
+        const earningsToday = basePayoutToday + incentivesToday;
 
-        const yesterday = new Date();
-        yesterday.setDate(now.getDate() - 1);
-        const d2 = new Date();
-        d2.setDate(now.getDate() - 2);
-        const d3 = new Date();
-        d3.setDate(now.getDate() - 3);
+        // Week and Month calculations strictly from real records
+        const ordersThisWeek = partnerOrders.filter(o => isWithinDays(o.delivered_at || o.updated_at || o.created_at, 7)).length;
+        const ordersThisMonth = partnerOrders.filter(o => isWithinDays(o.delivered_at || o.updated_at || o.created_at, 30)).length;
 
-        const recentPayouts = [
-            { date: formatReadableDate(yesterday).replace("Yesterday, ", ""), amount: 1480, deliveries: 42, status: "Deposited" },
-            { date: formatReadableDate(d2), amount: 1520, deliveries: 43, status: "Deposited" },
-            { date: formatReadableDate(d3), amount: 1390, deliveries: 39, status: "Deposited" }
-        ];
+        const weeklyEarnings = (ordersThisWeek * 40) + (subDeliveredToday * 35) + (ordersThisWeek >= 10 ? 100 : 0);
+        const monthlyEarnings = (ordersThisMonth * 40) + (subDeliveredToday * 35) + (ordersThisMonth >= 10 ? 100 : 0);
 
         return res.json({
             success: true,
             earnings: {
                 today: earningsToday,
-                this_week: weeklyEarnings,
-                this_month: monthlyEarnings,
+                this_week: Math.max(weeklyEarnings, earningsToday),
+                this_month: Math.max(monthlyEarnings, weeklyEarnings, earningsToday),
                 deliveries_today: totalDeliveredToday,
-                base_payout: basePayout,
-                incentives: incentives,
+                base_payout: basePayoutToday,
+                incentives: incentivesToday,
                 tips: 0,
-                recent_payouts: recentPayouts
+                recent_payouts: []
             }
         });
     } catch (err) {
@@ -1652,6 +1787,23 @@ router.get("/notifications", authenticatePartner, async (req, res) => {
             } catch {}
         }
 
+        if (notifs.length === 0) {
+            const welcomeNotif = {
+                id: `NOTIF-${partnerId}-welcome`,
+                user_id: partnerId,
+                title: "Welcome to Thulirva Delivery Fleet! 🌿",
+                message: "Your delivery account is active and verified. Go online to receive delivery requests and morning subscription runs.",
+                type: "system",
+                is_read: false,
+                created_at: new Date().toISOString()
+            };
+            notifs = [welcomeNotif];
+            try {
+                const { sendNotification } = require("../services/notificationService");
+                sendNotification(welcomeNotif);
+            } catch (_) {}
+        }
+
         const unreadCount = notifs.filter(n => !n.is_read).length;
         return res.json({
             success: true,
@@ -1664,19 +1816,52 @@ router.get("/notifications", authenticatePartner, async (req, res) => {
 });
 
 /**
- * PUT /api/delivery/notifications/:id/read
+ * PUT /api/delivery/notifications/:id/read & POST /api/delivery/notifications/:id/read
  */
-router.put("/notifications/:id/read", authenticatePartner, async (req, res) => {
+const markSingleReadHandler = async (req, res) => {
     try {
         const id = req.params.id;
+        const partnerId = req.partner.partner_id;
         try {
             await pool.query(`UPDATE notifications SET is_read = true WHERE id::text = $1`, [id]);
+        } catch {}
+        try {
+            const { markNotificationAsRead } = require("../services/notificationService");
+            markNotificationAsRead(id, partnerId);
         } catch {}
         return res.json({ success: true, message: "Notification marked as read" });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }
-});
+};
+
+router.put("/notifications/:id/read", authenticatePartner, markSingleReadHandler);
+router.post("/notifications/:id/read", authenticatePartner, markSingleReadHandler);
+
+/**
+ * PUT /api/delivery/notifications/read-all & POST /api/delivery/notifications/read-all
+ */
+const markAllReadHandler = async (req, res) => {
+    try {
+        const partnerId = req.partner.partner_id;
+        try {
+            await pool.query(
+                `UPDATE notifications SET is_read = true WHERE LOWER(user_id::text) = $1 OR user_id = 'all' OR user_id = 'delivery_partners'`,
+                [partnerId.toLowerCase()]
+            );
+        } catch {}
+        try {
+            const { markAllNotificationsAsRead } = require("../services/notificationService");
+            markAllNotificationsAsRead(partnerId);
+        } catch {}
+        return res.json({ success: true, message: "All notifications marked as read" });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+router.put("/notifications/read-all", authenticatePartner, markAllReadHandler);
+router.post("/notifications/read-all", authenticatePartner, markAllReadHandler);
 
 /**
  * POST /api/delivery/deliveries/:id/pickup

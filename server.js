@@ -1,6 +1,7 @@
 const express = require("express");
 const http = require("http");
 const path = require("path");
+const fs = require("fs");
 const cors = require("cors");
 require("dotenv").config();
 
@@ -68,6 +69,9 @@ const adminDeliveryRoutes =
 
 const serviceabilityRoutes =
     require("./routes/serviceability");
+
+const v1Routes =
+    require("./routes/v1");
 
 
 const app = express();
@@ -216,6 +220,19 @@ app.use(
     serviceabilityRoutes
 );
 
+/* ============================================================
+   CENTRALIZED V1 API & HEALTH MONITORING
+============================================================ */
+
+app.use("/api/v1", v1Routes);
+app.use("/api/health", require("./routes/v1/health"));
+app.use("/api/earnings-v1", require("./routes/v1/earnings"));
+app.use("/api/bank-accounts", require("./routes/v1/bankAccounts"));
+app.use("/api/withdrawals", require("./routes/v1/withdrawals"));
+app.use("/api/settlements", require("./routes/v1/settlements"));
+app.use("/api/hubs", require("./routes/v1/hubs"));
+app.use("/api/reports", require("./routes/v1/reports"));
+
 
 /* ============================================================
    FRONTEND & STATIC ASSETS (Common for Website, Admin & Mobile App)
@@ -223,7 +240,22 @@ app.use(
 
 const websitePath = path.resolve(__dirname, "..", "website", "website");
 const adminPath = path.resolve(__dirname, "..", "website", "admin");
-const uploadsPath = path.resolve(websitePath, "assets", "images", "uploads");
+const websiteUploadsPath = path.resolve(websitePath, "assets", "images", "uploads");
+const backendPublicUploadsPath = path.resolve(__dirname, "public", "uploads");
+const backendAssetsUploadsPath = path.resolve(__dirname, "assets", "images", "uploads");
+
+// Ensure upload directories exist
+[
+    backendPublicUploadsPath,
+    path.join(backendPublicUploadsPath, "partners"),
+    path.join(backendPublicUploadsPath, "attendance"),
+    backendAssetsUploadsPath,
+    websiteUploadsPath
+].forEach(dir => {
+    if (!fs.existsSync(dir)) {
+        try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+    }
+});
 
 // 1. Customer Website Frontend
 app.use(express.static(websitePath));
@@ -233,7 +265,18 @@ app.use("/admin", express.static(adminPath));
 
 // 3. Common Static Assets & Uploads (shared with Mobile App and Web)
 app.use("/assets", express.static(path.resolve(websitePath, "assets")));
-app.use("/uploads", express.static(uploadsPath));
+app.use("/assets/images/uploads", express.static(backendAssetsUploadsPath));
+app.use("/assets/images/uploads", express.static(websiteUploadsPath));
+
+// 4. Central Uploads routes (available at /uploads AND /api/uploads)
+app.use("/uploads", express.static(backendPublicUploadsPath));
+app.use("/uploads", express.static(websiteUploadsPath));
+app.use("/uploads", express.static(backendAssetsUploadsPath));
+
+app.use("/api/uploads", express.static(backendPublicUploadsPath));
+app.use("/api/uploads", express.static(websiteUploadsPath));
+app.use("/api/uploads", express.static(backendAssetsUploadsPath));
+
 app.use("/admin/assets", express.static(path.resolve(adminPath, "assets")));
 app.use("/admin/images", express.static(path.resolve(adminPath, "images")));
 

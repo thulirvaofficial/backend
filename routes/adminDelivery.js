@@ -147,8 +147,8 @@ router.post("/partners", async (req, res) => {
             assigned_area,
             vehicle_type,
             vehicle_number,
-            current_latitude: 12.8342,
-            current_longitude: 79.7036,
+            current_latitude: null,
+            current_longitude: null,
             is_online: true,
             is_active: true,
             is_blocked: false,
@@ -532,21 +532,28 @@ const liveTrackingHandler = async (req, res) => {
             partner_id: p.partner_id,
             name: p.name,
             phone: p.phone,
-            latitude: Number(p.current_latitude) || 12.8342,
-            longitude: Number(p.current_longitude) || 79.7036,
+            email: p.email,
+            profile_photo: p.profile_photo || null,
+            latitude: (p.current_latitude !== undefined && p.current_latitude !== null && !isNaN(Number(p.current_latitude)) && Number(p.current_latitude) !== 0) ? Number(p.current_latitude) : null,
+            longitude: (p.current_longitude !== undefined && p.current_longitude !== null && !isNaN(Number(p.current_longitude)) && Number(p.current_longitude) !== 0) ? Number(p.current_longitude) : null,
+            speed: Number(p.speed) || 0,
+            heading: Number(p.heading) || 0,
+            accuracy: Number(p.accuracy) || 0,
             is_online: Boolean(p.is_online),
+            is_active: Boolean(p.is_active),
+            kyc_status: p.kyc_status || (p.registration_status === 'approved' || p.is_active ? 'APPROVED' : 'PENDING'),
+            registration_status: p.registration_status || (p.is_active ? 'approved' : 'pending_approval'),
             vehicle_type: p.vehicle_type || "Scooter",
+            vehicle_number: p.vehicle_number || "",
             active_orders_count: p.active_orders_count || 0,
-            assigned_area: p.assigned_area
+            total_deliveries_count: p.total_deliveries_count || 0,
+            assigned_area: p.assigned_area,
+            last_active_at: p.last_active_at || null,
+            location_updated_at: p.location_updated_at || null
         }));
 
         return res.json({
             success: true,
-            hub_location: {
-                name: "Thulirva Farm Hub (Kanchipuram)",
-                latitude: 12.8342,
-                longitude: 79.7036
-            },
             partners: mapMarkers
         });
     } catch (err) {
@@ -609,7 +616,7 @@ router.post("/dispatch/manual-assign", async (req, res) => {
         }
 
         try {
-            await pool.query("UPDATE orders SET order_status = 'processing', updated_at = NOW() WHERE id::text = $1 OR order_number = $1", [order_id]);
+            await pool.query("UPDATE orders SET partner_id = $1, order_status = 'processing', updated_at = NOW() WHERE id::text = $2 OR order_number = $2", [partner_id, order_id]);
             await pool.query(`
                 INSERT INTO delivery_assignments (assignment_id, order_id, partner_id, assigned_by, status)
                 VALUES ($1, $2, $3, 'admin_manual', 'assigned')
@@ -618,6 +625,36 @@ router.post("/dispatch/manual-assign", async (req, res) => {
         } catch {}
 
         await recordAudit("Operations Admin", "MANUAL_DISPATCH_OVERRIDE", `Manually assigned Order #${order_id} to ${partner_id}`);
+
+        // Immediate high-priority push notification and socket alerts
+        const { sendNotification } = require("../services/notificationService");
+        const { emitToPartner, emitToCustomer, emitToAdmin } = require("../services/socketService");
+
+        sendNotification({
+            userId: partner_id,
+            title: "THULIRVA – NEW DELIVERY! 🌾",
+            message: `New order assigned to you.\nCustomer: ${order?.customer_name || 'Customer'}\nArea: ${order?.city || order?.address || 'Chennai'}\nOrder: #${order?.order_number || order_id}\nType: Home Delivery`,
+            type: "delivery_assignment",
+            targetId: order_id.toString()
+        }).catch(() => {});
+
+        try {
+            emitToPartner(partner_id, "order:assigned", {
+                order_id: order_id,
+                order_number: order?.order_number || `ORD${order_id}`,
+                customer_name: order?.customer_name || 'Customer',
+                customer_phone: order?.customer_phone || '',
+                address: order?.address || '',
+                total: order?.total || 0
+            });
+            if (order?.user_id) {
+                emitToCustomer(order.user_id, "order:partner_assigned", {
+                    order_id: order_id,
+                    partner_id: partner_id
+                });
+            }
+            emitToAdmin("order:assigned", { order_id, partner_id });
+        } catch (_) {}
 
         return res.json({
             success: true,

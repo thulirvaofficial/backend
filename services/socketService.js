@@ -76,7 +76,7 @@ function initSocketServer(httpServer) {
 
                 if (!partnerId || isNaN(latitude) || isNaN(longitude)) return;
 
-                // Update DB
+                // 1. Update PostgreSQL if connected
                 try {
                     await pool.query(`
                         UPDATE delivery_partners 
@@ -90,6 +90,24 @@ function initSocketServer(httpServer) {
                     `, [partnerId, latitude, longitude, speed, heading, accuracy]);
                 } catch (e) {
                     // Ignore DB errors
+                }
+
+                // 2. Update persistent JSON store (Single Source of Truth)
+                try {
+                    const { getPartnerById, savePartner } = require("./deliveryPartnerService");
+                    const partner = await getPartnerById(partnerId);
+                    if (partner) {
+                        partner.current_latitude = latitude;
+                        partner.current_longitude = longitude;
+                        partner.speed = speed;
+                        partner.heading = heading;
+                        partner.accuracy = accuracy;
+                        partner.location_updated_at = new Date().toISOString();
+                        partner.last_active_at = new Date().toISOString();
+                        await savePartner(partner);
+                    }
+                } catch (diskErr) {
+                    console.warn("[SOCKET LOCATION DISK SAVE WARN]:", diskErr.message);
                 }
 
                 const updatePayload = {
@@ -127,6 +145,16 @@ function initSocketServer(httpServer) {
                         [isOnline, partnerId]
                     );
                 } catch {}
+
+                try {
+                    const { getPartnerById, savePartner } = require("./deliveryPartnerService");
+                    const partner = await getPartnerById(partnerId);
+                    if (partner) {
+                        partner.is_online = isOnline;
+                        partner.last_active_at = new Date().toISOString();
+                        await savePartner(partner);
+                    }
+                } catch (_) {}
 
                 io.to("admin_channel").emit("partner:status:changed", {
                     partnerId,

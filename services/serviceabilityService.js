@@ -251,6 +251,40 @@ const INITIAL_15_AREAS = [
         delivery_charge: 0,
         minimum_order_amount: 199,
         estimated_delivery_time: "Coming Soon"
+    },
+    {
+        id: 16,
+        area_name: "Thiruverkadu",
+        city: "Chennai",
+        state: "Tamil Nadu",
+        pincode: "600077",
+        boundary_type: "polygon",
+        latitude: 13.0697,
+        longitude: 80.1245,
+        radius_meters: 5000,
+        is_serviceable: true,
+        is_active: true,
+        coverage_status: "active",
+        delivery_charge: 0,
+        minimum_order_amount: 149,
+        estimated_delivery_time: "25-35 minutes"
+    },
+    {
+        id: 17,
+        area_name: "Padur",
+        city: "Chennai / Kanchipuram",
+        state: "Tamil Nadu",
+        pincode: "603103",
+        boundary_type: "polygon",
+        latitude: 12.7983,
+        longitude: 80.2227,
+        radius_meters: 5000,
+        is_serviceable: true,
+        is_active: true,
+        coverage_status: "active",
+        delivery_charge: 30,
+        minimum_order_amount: 149,
+        estimated_delivery_time: "25-35 minutes"
     }
 ];
 
@@ -293,6 +327,18 @@ function loadAreasFromDisk() {
             const content = fs.readFileSync(AREAS_FILE, "utf-8");
             const parsed = JSON.parse(content);
             if (Array.isArray(parsed) && parsed.length > 0) {
+                // Ensure default configured areas (such as Thiruverkadu & Padur) exist in disk store
+                let modified = false;
+                for (const initial of INITIAL_15_AREAS) {
+                    const exists = parsed.some(p => p.area_name && p.area_name.toLowerCase().trim() === initial.area_name.toLowerCase().trim());
+                    if (!exists) {
+                        parsed.push(initial);
+                        modified = true;
+                    }
+                }
+                if (modified) {
+                    saveAreasToDisk(parsed);
+                }
                 return parsed;
             }
         }
@@ -436,33 +482,64 @@ async function getAllAreas({ includeInactive = true } = {}) {
 }
 
 /**
- * Check serviceability for coordinates and/or pincode
+ * Normalizes locality or text for case-insensitive matching
  */
-async function checkServiceability({ latitude, longitude, pincode }) {
+function normalizeLocality(text) {
+    if (!text) return "";
+    return String(text)
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\b(nagar|road|street|st|rd|salai|lane|bypass|highway|main|west|east|north|south|hub|chennai|kanchipuram|tamil\s*nadu|india|municipality|taluk)\b/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+/**
+ * Check serviceability for coordinates, pincode, area_name, locality and/or address
+ */
+async function checkServiceability({
+    latitude,
+    longitude,
+    pincode,
+    area_name,
+    area,
+    locality,
+    address,
+    zone,
+    delivery_location
+} = {}) {
     const lat = latitude !== undefined && latitude !== null && latitude !== "" ? Number(latitude) : null;
     const lng = longitude !== undefined && longitude !== null && longitude !== "" ? Number(longitude) : null;
-    const pin = pincode ? String(pincode).trim() : null;
+    const rawPin = pincode || "";
+    const cleanPin = String(rawPin).trim().replace(/\D/g, "");
+    const pin = cleanPin.length >= 6 ? cleanPin.slice(0, 6) : (cleanPin.length > 0 ? cleanPin : null);
 
-    if (lat === null && lng === null && !pin) {
+    const inputName = (area_name || area || locality || zone || delivery_location || "").trim();
+    const cleanInputName = normalizeLocality(inputName);
+    const cleanAddress = (address || "").toLowerCase();
+
+    // Check if any location signal was provided
+    if (lat === null && lng === null && !pin && !cleanInputName && !cleanAddress) {
         return {
             success: true,
             serviceable: false,
-            message: "Please provide coordinates or pincode to check serviceability",
+            message: "Please provide coordinates, pincode, or locality to check serviceability",
             area: null
         };
     }
 
-    const { areas } = await getAllAreas({ includeInactive: false });
+    // Fetch all configured areas (both active and coming-soon) to differentiate between Coming Soon vs completely outside
+    const { areas } = await getAllAreas({ includeInactive: true });
 
     let matchedArea = null;
     let matchType = null;
 
     // 1. Polygon / Geofence Check (Highest Precision)
     if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
-        for (const area of areas) {
-            if (area.boundary_coordinates && Array.isArray(area.boundary_coordinates) && area.boundary_coordinates.length >= 3) {
-                if (pointInPolygon([lat, lng], area.boundary_coordinates)) {
-                    matchedArea = area;
+        for (const a of areas) {
+            if (a.boundary_coordinates && Array.isArray(a.boundary_coordinates) && a.boundary_coordinates.length >= 3) {
+                if (pointInPolygon([lat, lng], a.boundary_coordinates)) {
+                    matchedArea = a;
                     matchType = "polygon";
                     break;
                 }
@@ -471,12 +548,12 @@ async function checkServiceability({ latitude, longitude, pincode }) {
 
         // 2. Radius Check (if not matched by polygon)
         if (!matchedArea) {
-            for (const area of areas) {
-                if (area.latitude && area.longitude) {
-                    const dist = haversineDistanceMeters(lat, lng, area.latitude, area.longitude);
-                    const allowedRadius = area.radius_meters || 5000;
+            for (const a of areas) {
+                if (a.latitude && a.longitude) {
+                    const dist = haversineDistanceMeters(lat, lng, a.latitude, a.longitude);
+                    const allowedRadius = a.radius_meters || 5000;
                     if (dist <= allowedRadius) {
-                        matchedArea = area;
+                        matchedArea = a;
                         matchType = "radius";
                         break;
                     }
@@ -485,36 +562,108 @@ async function checkServiceability({ latitude, longitude, pincode }) {
         }
     }
 
-    // 3. Pincode Check (Fallback if no coordinate match or if coordinates are outside)
+    // 3. Pincode Check
     if (!matchedArea && pin) {
-        for (const area of areas) {
-            if (matchPincode(pin, area.pincode)) {
-                matchedArea = area;
+        for (const a of areas) {
+            if (matchPincode(pin, a.pincode)) {
+                matchedArea = a;
                 matchType = "pincode";
                 break;
             }
         }
     }
 
-    if (matchedArea) {
-        return {
-            success: true,
-            serviceable: true,
-            matchType,
-            message: "Available for Delivery",
-            area: {
-                id: matchedArea.id,
-                name: matchedArea.area_name,
-                city: matchedArea.city,
-                state: matchedArea.state,
-                pincode: matchedArea.pincode,
-                deliveryCharge: matchedArea.delivery_charge,
-                minimumOrderAmount: matchedArea.minimum_order_amount,
-                estimatedDeliveryTime: matchedArea.estimated_delivery_time,
-                latitude: matchedArea.latitude,
-                longitude: matchedArea.longitude
+    // 4. Locality / Area Name Normalization Check
+    if (!matchedArea && (cleanInputName || inputName)) {
+        const rawInput = inputName.toLowerCase().trim();
+
+        // Pass 1: Exact case-insensitive area name match
+        for (const a of areas) {
+            const rawArea = (a.area_name || "").toLowerCase().trim();
+            if (rawArea && (rawArea === rawInput || rawArea === cleanInputName)) {
+                matchedArea = a;
+                matchType = "locality_exact";
+                break;
             }
-        };
+        }
+
+        // Pass 2: Whole word / token boundary match (minimum 3 characters to avoid false matches)
+        if (!matchedArea) {
+            const inputTokens = cleanInputName.split(/\s+/).filter(t => t.length >= 3);
+            for (const a of areas) {
+                const cleanArea = normalizeLocality(a.area_name);
+                const areaTokens = cleanArea.split(/\s+/).filter(t => t.length >= 3);
+                const hasMatchingToken = inputTokens.some(it => areaTokens.includes(it));
+                if (hasMatchingToken || (cleanArea.length >= 4 && new RegExp(`\\b${cleanArea}\\b`, "i").test(cleanInputName))) {
+                    matchedArea = a;
+                    matchType = "locality_name";
+                    break;
+                }
+            }
+        }
+    }
+
+    // 5. Full Address Text Matching Check (fallback if address contains area name or pincode)
+    if (!matchedArea && cleanAddress) {
+        for (const a of areas) {
+            const rawArea = (a.area_name || "").toLowerCase().trim();
+            if (rawArea.length >= 3) {
+                const regex = new RegExp(`(^|[^a-z0-9])${rawArea}([^a-z0-9]|$)`, "i");
+                if (regex.test(cleanAddress)) {
+                    matchedArea = a;
+                    matchType = "address_text";
+                    break;
+                }
+            }
+            if (a.pincode && matchPincode(cleanAddress, a.pincode)) {
+                matchedArea = a;
+                matchType = "address_pincode";
+                break;
+            }
+        }
+    }
+
+    // If an area was matched, verify its operational status (Active vs Coming Soon)
+    if (matchedArea) {
+        const isOperational = Boolean(matchedArea.is_active && matchedArea.is_serviceable);
+        if (isOperational) {
+            return {
+                success: true,
+                serviceable: true,
+                matchType,
+                message: "Available for Delivery",
+                area: {
+                    id: matchedArea.id,
+                    name: matchedArea.area_name,
+                    area_name: matchedArea.area_name,
+                    city: matchedArea.city,
+                    state: matchedArea.state,
+                    pincode: matchedArea.pincode,
+                    deliveryCharge: matchedArea.delivery_charge || 0,
+                    minimumOrderAmount: matchedArea.minimum_order_amount || 0,
+                    estimatedDeliveryTime: matchedArea.estimated_delivery_time || "25-35 minutes",
+                    latitude: matchedArea.latitude,
+                    longitude: matchedArea.longitude,
+                    status: "active"
+                }
+            };
+        } else {
+            return {
+                success: true,
+                serviceable: false,
+                matchType,
+                message: `Coming Soon to ${matchedArea.area_name}! We're working hard to expand delivery to your area soon.`,
+                area: {
+                    id: matchedArea.id,
+                    name: matchedArea.area_name,
+                    area_name: matchedArea.area_name,
+                    city: matchedArea.city,
+                    state: matchedArea.state,
+                    pincode: matchedArea.pincode,
+                    status: "coming_soon"
+                }
+            };
+        }
     }
 
     return {

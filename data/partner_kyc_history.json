@@ -1,0 +1,135 @@
+[
+  {
+    "partner_id": "THU-DP-0009",
+    "status": "APPROVED",
+    "rejection_reason": null,
+    "notes": "Verified Aadhaar and Driver License documents",
+    "reviewed_at": "2026-11-13T12:15:23.564Z",
+    "changed_by": "Thulirva Operations Admin",
+    "created_at": "2026-11-13T12:15:23.564Z"
+  },
+  {
+    "submission_id": "KYC-SUB-1794572123545",
+    "partner_id": "THU-DP-0009",
+    "status": "PENDING",
+    "rejection_reason": null,
+    "notes": "KYC documents submitted by partner. Pending admin review.",
+    "submitted_at": "2026-11-13T12:15:23.545Z",
+    "changed_by": "Partner THU-DP-0009",
+    "created_at": "2026-11-13T12:15:23.545Z"
+  },
+  {
+    "partner_id": "THU-DP-0008",
+    "status": "APPROVED",
+    "rejection_reason": null,
+    "notes": "Verified Aadhaar and Driver License documents",
+    "reviewed_at": "2026-11-13T12:14:56.885Z",
+    "changed_by": "Thulirva Operations Admin",
+    "created_at": "2026-11-13T12:14:56.885Z"
+  },
+  {
+    "submission_id": "KYC-SUB-1794572096860",
+    "partner_id": "THU-DP-0008",
+    "status": "PENDING",
+    "rejection_reason": null,
+    "notes": "KYC documents submitted by partner. Pending admin review.",
+    "submitted_at": "2026-11-13T12:14:56.860Z",
+    "changed_by": "Partner THU-DP-0008",
+    "created_at": "2026-11-13T12:14:56.860Z"
+  },
+  {
+    "partner_id": "THU-DP-0007",
+    "status": "APPROVED",
+    "rejection_reason": null,
+    "notes": "Verified Aadhaar and Driver License documents",
+    "reviewed_at": "2026-11-13T12:13:50.754Z",
+    "changed_by": "Thulirva Operations Admin",
+    "created_at": "2026-11-13T12:13:50.754Z"
+  },
+  {
+    "submission_id": "KYC-SUB-1794572030729",
+    "partner_id": "THU-DP-0007",
+    "status": "PENDING",
+    "rejection_reason": null,
+    "notes": "KYC documents submitted by partner. Pending admin review.",
+    "submitted_at": "2026-11-13T12:13:50.729Z",
+    "changed_by": "Partner THU-DP-0007",
+    "created_at": "2026-11-13T12:13:50.729Z"
+  },
+  {
+    "partner_id": "THU-DP-0005",
+    "status": "APPROVED",
+    "rejection_reason": null,
+    "notes": "Verified Aadhaar and Driver License documents",
+    "reviewed_at": "2026-11-13T12:06:47.287Z",
+    "changed_by": "Thulirva Operations Admin",
+    "created_at": "2026-11-13T12:06:47.287Z"
+  },
+  {
+    "submission_id": "KYC-SUB-1794571607263",
+    "partner_id": "THU-DP-0005",
+    "status": "PENDING",
+    "rejection_reason": null,
+    "notes": "KYC documents submitted by partner. Pending admin review.",
+    "submitted_at": "2026-11-13T12:06:47.263Z",
+    "changed_by": "Partner THU-DP-0005",
+    "created_at": "2026-11-13T12:06:47.263Z"
+  },
+  {
+    "partner_id": "THU-DP-0005",
+    "status": "APPROVED",
+    "rejection_reason": null,
+    "notes": "Verified Aadhaar and Driver License documents",
+    "reviewed_at": "2026-11-13T12:06:12.678Z",
+    "changed_by": "Thulirva Operations Admin",
+    "created_at": "2026-11-13T12:06:12.678Z"
+  },
+  {
+    "submission_id": "KYC-SUB-1794571572656",
+    "partner_id": "THU-DP-0005",
+    "status": "PENDING",
+    "rejection_reason": null,
+    "notes": "KYC documents submitted by partner. Pending admin review.",
+    "submitted_at": "2026-11-13T12:06:12.656Z",
+    "changed_by": "Partner THU-DP-0005",
+    "created_at": "2026-11-13T12:06:12.656Z"
+  },
+  {
+    "partner_id": "THU-DP-0004",
+    "status": "APPROVED",
+    "rejection_reason": null,
+    "notes": "Verified Aadhaar and Driver License documents",
+    "reviewed_at": "2026-11-13T12:05:31.065Z",
+    "changed_by": "Thulirva Operations Admin",
+    "created_at": "2026-11-13T12:05:31.065Z"
+  },
+  {
+    "submission_id": "KYC-SUB-1794571531041",
+    "partner_id": "THU-DP-0004",
+    "status": "PENDING",
+    "rejection_reason": null,
+    "notes": "KYC documents submitted by partner. Pending admin review.",
+    "submitted_at": "2026-11-13T12:05:31.041Z",
+    "changed_by": "Partner THU-DP-0004",
+    "created_at": "2026-11-13T12:05:31.041Z"
+  },
+  {
+    "partner_id": "THU-DP-0003",
+    "status": "APPROVED",
+    "rejection_reason": null,
+    "notes": "Verified Aadhaar and Driver License documents",
+    "reviewed_at": "2026-11-13T12:04:44.067Z",
+    "changed_by": "Thulirva Operations Admin",
+    "created_at": "2026-11-13T12:04:44.067Z"
+  },
+  {
+    "submission_id": "KYC-SUB-1794571484045",
+    "partner_id": "THU-DP-0003",
+    "status": "PENDING",
+    "rejection_reason": null,
+    "notes": "KYC documents submitted by partner. Pending admin review.",
+    "submitted_at": "2026-11-13T12:04:44.045Z",
+    "changed_by": "Partner THU-DP-0003",
+    "created_at": "2026-11-13T12:04:44.045Z"
+  }
+]

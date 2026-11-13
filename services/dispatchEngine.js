@@ -366,12 +366,24 @@ async function handleOfferAccept(orderId, partnerId) {
             ) VALUES ($1, $2, 'order', $3, 'pickup_pending', 'smart_dispatch')
         `, [assignmentId, orderId, partnerId]);
 
-        // 4. Update order status and assign partner
+        // 4. Update order status and assign partner in DB & disk store
         await client.query(`
             UPDATE orders 
-            SET order_status = 'processing', updated_at = NOW() 
-            WHERE id = $1
-        `, [orderId]);
+            SET partner_id = $1, order_status = 'processing', updated_at = NOW() 
+            WHERE id = $2
+        `, [partnerId, orderId]);
+
+        try {
+            if (fs.existsSync(ORDERS_FILE)) {
+                const orders = JSON.parse(fs.readFileSync(ORDERS_FILE, "utf-8"));
+                const ord = orders.find(o => String(o.id) === String(orderId) || String(o.order_number) === String(orderId));
+                if (ord) {
+                    ord.partner_id = partnerId;
+                    ord.order_status = "processing";
+                    fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2), "utf-8");
+                }
+            }
+        } catch (_) {}
 
         // 5. Increment partner active orders count
         await client.query(`

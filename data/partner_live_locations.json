@@ -1,0 +1,80 @@
+[
+  {
+    "partner_id": "THU-DP-0003",
+    "latitude": 12.8025,
+    "longitude": 80.2233,
+    "accuracy": 4.2,
+    "speed": 16.5,
+    "heading": 45,
+    "active_delivery_id": null,
+    "device_timestamp": "2026-11-13T12:04:44.092Z",
+    "server_timestamp": "2026-11-13T12:04:44.096Z",
+    "is_fresh": true,
+    "last_seen_seconds_ago": 0
+  },
+  {
+    "partner_id": "THU-DP-0004",
+    "latitude": 12.8025,
+    "longitude": 80.2233,
+    "accuracy": 4.2,
+    "speed": 16.5,
+    "heading": 45,
+    "active_delivery_id": null,
+    "device_timestamp": "2026-11-13T12:05:31.089Z",
+    "server_timestamp": "2026-11-13T12:05:31.094Z",
+    "is_fresh": true,
+    "last_seen_seconds_ago": 0
+  },
+  {
+    "partner_id": "THU-DP-0005",
+    "latitude": 12.8025,
+    "longitude": 80.2233,
+    "accuracy": 4.2,
+    "speed": 16.5,
+    "heading": 45,
+    "active_delivery_id": null,
+    "device_timestamp": "2026-11-13T12:06:47.310Z",
+    "server_timestamp": "2026-11-13T12:06:47.319Z",
+    "is_fresh": true,
+    "last_seen_seconds_ago": 0
+  },
+  {
+    "partner_id": "THU-DP-0007",
+    "latitude": 12.8025,
+    "longitude": 80.2233,
+    "accuracy": 4.2,
+    "speed": 16.5,
+    "heading": 45,
+    "active_delivery_id": null,
+    "device_timestamp": "2026-11-13T12:13:50.777Z",
+    "server_timestamp": "2026-11-13T12:13:50.786Z",
+    "is_fresh": true,
+    "last_seen_seconds_ago": 0
+  },
+  {
+    "partner_id": "THU-DP-0008",
+    "latitude": 12.8025,
+    "longitude": 80.2233,
+    "accuracy": 4.2,
+    "speed": 16.5,
+    "heading": 45,
+    "active_delivery_id": null,
+    "device_timestamp": "2026-11-13T12:14:56.907Z",
+    "server_timestamp": "2026-11-13T12:14:56.915Z",
+    "is_fresh": true,
+    "last_seen_seconds_ago": 0
+  },
+  {
+    "partner_id": "THU-DP-0009",
+    "latitude": 12.8025,
+    "longitude": 80.2233,
+    "accuracy": 4.2,
+    "speed": 16.5,
+    "heading": 45,
+    "active_delivery_id": null,
+    "device_timestamp": "2026-11-13T12:15:23.587Z",
+    "server_timestamp": "2026-11-13T12:15:23.593Z",
+    "is_fresh": true,
+    "last_seen_seconds_ago": 0
+  }
+]
