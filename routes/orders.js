@@ -573,6 +573,42 @@ async function getOrdersWithItems(whereClause = "", params = []) {
     }
 }
 
+/* GET ALL ORDERS */
+router.get("/", async (req, res) => {
+    try {
+        const includeSubs = req.query.include_subscriptions === "true" || req.query.type === "all";
+        const orders = await getOrdersWithItems();
+        const dbIds = new Set(orders.map(o => o.id.toString()));
+        const memOrders = (getMockOrders() || []).filter(o => !dbIds.has(o.id.toString()));
+        
+        let allOrders = [...orders, ...memOrders].filter(o => {
+            const isSub = (o.delivery_type === "subscription" || o.order_type === "subscription" || (o.id && o.id.toString().startsWith("SUB-")));
+            return !isSub;
+        }).map(o => ({
+            ...o,
+            order_type: "product"
+        }));
+
+        if (includeSubs) {
+            const subsList = await subscriptionsRouter.getDirectSubscriptionsList();
+            allOrders = [...allOrders, ...subsList];
+        }
+
+        res.json({
+            success: true,
+            total: allOrders.length,
+            orders: allOrders
+        });
+    } catch (err) {
+        const memOrders = (getMockOrders() || []).map(o => ({ ...o, order_type: "product" }));
+        res.json({
+            success: true,
+            total: memOrders.length,
+            orders: memOrders
+        });
+    }
+});
+
 /* ADMIN ALL ORDERS */
 router.get("/admin/all", async (req, res) => {
     try {
@@ -1276,5 +1312,98 @@ router.post("/:id/rate", async (req, res) => {
 router.put("/:id/status", updateOrderStatusHandler);
 router.patch("/:id/status", updateOrderStatusHandler);
 router.post("/:id/status", updateOrderStatusHandler);
+
+/* ============================================================
+   DELIVERY PROOF & COMPLETION ENDPOINTS
+============================================================ */
+const {
+    saveDeliveryProof,
+    completeDelivery,
+    getDeliveryDetails,
+    verifyDeliveryProof,
+    flagDeliveryProof,
+    reportDeliveryIssue
+} = require("../services/deliveryProofService");
+
+router.post("/:orderId/delivery-proof", async (req, res) => {
+    try {
+        const orderId = req.params.orderId;
+        const { image, photo, proof, remarks, latitude, longitude, partner_id, sub_id } = req.body;
+        const result = await saveDeliveryProof({
+            orderId,
+            subId: sub_id,
+            partnerId: partner_id || req.user?.partner_id,
+            imageBase64: image || photo || proof,
+            remarks,
+            latitude,
+            longitude
+        });
+        return res.json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+});
+
+router.get("/:orderId/delivery-proof", async (req, res) => {
+    try {
+        const details = await getDeliveryDetails(req.params.orderId);
+        if (!details) return res.status(404).json({ success: false, message: "Order not found" });
+        return res.json({
+            success: true,
+            order_id: req.params.orderId,
+            delivery_proof: details.delivery_proof,
+            delivery_proof_urls: details.delivery_proof_urls,
+            proof_status: details.proof_status
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.get("/:orderId/delivery-details", async (req, res) => {
+    try {
+        const details = await getDeliveryDetails(req.params.orderId);
+        if (!details) return res.status(404).json({ success: false, message: "Delivery details not found" });
+        return res.json({ success: true, delivery: details, order: details });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.post("/:orderId/complete-delivery", async (req, res) => {
+    try {
+        const orderId = req.params.orderId;
+        const { image, photo, proof, remarks, latitude, longitude, partner_id, sub_id } = req.body;
+        const result = await completeDelivery({
+            orderId,
+            subId: sub_id,
+            partnerId: partner_id || req.user?.partner_id,
+            remarks,
+            latitude,
+            longitude,
+            imageBase64: image || photo || proof
+        });
+        return res.json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+});
+
+router.post("/:orderId/issues", async (req, res) => {
+    try {
+        const orderId = req.params.orderId;
+        const { customer_id, issue_category, description, image } = req.body;
+        const result = await reportDeliveryIssue({
+            orderId,
+            customerId: customer_id || req.user?.id,
+            issueCategory: issue_category,
+            description,
+            imageBase64: image
+        });
+        return res.status(201).json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+});
 
 module.exports = router;

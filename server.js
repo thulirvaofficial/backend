@@ -74,6 +74,9 @@ const v1Routes =
     require("./routes/v1");
 
 
+const recipeRoutes =
+    require("./routes/recipes");
+
 const app = express();
 
 const PORT =
@@ -107,6 +110,11 @@ app.use(
 
 app.use(
     "/api/products",
+    productRoutes
+);
+
+app.use(
+    "/api/admin/products",
     productRoutes
 );
 
@@ -171,6 +179,11 @@ app.use(
 );
 
 app.use(
+    "/api/recipes",
+    recipeRoutes
+);
+
+app.use(
     "/api/offers",
     offerRoutes
 );
@@ -188,6 +201,11 @@ app.use(
 app.use(
     "/api/delivery-partners",
     deliveryRoutes
+);
+
+app.use(
+    "/api/partners",
+    require("./routes/v1/partners")
 );
 
 app.use(

@@ -53,7 +53,18 @@
     "partner_id": "THU-DP-0009",
     "status": "delivered",
     "notes": "Delivered to customer with OTP confirmation",
-    "delivered_at": "2026-11-13T12:15:23.827Z"
+    "delivered_at": "2026-11-13T12:15:23.827Z",
+    "delivery_proof": "/uploads/delivery_proofs/proof_1010_1794573894079_194.png",
+    "delivery_proof_urls": [
+      "/uploads/delivery_proofs/proof_1010_1794573894079_194.png"
+    ],
+    "delivery_remarks": "Delivered to door step in Padur",
+    "delivery_latitude": 12.8025,
+    "delivery_longitude": 80.2233,
+    "proof_uploaded_at": "2026-11-13T12:44:54.080Z",
+    "proof_status": "uploaded",
+    "has_complaint": true,
+    "last_complaint_id": "ISSUE-1794581683219-739"
   },
   {
     "id": 1009,

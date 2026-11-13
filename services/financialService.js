@@ -62,7 +62,7 @@ async function recordFinancialAudit(action, partnerId, adminName, amountPaise, b
             INSERT INTO financial_audit_logs (action, partner_id, admin_name, amount_paise, before_balance_paise, after_balance_paise, notes, created_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
         `, [action, partnerId, adminName || "System Automated", amountPaise, beforeBalance, afterBalance, notes]);
-    } catch (_) {}
+    } catch (_) { }
 
     return auditEntry;
 }
@@ -92,7 +92,7 @@ async function getPartnerWalletBalance(partnerId) {
                 updated_at: row.updated_at
             };
         }
-    } catch (_) {}
+    } catch (_) { }
 
     const balances = loadJson(BALANCES_FILE, []);
     let wallet = balances.find(b => b.partner_id === partnerId);
@@ -159,7 +159,7 @@ async function savePartnerWalletBalance(wallet) {
             wallet.partner_id, wallet.lifetime_earned_paise, wallet.total_settled_paise,
             wallet.available_payable_paise, wallet.reserved_withdrawal_paise, wallet.pending_settlement_paise
         ]);
-    } catch (_) {}
+    } catch (_) { }
 }
 
 /**
@@ -220,7 +220,7 @@ async function recordEarningEntry({
             ) VALUES ($1, $2, $3, $4, $5, $6, false, null, NOW())
             ON CONFLICT (id) DO NOTHING
         `, [newEntry.id, partner_id, entry_type, reference_id.toString(), amountPaise, newEntry.description]);
-    } catch (_) {}
+    } catch (_) { }
 
     // Update Wallet Balance Atomically
     const wallet = await getPartnerWalletBalance(partner_id);
@@ -247,7 +247,7 @@ async function recordEarningEntry({
             balance_rupees: wallet.available_payable_paise / 100,
             entry: newEntry
         });
-    } catch (_) {}
+    } catch (_) { }
 
     return newEntry;
 }
@@ -499,7 +499,7 @@ async function executeWeeklySettlement({
             utr_number,
             available_payable_rupees: wallet.available_payable_paise / 100
         });
-    } catch (_) {}
+    } catch (_) { }
 
     return settlementRecord;
 }

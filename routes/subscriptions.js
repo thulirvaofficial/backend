@@ -1048,4 +1048,59 @@ router.put("/:id/status", async (req, res) => {
     });
 });
 
+/* ============================================================
+   SUBSCRIPTION DELIVERY PROOF & COMPLETION ENDPOINTS
+============================================================ */
+const {
+    saveDeliveryProof,
+    completeDelivery,
+    getDeliveryDetails
+} = require("../services/deliveryProofService");
+
+router.post("/:id/delivery-proof", async (req, res) => {
+    try {
+        const id = req.params.id;
+        const { image, photo, proof, remarks, latitude, longitude, partner_id } = req.body;
+        const result = await saveDeliveryProof({
+            subId: id,
+            partnerId: partner_id || req.user?.partner_id,
+            imageBase64: image || photo || proof,
+            remarks,
+            latitude,
+            longitude
+        });
+        return res.json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+});
+
+router.get("/:id/delivery-details", async (req, res) => {
+    try {
+        const details = await getDeliveryDetails(`SUB-${req.params.id}`);
+        if (!details) return res.status(404).json({ success: false, message: "Subscription delivery details not found" });
+        return res.json({ success: true, delivery: details });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.post("/:id/complete-delivery", async (req, res) => {
+    try {
+        const id = req.params.id;
+        const { image, photo, proof, remarks, latitude, longitude, partner_id } = req.body;
+        const result = await completeDelivery({
+            subId: id,
+            partnerId: partner_id || req.user?.partner_id,
+            remarks,
+            latitude,
+            longitude,
+            imageBase64: image || photo || proof
+        });
+        return res.json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+});
+
 module.exports = router;

@@ -64,7 +64,7 @@ function initSocketServer(httpServer) {
         });
 
         // Partner GPS tracking update via WebSocket
-        socket.on("delivery:location:update", async (data) => {
+        const handleLocationUpdate = async (data) => {
             try {
                 if (!data) return;
                 const partnerId = data.partnerId || socket.partnerId;
@@ -122,18 +122,24 @@ function initSocketServer(httpServer) {
 
                 // Broadcast live location to Admin channel
                 io.to("admin_channel").emit("delivery:location:update", updatePayload);
+                io.to("admin_channel").emit("fleet:location:updated", updatePayload);
+                io.to("admin_channel").emit("partner:location:updated", updatePayload);
 
                 // Broadcast to active order room if specified
                 if (data.orderId) {
                     io.to(`order_${data.orderId}`).emit("delivery:location:update", updatePayload);
+                    io.to(`order_${data.orderId}`).emit("partner:location:updated", updatePayload);
                 }
             } catch (err) {
                 console.error("[SOCKET LOCATION ERROR]", err.message);
             }
-        });
+        };
 
-        // Partner availability toggle
-        socket.on("partner:availability", async (data) => {
+        socket.on("delivery:location:update", handleLocationUpdate);
+        socket.on("partner:location:update", handleLocationUpdate);
+
+        // Partner availability / status toggle
+        const handleStatusUpdate = async (data) => {
             try {
                 const partnerId = data?.partnerId || socket.partnerId;
                 const isOnline = Boolean(data?.is_online ?? data?.isOnline);
@@ -156,13 +162,19 @@ function initSocketServer(httpServer) {
                     }
                 } catch (_) {}
 
-                io.to("admin_channel").emit("partner:status:changed", {
+                const statusPayload = {
                     partnerId,
                     is_online: isOnline,
                     timestamp: new Date().toISOString()
-                });
+                };
+
+                io.to("admin_channel").emit("partner:status:changed", statusPayload);
+                io.to("admin_channel").emit("partner:status:updated", statusPayload);
             } catch (err) {}
-        });
+        };
+
+        socket.on("partner:availability", handleStatusUpdate);
+        socket.on("partner:status:update", handleStatusUpdate);
 
         socket.on("disconnect", () => {
             if (socket.partnerId) {

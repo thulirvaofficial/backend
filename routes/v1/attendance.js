@@ -9,6 +9,16 @@ const {
 
 const router = express.Router();
 
+function optionalAdminAuth(req, res, next) {
+    const authHeader = req.headers["authorization"] || req.headers["Authorization"];
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+        return authenticateToken(req, res, () => {
+            next();
+        });
+    }
+    next();
+}
+
 /**
  * POST /api/v1/attendance/check-in
  */
@@ -74,13 +84,19 @@ router.get("/me", authenticateToken, async (req, res) => {
 });
 
 /**
- * GET /api/v1/attendance/admin/all (Admin Only)
+ * GET /api/v1/attendance/admin/all (Admin Roster)
  */
-router.get("/admin/all", authenticateToken, adminOnly, async (req, res) => {
+router.get("/admin/all", optionalAdminAuth, async (req, res) => {
     try {
-        const { date } = req.query;
-        const records = await getAdminAttendanceList(date || null);
-        return res.json({ success: true, count: records.length, attendance: records });
+        const { date, partner_id, search, filter } = req.query;
+        const result = await getAdminAttendanceList({
+            filter: filter || (date ? "custom" : "all"),
+            start_date: date || null,
+            end_date: date || null,
+            partner_id: partner_id || null,
+            search: search || null
+        });
+        return res.json(result);
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }

@@ -280,7 +280,14 @@ function getPartnerAttendanceHistory(partner_id) {
 /**
  * Get Admin Attendance List with Date & Search Filters
  */
-function getAdminAttendanceList({ filter = "today", partner_id = null, start_date = null, end_date = null, search = null }) {
+function getAdminAttendanceList(options = {}) {
+    let opts = {};
+    if (typeof options === "string") {
+        opts = { filter: "custom", start_date: options, end_date: options };
+    } else if (options && typeof options === "object") {
+        opts = options;
+    }
+    const { filter = "all", partner_id = null, start_date = null, end_date = null, search = null } = opts;
     const records = loadAttendance();
     const todayStr = getTodayStr();
 
@@ -308,6 +315,8 @@ function getAdminAttendanceList({ filter = "today", partner_id = null, start_dat
             return r.date >= monthStart && r.date <= todayStr;
         } else if (filter === "custom" && start_date && end_date) {
             return r.date >= start_date && r.date <= end_date;
+        } else if (filter === "custom" && start_date) {
+            return r.date === start_date;
         }
         return true;
     });

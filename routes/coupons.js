@@ -237,7 +237,18 @@ router.post("/", async (req, res) => {
 
     const cleanCode = code.trim().toUpperCase();
 
+    // Prevent duplicate coupon codes in memory / pool
+    const duplicate = MOCK_COUPONS.find(c => (c.code || "").toUpperCase() === cleanCode);
+    if (duplicate) {
+        return res.status(400).json({ success: false, message: `Coupon code '${cleanCode}' already exists.` });
+    }
+
     try {
+        const checkDb = await pool.query("SELECT id FROM coupons WHERE UPPER(code) = $1", [cleanCode]);
+        if (checkDb.rows && checkDb.rows.length > 0) {
+            return res.status(400).json({ success: false, message: `Coupon code '${cleanCode}' already exists in database.` });
+        }
+
         const result = await pool.query(
             `INSERT INTO coupons (code, discount_type, discount_value, min_order, max_discount, description, headline, expiry_date, usage_limit, status)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active')
@@ -278,6 +289,83 @@ router.post("/", async (req, res) => {
         }).catch(() => {});
         return res.json({ success: true, coupon: newCoupon });
     }
+});
+
+/* UPDATE / EDIT COUPON */
+router.put("/:id", async (req, res) => {
+    const id = parseInt(req.params.id);
+    const { code, discount_type, discount_value, min_order, max_discount, description, headline, expiry_date, usage_limit, status } = req.body;
+    
+    try {
+        const cleanCode = code ? code.trim().toUpperCase() : null;
+        if (cleanCode) {
+            const checkDb = await pool.query("SELECT id FROM coupons WHERE UPPER(code) = $1 AND id != $2", [cleanCode, id]);
+            if (checkDb.rows && checkDb.rows.length > 0) {
+                return res.status(400).json({ success: false, message: `Coupon code '${cleanCode}' is already taken.` });
+            }
+        }
+
+        const result = await pool.query(`
+            UPDATE coupons
+            SET code = COALESCE($1, code),
+                discount_type = COALESCE($2, discount_type),
+                discount_value = COALESCE($3, discount_value),
+                min_order = COALESCE($4, min_order),
+                max_discount = COALESCE($5, max_discount),
+                description = COALESCE($6, description),
+                headline = COALESCE($7, headline),
+                expiry_date = COALESCE($8, expiry_date),
+                usage_limit = COALESCE($9, usage_limit),
+                status = COALESCE($10, status),
+                updated_at = NOW()
+            WHERE id = $11
+            RETURNING *
+        `, [cleanCode, discount_type, discount_value, min_order, max_discount, description, headline, expiry_date, usage_limit, status, id]);
+
+        if (result.rows && result.rows.length > 0) {
+            return res.json({ success: true, coupon: result.rows[0] });
+        }
+    } catch (_) {}
+
+    // Memory fallback
+    const idx = MOCK_COUPONS.findIndex(c => c.id === id);
+    if (idx !== -1) {
+        if (code) MOCK_COUPONS[idx].code = code.trim().toUpperCase();
+        if (discount_type) MOCK_COUPONS[idx].discount_type = discount_type;
+        if (discount_value !== undefined) MOCK_COUPONS[idx].discount_value = Number(discount_value);
+        if (min_order !== undefined) MOCK_COUPONS[idx].min_order = Number(min_order);
+        if (max_discount !== undefined) MOCK_COUPONS[idx].max_discount = Number(max_discount);
+        if (description !== undefined) MOCK_COUPONS[idx].description = description;
+        if (headline !== undefined) MOCK_COUPONS[idx].headline = headline;
+        if (expiry_date) MOCK_COUPONS[idx].expiry_date = expiry_date;
+        if (usage_limit !== undefined) MOCK_COUPONS[idx].usage_limit = Number(usage_limit);
+        if (status) MOCK_COUPONS[idx].status = status;
+
+        return res.json({ success: true, coupon: MOCK_COUPONS[idx] });
+    }
+
+    return res.status(404).json({ success: false, message: "Coupon not found" });
+});
+
+/* TOGGLE COUPON STATUS */
+router.patch("/:id/toggle", async (req, res) => {
+    const id = parseInt(req.params.id);
+    try {
+        const row = await pool.query("SELECT status FROM coupons WHERE id = $1", [id]);
+        if (row.rows && row.rows.length > 0) {
+            const nextStatus = row.rows[0].status === "active" ? "inactive" : "active";
+            const updated = await pool.query("UPDATE coupons SET status = $1 WHERE id = $2 RETURNING *", [nextStatus, id]);
+            return res.json({ success: true, coupon: updated.rows[0] });
+        }
+    } catch (_) {}
+
+    const c = MOCK_COUPONS.find(x => x.id === id);
+    if (c) {
+        c.status = c.status === "active" ? "inactive" : "active";
+        return res.json({ success: true, coupon: c });
+    }
+
+    return res.status(404).json({ success: false, message: "Coupon not found" });
 });
 
 /* DELETE COUPON */

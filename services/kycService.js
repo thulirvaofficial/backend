@@ -157,6 +157,9 @@ async function reviewKycSubmission({
     partner.kyc_rejection_reason = (cleanStatus === "REJECTED" || cleanStatus === "RESUBMISSION_REQUIRED") ? rejection_reason : null;
 
     if (cleanStatus === "APPROVED") {
+        if (!partner.aadhaar_front_url || !partner.aadhaar_back_url) {
+            throw new Error("Cannot approve KYC: Mandatory Aadhaar front and back documents are missing.");
+        }
         partner.is_active = true;
         partner.registration_status = "approved";
     } else if (cleanStatus === "REJECTED") {
