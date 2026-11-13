@@ -28,29 +28,24 @@ jobs:
 
             npm install --omit=dev
 
-            echo "=== PM2 STATUS BEFORE ==="
-            pm2 status || true
-
             pm2 restart backend --update-env || pm2 start server.js --name backend --update-env
 
             pm2 save
 
             sleep 3
 
-            echo "=== PM2 STATUS AFTER ==="
-            pm2 status
-
-            echo "=== PM2 RECENT LOGS ==="
-            pm2 logs backend --lines 50 --nostream || true
-
-            echo "=== LISTENING PORTS ==="
-            sudo ss -tlpn || sudo netstat -tlpn || true
-
-            echo "=== NGINX CONFIGURATION ==="
-            sudo cat /etc/nginx/sites-enabled/* || true
-
-            echo "=== TEST LOCAL BACKEND HTTP ==="
-            curl -s -o /dev/null -w "Port 5500 HTTP Code: %{http_code}\n" http://127.0.0.1:5500/api || true
-            curl -s -o /dev/null -w "Port 5000 HTTP Code: %{http_code}\n" http://127.0.0.1:5000/api || true
+            {
+              echo "=== PM2 STATUS ==="
+              pm2 status || true
+              echo "=== PM2 LOGS ==="
+              pm2 logs backend --lines 40 --nostream || true
+              echo "=== LISTENING PORTS ==="
+              sudo ss -tlpn || sudo netstat -tlpn || true
+              echo "=== NGINX SITES ==="
+              sudo cat /etc/nginx/sites-enabled/* || true
+              echo "=== LOCAL CURL TESTS ==="
+              curl -i http://127.0.0.1:5500/api || true
+              curl -i http://127.0.0.1:5000/api || true
+            } > /var/www/thulirva/website/vps_diag.txt 2>&1 || true
 
             echo "Backend deployment successful"
