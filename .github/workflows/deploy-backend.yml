@@ -28,16 +28,16 @@ jobs:
 
             npm install --omit=dev
 
+            # Ensure root PM2 does not conflict on port 5500
+            pm2 delete backend 2>/dev/null || true
+
             # Restart in ubuntu user PM2 daemon (main service runner)
-            su - ubuntu -c "cd /var/www/thulirva/backend && (pm2 delete backend || true) && pm2 start server.js --name backend --update-env && pm2 save" || true
+            su - ubuntu -c "cd /var/www/thulirva/backend && (pm2 delete backend 2>/dev/null || true) && pm2 start server.js --name backend --update-env && pm2 save"
 
-            # Also restart in root PM2 daemon if active
-            (pm2 delete backend || true) && pm2 start /var/www/thulirva/backend/server.js --name backend --update-env && pm2 save || true
-
-            sleep 3
+            sleep 4
 
             # Verify local backend is responding
-            curl -s -f http://127.0.0.1:5500/api || curl -s -f http://127.0.0.1:5000/api || echo "Backend check complete"
+            curl -s -f http://127.0.0.1:5500/api || echo "Backend check completed"
 
             # Remove diagnostic text files for security
             sudo rm -f /var/www/thulirva/website/admin/diag.txt /var/www/thulirva/website/website/diag.txt /var/www/thulirva/website/diag.txt /var/www/thulirva/website/vps_diag.txt 2>/dev/null || true

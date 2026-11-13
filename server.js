@@ -321,7 +321,7 @@ app.get("/api/", apiStatusHandler);
    API 404 CATCH-ALL (Guarantees pure JSON, never HTML)
 ============================================================ */
 
-app.all("/api/*", (req, res) => {
+app.use("/api", (req, res) => {
     res.status(404).json({
         success: false,
         error: "ENDPOINT_NOT_FOUND",
