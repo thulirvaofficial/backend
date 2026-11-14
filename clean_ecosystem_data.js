@@ -131,3 +131,4 @@ async function cleanData() {
 }
 
 cleanData().catch(console.error);
+
