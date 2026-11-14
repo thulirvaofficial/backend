@@ -724,7 +724,7 @@ router.get("/profile", authenticatePartner, async (req, res) => {
         }
     } catch {}
 
-    const subsData = await getSubscriptionDeliveries(formatDateKey(new Date()), partnerId);
+    const subsData = await getSubscriptionDeliveries(formatDateKey(new Date()), req.partner);
     const completedSubs = (subsData.deliveries || []).filter(d => d.status === "delivered").length;
     const calculatedTrips = (Number(partner.total_deliveries_count) || 0) + completedOrders + completedSubs;
 
@@ -1282,6 +1282,28 @@ router.post("/location", authenticatePartner, async (req, res) => {
 ============================================================ */
 
 /**
+ * Shared Authorized Product Orders Filter for Partner
+ * Matches orders explicitly assigned to partner, or unassigned within partner's service area
+ */
+const getAuthorizedProductOrdersForPartner = (orders, partnerId, partnerArea) => {
+    return (orders || []).filter(o => {
+        const isSub = (o.order_type === "subscription" || o.delivery_type === "subscription" || (o.id && o.id.toString().startsWith("SUB-")));
+        if (isSub) return false;
+
+        // Assigned directly to this partner
+        if (o.partner_id && o.partner_id === partnerId) return true;
+
+        // Unassigned order available for claim/delivery in partner's assigned territory
+        if (!o.partner_id) {
+            if (!partnerArea || partnerArea.toLowerCase() === "all") return true;
+            const orderArea = `${o.city || ''} ${o.address || ''} ${o.area || ''}`.toLowerCase();
+            return orderArea.includes(partnerArea.toLowerCase());
+        }
+        return false;
+    });
+};
+
+/**
  * GET /api/delivery/dashboard
  * Real-time dynamic live counts calculated from database & disk
  */
@@ -1292,7 +1314,7 @@ router.get("/dashboard", authenticatePartner, async (req, res) => {
         const todayStr = formatDateKey(now);
         const dateLabel = formatReadableDate(now);
 
-        const subsData = await getSubscriptionDeliveries(todayStr, partnerId);
+        const subsData = await getSubscriptionDeliveries(todayStr, req.partner);
 
         // Fetch product orders strictly (excluding subscriptions)
         let orders = [];
@@ -1302,11 +1324,7 @@ router.get("/dashboard", authenticatePartner, async (req, res) => {
             }
         } catch {}
 
-        const partnerOrders = orders.filter(o => {
-            const isSub = (o.order_type === "subscription" || o.delivery_type === "subscription" || (o.id && o.id.toString().startsWith("SUB-")));
-            if (isSub) return false;
-            return !o.partner_id || o.partner_id === partnerId;
-        });
+        const partnerOrders = getAuthorizedProductOrdersForPartner(orders, partnerId, req.partner.assigned_area);
 
         const ordersTotal = partnerOrders.length;
         const ordersDelivered = partnerOrders.filter(o => o.order_status === "delivered").length;
@@ -1502,11 +1520,7 @@ const getOrdersHandler = async (req, res) => {
         } catch {}
 
         // Strict Product Orders partition: NEVER return subscriptions!
-        let filtered = orders.filter(o => {
-            const isSub = (o.order_type === "subscription" || o.delivery_type === "subscription" || (o.id && o.id.toString().startsWith("SUB-")));
-            if (isSub) return false;
-            return !o.partner_id || o.partner_id === partnerId;
-        });
+        let filtered = getAuthorizedProductOrdersForPartner(orders, partnerId, req.partner.assigned_area);
 
         if (search && search.trim()) {
             const q = search.trim().toLowerCase();
@@ -1786,7 +1800,7 @@ const getDeliveryLogHandler = async (req, res) => {
         const dateKey = formatDateKey(targetDate);
 
         // Subscriptions
-        const subsData = await getSubscriptionDeliveries(dateKey, partnerId);
+        const subsData = await getSubscriptionDeliveries(dateKey, req.partner);
         const deliveredSubs = (subsData.deliveries || []).filter(d => d.status === "delivered").map(d => ({
             id: d.subscription_id || `SUB${d.id}`,
             code: d.subscription_id || `SUB${d.id}`,
