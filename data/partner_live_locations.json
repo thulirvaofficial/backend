@@ -63,5 +63,18 @@
     "server_timestamp": "2026-11-14T16:12:59.134Z",
     "is_fresh": true,
     "last_seen_seconds_ago": 0
+  },
+  {
+    "partner_id": "THU-DP-0001",
+    "latitude": 13.0382,
+    "longitude": 80.1565,
+    "accuracy": 3.2,
+    "speed": 26.5,
+    "heading": 315,
+    "active_delivery_id": "1794669999001",
+    "device_timestamp": "2026-11-14T18:13:59.589Z",
+    "server_timestamp": "2026-11-14T18:13:59.589Z",
+    "is_fresh": true,
+    "last_seen_seconds_ago": 0
   }
 ]

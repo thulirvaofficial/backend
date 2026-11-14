@@ -771,12 +771,15 @@ router.get("/user/:identifier", async (req, res) => {
     const cleanDigits = rawIdent.replace(/\D/g, "");
     const isEmail = ident.includes("@");
     const isPhone = cleanDigits.length >= 10 && /^[6-9]\d{9}$/.test(cleanDigits);
-    const isNumericId = !isEmail && !isPhone && !isNaN(Number(ident));
+    const isCusCode = ident.startsWith("cus-") || ident.startsWith("cus");
+    const parsedCusNum = isCusCode && cleanDigits.length > 0 ? parseInt(cleanDigits, 10) : null;
+    const isNumericId = (!isEmail && !isPhone && !isNaN(Number(ident))) || (parsedCusNum != null && !isNaN(parsedCusNum));
+    const effectiveNumericId = isNumericId ? (parsedCusNum != null ? parsedCusNum : Number(ident)) : null;
 
     try {
         let matchedUser = null;
-        if (isNumericId) {
-            const uRes = await pool.query("SELECT id, email, phone FROM users WHERE id = $1 LIMIT 1", [Number(ident)]).catch(() => ({ rows: [] }));
+        if (effectiveNumericId) {
+            const uRes = await pool.query("SELECT id, email, phone FROM users WHERE id = $1 LIMIT 1", [effectiveNumericId]).catch(() => ({ rows: [] }));
             if (uRes.rows.length > 0) matchedUser = uRes.rows[0];
         } else if (isEmail) {
             const uRes = await pool.query("SELECT id, email, phone FROM users WHERE LOWER(email) = $1 LIMIT 1", [ident]).catch(() => ({ rows: [] }));
@@ -786,7 +789,7 @@ router.get("/user/:identifier", async (req, res) => {
             if (uRes.rows.length > 0) matchedUser = uRes.rows[0];
         }
 
-        const userNumericId = matchedUser ? matchedUser.id : (isNumericId ? Number(ident) : null);
+        const userNumericId = matchedUser ? matchedUser.id : (effectiveNumericId || null);
         const userEmail = matchedUser?.email ? matchedUser.email.toLowerCase().trim() : (isEmail ? ident : null);
         const userPhone = matchedUser?.phone ? matchedUser.phone.replace(/\D/g, "") : (isPhone ? cleanDigits : null);
 
@@ -812,12 +815,18 @@ router.get("/user/:identifier", async (req, res) => {
         }
 
         const whereSql = `WHERE (${whereClauses.join(" OR ")}) AND (LOWER(COALESCE(delivery_type, '')) != 'subscription')`;
-        const orders = await getOrdersWithItems(whereSql, params);
+        let orders = [];
+        try {
+            orders = await getOrdersWithItems(whereSql, params);
+        } catch (dbErr) {
+            orders = [];
+        }
         
         // Merge in-memory / disk orders safely (strictly product orders only)
-        const dbIds = new Set(orders.map(o => o.id.toString()));
+        const dbIds = new Set((orders || []).filter(o => o && o.id != null).map(o => o.id.toString()));
         const memOrders = (getMockOrders() || []).filter(o => {
-            if (dbIds.has(o.id.toString())) return false;
+            if (!o) return false;
+            if (o.id != null && dbIds.has(o.id.toString())) return false;
             if ((o.delivery_type || "").toLowerCase() === "subscription") return false;
             if (o.id && o.id.toString().startsWith("SUB-")) return false;
             const oUid = (o.user_id || o.userId || "").toString().trim();
@@ -827,6 +836,7 @@ router.get("/user/:identifier", async (req, res) => {
             if (userNumericId && oUid === userNumericId.toString()) return true;
             if (userEmail && oEmail === userEmail) return true;
             if (userPhone && oPhone === userPhone) return true;
+            if (ident && (oUid === ident || oEmail === ident || (cleanDigits.length >= 10 && oPhone === cleanDigits))) return true;
             return false;
         });
 
