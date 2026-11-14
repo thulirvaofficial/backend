@@ -299,10 +299,13 @@ const backendAssetsUploadsPath = path.resolve(__dirname, "assets", "images", "up
     path.join(backendPublicUploadsPath, "partners"),
     path.join(backendPublicUploadsPath, "delivery_proofs"),
     path.join(backendPublicUploadsPath, "attendance"),
+    path.join(backendPublicUploadsPath, "profiles"),
     backendAssetsUploadsPath,
+    path.join(backendAssetsUploadsPath, "profiles"),
     websiteUploadsPath,
     path.join(websiteUploadsPath, "delivery_proofs"),
-    path.join(websiteUploadsPath, "partners")
+    path.join(websiteUploadsPath, "partners"),
+    path.join(websiteUploadsPath, "profiles")
 ].forEach(dir => {
     if (!fs.existsSync(dir)) {
         try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}

@@ -4,9 +4,10 @@ const fs = require("fs");
 
 const PROOF_UPLOADS_DIR = path.resolve(__dirname, "..", "public", "uploads", "delivery_proofs");
 const PARTNER_UPLOADS_DIR = path.resolve(__dirname, "..", "public", "uploads", "partners");
+const USER_UPLOADS_DIR = path.resolve(__dirname, "..", "public", "uploads", "profiles");
 
 // Ensure upload dirs exist
-[PROOF_UPLOADS_DIR, PARTNER_UPLOADS_DIR].forEach(dir => {
+[PROOF_UPLOADS_DIR, PARTNER_UPLOADS_DIR, USER_UPLOADS_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
     }
@@ -134,8 +135,65 @@ const uploadPartnerPhoto = (req, res, next) => {
     });
 };
 
+// 3. Customer & Admin User Profile Photo Storage
+const userProfileStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, USER_UPLOADS_DIR);
+    },
+    filename: (req, file, cb) => {
+        const userId = req.user?.id || req.body?.userId || req.body?.user_id || "user";
+        const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
+        const cleanExt = (ext === ".tmp" || !ext || ext === ".") ? ".jpg" : (ext.startsWith(".") ? ext : `.${ext}`);
+        const uniqueSuffix = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+        cb(null, `profile_${userId}_${uniqueSuffix}${cleanExt}`);
+    }
+});
+
+const uploadUserProfileMulter = multer({
+    storage: userProfileStorage,
+    limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
+    fileFilter: imageFileFilter
+});
+
+const uploadUserProfilePhoto = (req, res, next) => {
+    const ct = (req.headers["content-type"] || "").toLowerCase();
+    if (!ct.includes("multipart/form-data")) {
+        return next();
+    }
+
+    const handler = uploadUserProfileMulter.fields([
+        { name: "photo", maxCount: 1 },
+        { name: "profile_photo", maxCount: 1 },
+        { name: "image", maxCount: 1 },
+        { name: "avatar", maxCount: 1 },
+        { name: "file", maxCount: 1 }
+    ]);
+
+    handler(req, res, (err) => {
+        if (err) {
+            console.warn("[UPLOAD USER PHOTO WARNING]:", err.message);
+            if (err.code === "LIMIT_FILE_SIZE") {
+                return res.status(413).json({ success: false, message: "File exceeds 25MB limit" });
+            }
+        }
+        if (req.files) {
+            const found = req.files["photo"]?.[0] ||
+                          req.files["profile_photo"]?.[0] ||
+                          req.files["image"]?.[0] ||
+                          req.files["avatar"]?.[0] ||
+                          req.files["file"]?.[0];
+            if (found) req.file = found;
+        }
+        next();
+    });
+};
+
 module.exports = {
     uploadDeliveryProof,
-    uploadPartnerPhoto
+    uploadPartnerPhoto,
+    uploadUserProfilePhoto,
+    USER_UPLOADS_DIR,
+    PARTNER_UPLOADS_DIR,
+    PROOF_UPLOADS_DIR
 };
 

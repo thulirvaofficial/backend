@@ -4,13 +4,13 @@
     "name": "kamsh",
     "phone": "7904880944",
     "email": "kamsh@thulirva.com",
-    "profile_photo": "/uploads/partners/profile_THU-DP-0001_1794650635910.jpg",
+    "profile_photo": "/uploads/partners/profile_THU-DP-0001_1794686372852.png",
     "is_online": true,
     "is_active": true,
     "registration_status": "approved",
     "kyc_status": "APPROVED",
     "rating": 5,
-    "total_deliveries_count": 0,
+    "total_deliveries_count": 2,
     "vehicle_type": "Electric Scooter",
     "vehicle_number": "TN 09 CY 4567",
     "assigned_area": "All",
@@ -19,8 +19,9 @@
     "current_longitude": 80.1565,
     "password": "123456",
     "created_at": "2026-11-14T08:00:00.000Z",
-    "updated_at": "2026-11-14T10:03:55.923Z",
-    "today_deliveries_count": 0
+    "updated_at": "2026-11-14T19:59:32.909Z",
+    "today_deliveries_count": 2,
+    "last_active_at": "2026-11-14T19:59:32.841Z"
   },
   {
     "partner_id": "DP-TEST-9999",

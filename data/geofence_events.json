@@ -1,0 +1,19 @@
+{
+  "product_arrival": {
+    "34": {
+      "order_id": "34",
+      "partner_id": "THU-DP-0001",
+      "user_id": 3,
+      "arrived_at": "2026-11-14T19:28:20.370Z",
+      "distance_meters": 47
+    },
+    "1794669999001": {
+      "order_id": "1794669999001",
+      "partner_id": "THU-DP-0001",
+      "user_id": 3,
+      "arrived_at": "2026-11-14T19:27:21.129Z",
+      "distance_meters": 47
+    }
+  },
+  "subscription_proximity": {}
+}

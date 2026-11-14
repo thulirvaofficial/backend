@@ -1,5 +1,17 @@
 [
   {
+    "id": 1794686354690,
+    "action": "EARNING_CREDITED",
+    "partner_id": "THU-DP-0001",
+    "admin_name": "System Automated",
+    "amount_paise": 4000,
+    "amount_rupees": 40,
+    "before_balance_paise": 12000,
+    "after_balance_paise": 16000,
+    "notes": "Credited ₹40 for delivery_order #ORD101",
+    "created_at": "2026-11-14T19:59:14.474Z"
+  },
+  {
     "id": 1794667162230,
     "action": "WEEKLY_SALARY_SETTLED",
     "partner_id": "THU-DP-0006",

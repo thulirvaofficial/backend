@@ -1,5 +1,17 @@
 [
   {
+    "id": "LEDGER-1794686354466-8537",
+    "partner_id": "THU-DP-0001",
+    "entry_type": "delivery_order",
+    "reference_id": "ORD101",
+    "amount_paise": 4000,
+    "amount_rupees": 40,
+    "description": "Doorstep Product Delivery fee for Order #ORD101",
+    "is_settled": false,
+    "settlement_id": null,
+    "created_at": "2026-11-14T19:59:14.466Z"
+  },
+  {
     "id": "LEDGER-1794667161663-9798",
     "partner_id": "THU-DP-0006",
     "entry_type": "delivery_subscription",

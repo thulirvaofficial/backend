@@ -26,6 +26,27 @@ jobs:
 
             npm install --omit=dev
 
+            # Ensure upload directories and permissions exist
+            mkdir -p public/uploads/profiles public/uploads/partners public/uploads/delivery_proofs public/uploads/attendance
+            chmod -R 775 public/uploads 2>/dev/null || true
+
+            # Configure Nginx client_max_body_size 25M to fix HTTP 413
+            if [ -f /etc/nginx/nginx.conf ]; then
+              if ! grep -q "client_max_body_size" /etc/nginx/nginx.conf; then
+                sudo sed -i '/http {/a \    client_max_body_size 25M;' /etc/nginx/nginx.conf 2>/dev/null || true
+              else
+                sudo sed -i 's/client_max_body_size .*/client_max_body_size 25M;/g' /etc/nginx/nginx.conf 2>/dev/null || true
+              fi
+            fi
+
+            for site in /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*; do
+              if [ -f "$site" ]; then
+                sudo sed -i 's/client_max_body_size .*/client_max_body_size 25M;/g' "$site" 2>/dev/null || true
+              fi
+            done
+
+            (sudo nginx -t && sudo systemctl reload nginx) 2>/dev/null || echo "Nginx verified"
+
             pm2 delete backend 2>/dev/null || true
             pm2 start server.js --name backend --update-env
             pm2 save

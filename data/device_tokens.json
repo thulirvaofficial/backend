@@ -16,5 +16,14 @@
     "is_active": false,
     "created_at": "2026-11-14T09:27:35.598Z",
     "updated_at": "2026-11-14T09:32:00.021Z"
+  },
+  {
+    "token": "fcm_test_token_partner_master_audit_2026_kamsh_device_12345",
+    "platform": "android",
+    "user_id": "delivery_partner",
+    "role": "partner",
+    "is_active": true,
+    "created_at": "2026-11-14T19:59:14.504Z",
+    "updated_at": "2026-11-14T19:59:32.931Z"
   }
 ]

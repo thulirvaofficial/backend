@@ -52,18 +52,48 @@ function extractUserId(req) {
     return req.body.id || req.body.userId || req.query.id || req.query.userId || null;
 }
 
-// Fallback in-memory customer store for zero-downtime registration & login
-const IN_MEMORY_USERS = [
-    {
-        id: 1,
-        name: "THULIRVA Admin",
-        email: "admin@thulirva.com",
-        password: "$2a$10$YourHashedPasswordHere",
-        phone: "7904880944",
-        address: "Chennai, Tamil Nadu",
-        role: "admin"
+const { uploadUserProfilePhoto, USER_UPLOADS_DIR } = require("../middleware/uploadMiddleware");
+
+// Disk-persisted user store for zero-downtime registration, login & profile sync
+const DATA_DIR = path.resolve(__dirname, "..", "data");
+const USERS_FILE = path.join(DATA_DIR, "users.json");
+
+function loadUsersFromDisk() {
+    try {
+        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+        if (fs.existsSync(USERS_FILE)) {
+            const data = fs.readFileSync(USERS_FILE, "utf-8");
+            return JSON.parse(data);
+        }
+    } catch (_) {}
+    return [
+        {
+            id: 1,
+            name: "THULIRVA Admin",
+            email: "admin@thulirva.com",
+            password: "$2a$10$YourHashedPasswordHere",
+            phone: "7904880944",
+            alternate_phone: "",
+            address: "Chennai, Tamil Nadu",
+            city: "Chennai",
+            pincode: "600087",
+            profile_photo: "",
+            role: "admin",
+            created_at: "2026-01-01T00:00:00.000Z"
+        }
+    ];
+}
+
+function saveUsersToDisk(users) {
+    try {
+        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+        fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), "utf-8");
+    } catch (e) {
+        console.warn("[USERS SAVE ERROR]:", e.message);
     }
-];
+}
+
+const IN_MEMORY_USERS = loadUsersFromDisk();
 
 /* ============================================================
    REGISTER ENDPOINT
@@ -147,11 +177,38 @@ router.post("/register", async (req, res) => {
                 forAdmin: false
             }).catch(() => {});
 
+            // Also update in-memory and disk fallback store
+            let memIdx = IN_MEMORY_USERS.findIndex(u => u.email.toLowerCase() === cleanEmail);
+            if (memIdx >= 0) {
+                IN_MEMORY_USERS[memIdx] = { ...IN_MEMORY_USERS[memIdx], ...newUser };
+            } else {
+                IN_MEMORY_USERS.push({
+                    id: newUser.id,
+                    name: newUser.name,
+                    email: newUser.email,
+                    phone: newUser.phone,
+                    alternate_phone: "",
+                    address: newUser.address,
+                    city: "Chennai",
+                    pincode: "600087",
+                    profile_photo: "",
+                    role: newUser.role,
+                    created_at: new Date().toISOString()
+                });
+            }
+            saveUsersToDisk(IN_MEMORY_USERS);
+
             return res.json({
                 success: true,
                 message: "Registration successful",
                 token,
-                user: newUser
+                user: {
+                    ...newUser,
+                    alternate_phone: "",
+                    city: "Chennai",
+                    pincode: "600087",
+                    profile_photo: ""
+                }
             });
         } catch (dbErr) {
             console.warn("[AUTH] Database unavailable, using fallback in-memory store:", dbErr.message);
@@ -172,10 +229,16 @@ router.post("/register", async (req, res) => {
                 email: cleanEmail,
                 password: hashedPassword,
                 phone: cleanPhone,
+                alternate_phone: "",
                 address: cleanAddress,
-                role: "customer"
+                city: "Chennai",
+                pincode: "600087",
+                profile_photo: "",
+                role: "customer",
+                created_at: new Date().toISOString()
             };
             IN_MEMORY_USERS.push(newMemUser);
+            saveUsersToDisk(IN_MEMORY_USERS);
 
             const token = jwt.sign(
                 { id: newMemUser.id, email: newMemUser.email, role: newMemUser.role },
@@ -192,8 +255,13 @@ router.post("/register", async (req, res) => {
                     name: newMemUser.name,
                     email: newMemUser.email,
                     phone: newMemUser.phone,
+                    alternate_phone: "",
                     address: newMemUser.address,
-                    role: newMemUser.role
+                    city: newMemUser.city,
+                    pincode: newMemUser.pincode,
+                    profile_photo: "",
+                    role: newMemUser.role,
+                    created_at: newMemUser.created_at
                 }
             });
         }
@@ -286,8 +354,13 @@ router.post("/login", async (req, res) => {
                         name: user.name,
                         email: user.email,
                         phone: user.phone || "",
+                        alternate_phone: user.alternate_phone || "",
                         address: user.address || "",
-                        role: user.role
+                        city: user.city || "Chennai",
+                        pincode: user.pincode || "600087",
+                        profile_photo: user.profile_photo || "",
+                        role: user.role,
+                        created_at: user.created_at || new Date().toISOString()
                     }
                 });
             }
@@ -318,8 +391,13 @@ router.post("/login", async (req, res) => {
                         name: memUser.name,
                         email: memUser.email,
                         phone: memUser.phone || "",
+                        alternate_phone: memUser.alternate_phone || "",
                         address: memUser.address || "",
-                        role: memUser.role
+                        city: memUser.city || "Chennai",
+                        pincode: memUser.pincode || "600087",
+                        profile_photo: memUser.profile_photo || "",
+                        role: memUser.role,
+                        created_at: memUser.created_at || new Date().toISOString()
                     }
                 });
             } else {
@@ -359,7 +437,7 @@ router.post("/forgot-password", async (req, res) => {
 /* ============================================================
    GET PROFILE ENDPOINT (AUTHENTICATED CUSTOMER & BY ID)
 ============================================================ */
-router.get("/profile", async (req, res) => {
+const getProfileHandler = async (req, res) => {
     try {
         const userId = extractUserId(req);
         if (!userId) {
@@ -403,7 +481,10 @@ router.get("/profile", async (req, res) => {
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
-});
+};
+
+router.get("/profile", getProfileHandler);
+router.get("/me", getProfileHandler);
 
 router.get("/profile/:id", async (req, res) => {
     const id = req.params.id;
@@ -527,12 +608,15 @@ router.put("/profile", async (req, res) => {
                 phone: phone || "",
                 alternate_phone: altPhone || "",
                 address: address || "",
-                city: city || "Kanchipuram",
-                pincode: pincode || "631601",
+                city: city || "Chennai",
+                pincode: pincode || "600087",
                 profile_photo: photo || "",
                 role: "customer"
             };
+            IN_MEMORY_USERS.push(updatedUser);
         }
+
+        saveUsersToDisk(IN_MEMORY_USERS);
 
         res.json({
             success: true,
@@ -548,53 +632,132 @@ router.put("/profile", async (req, res) => {
 /* ============================================================
    PROFILE PHOTO UPLOAD ENDPOINT
 ============================================================ */
-router.post("/profile/photo", async (req, res) => {
+router.post("/profile/photo", uploadUserProfilePhoto, async (req, res) => {
     try {
         const userId = extractUserId(req);
         if (!userId) {
             return res.status(401).json({ success: false, message: "Authentication required" });
         }
 
-        const imageBase64 = req.body.image || req.body.photo || req.body.file;
-        if (!imageBase64) {
-            return res.status(400).json({ success: false, message: "Image data is required" });
+        const profilesDir = USER_UPLOADS_DIR;
+        if (!fs.existsSync(profilesDir)) fs.mkdirSync(profilesDir, { recursive: true });
+
+        let filename = "";
+        let photoUrl = "";
+        let fileBuffer = null;
+
+        if (req.file) {
+            filename = req.file.filename;
+            const fullFilePath = req.file.path || path.join(profilesDir, filename);
+            if (fs.existsSync(fullFilePath)) {
+                fileBuffer = fs.readFileSync(fullFilePath);
+            }
+            photoUrl = `/uploads/profiles/${filename}`;
+        } else {
+            const rawData = req.body.photo || req.body.image || req.body.file || req.body.profile_photo;
+            if (!rawData || typeof rawData !== "string") {
+                return res.status(400).json({ success: false, message: "Image file or base64 data is required." });
+            }
+
+            let ext = "jpg";
+            const matches = rawData.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/);
+            if (matches) {
+                ext = matches[1].toLowerCase() === "jpeg" ? "jpg" : matches[1].toLowerCase();
+                fileBuffer = Buffer.from(matches[2], "base64");
+            } else {
+                fileBuffer = Buffer.from(rawData, "base64");
+            }
+
+            if (!fileBuffer || fileBuffer.length < 50) {
+                return res.status(400).json({ success: false, message: "Invalid image data." });
+            }
+
+            filename = `profile_${userId}_${Date.now()}.${ext}`;
+            const filePath = path.join(profilesDir, filename);
+            fs.writeFileSync(filePath, fileBuffer);
+            photoUrl = `/uploads/profiles/${filename}`;
         }
 
-        const uploadsDir = path.join(__dirname, "..", "assets", "images", "uploads");
-        if (!fs.existsSync(uploadsDir)) {
-            fs.mkdirSync(uploadsDir, { recursive: true });
-        }
+        // Mirror to secondary directories so all static routes serve it
+        const mirrorDirs = [
+            path.resolve(__dirname, "..", "assets", "images", "uploads", "profiles"),
+            path.resolve(__dirname, "..", "assets", "images", "uploads"),
+            path.resolve(__dirname, "..", "..", "website", "website", "assets", "images", "uploads", "profiles"),
+            path.resolve(__dirname, "..", "..", "website", "website", "assets", "images", "uploads")
+        ];
+        mirrorDirs.forEach(dir => {
+            if (!fs.existsSync(dir)) try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+            try {
+                const src = path.join(profilesDir, filename);
+                if (fs.existsSync(src)) fs.copyFileSync(src, path.join(dir, filename));
+            } catch (_) {}
+        });
 
-        const matches = imageBase64.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/);
-        const ext = matches ? (matches[1] === "jpeg" ? "jpg" : matches[1]) : "jpg";
-        const data = matches ? matches[2] : imageBase64;
-        const buffer = Buffer.from(data, "base64");
-
-        const fileName = `profile_${userId}_${Date.now()}.${ext}`;
-        const filePath = path.join(uploadsDir, fileName);
-        fs.writeFileSync(filePath, buffer);
-
-        const photoUrl = `/assets/images/uploads/${fileName}`;
-
+        // 1. Update PostgreSQL database
         try {
+            await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo TEXT;");
             await pool.query(
                 "UPDATE users SET profile_photo = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
                 [photoUrl, userId]
             );
         } catch (_) {}
 
-        const memUser = IN_MEMORY_USERS.find(u => u.id == userId);
-        if (memUser) memUser.profile_photo = photoUrl;
+        // 2. Update In-memory and disk fallback store
+        let userObj = IN_MEMORY_USERS.find(u => u.id == userId);
+        if (userObj) {
+            userObj.profile_photo = photoUrl;
+            userObj.updated_at = new Date().toISOString();
+        } else {
+            userObj = {
+                id: userId,
+                name: "Customer",
+                email: "",
+                phone: "",
+                profile_photo: photoUrl,
+                role: "customer"
+            };
+            IN_MEMORY_USERS.push(userObj);
+        }
+        saveUsersToDisk(IN_MEMORY_USERS);
 
         res.json({
             success: true,
             message: "Profile photo uploaded successfully",
             profile_photo: photoUrl,
-            photoUrl
+            photoUrl,
+            url: photoUrl,
+            full_url: photoUrl,
+            user: userObj
         });
     } catch (err) {
         console.error("[PHOTO UPLOAD ERROR]", err);
-        res.status(500).json({ success: false, message: "Failed to upload photo" });
+        res.status(500).json({ success: false, message: "Failed to upload photo: " + err.message });
+    }
+});
+
+/* ============================================================
+   DELETE PROFILE PHOTO ENDPOINT
+============================================================ */
+router.delete("/profile/photo", async (req, res) => {
+    try {
+        const userId = extractUserId(req);
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Authentication required" });
+        }
+
+        try {
+            await pool.query("UPDATE users SET profile_photo = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1", [userId]);
+        } catch (_) {}
+
+        const userObj = IN_MEMORY_USERS.find(u => u.id == userId);
+        if (userObj) {
+            userObj.profile_photo = "";
+            saveUsersToDisk(IN_MEMORY_USERS);
+        }
+
+        res.json({ success: true, message: "Profile photo removed successfully" });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 

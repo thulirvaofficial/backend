@@ -1,5 +1,104 @@
 [
   {
+    "id": "NOTIF-1794684500397-893",
+    "user_id": 3,
+    "title": "💬 New Message from Delivery Partner",
+    "message": "Sure, reaching in 2 minutes! Outside the gate now.",
+    "type": "chat_message",
+    "target_id": "34",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T19:28:20.397Z"
+  },
+  {
+    "id": "NOTIF-1794684500392-225",
+    "user_id": null,
+    "title": "💬 New Message from Thiruverkadu Customer",
+    "message": "Hello, please ring the front doorbell upon arrival.",
+    "type": "chat_message",
+    "target_id": "34",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T19:28:20.392Z"
+  },
+  {
+    "id": "NOTIF-1794684500373-692",
+    "user_id": 3,
+    "title": "Your Thulirva Delivery Partner Has Arrived!",
+    "message": "Your delivery partner has reached your location and is within 100 metres. Please be ready to receive your order.",
+    "type": "order_arrived",
+    "target_id": "34",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T19:28:20.373Z"
+  },
+  {
+    "id": "NOTIF-1794684477275-256",
+    "user_id": 3,
+    "title": "💬 New Message from Delivery Partner",
+    "message": "Sure, reaching in 2 minutes! Outside the gate now.",
+    "type": "chat_message",
+    "target_id": "34",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T19:27:57.275Z"
+  },
+  {
+    "id": "NOTIF-1794684477269-776",
+    "user_id": null,
+    "title": "💬 New Message from Thiruverkadu Customer",
+    "message": "Hello, please ring the front doorbell upon arrival.",
+    "type": "chat_message",
+    "target_id": "34",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T19:27:57.269Z"
+  },
+  {
+    "id": "NOTIF-1794684477243-545",
+    "user_id": 3,
+    "title": "Your Thulirva Delivery Partner Has Arrived!",
+    "message": "Your delivery partner has reached your location and is within 100 metres. Please be ready to receive your order.",
+    "type": "order_arrived",
+    "target_id": "34",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T19:27:57.243Z"
+  },
+  {
+    "id": "NOTIF-1794684441144-607",
+    "user_id": null,
+    "title": "💬 New Message from Thiruverkadu Customer",
+    "message": "Hello, please ring the front doorbell upon arrival.",
+    "type": "chat_message",
+    "target_id": "ORD-101",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T19:27:21.144Z"
+  },
+  {
+    "id": "NOTIF-1794684441129-550",
+    "user_id": 3,
+    "title": "Your Thulirva Delivery Partner Has Arrived!",
+    "message": "Your delivery partner has reached your location and is within 100 metres. Please be ready to receive your order.",
+    "type": "order_arrived",
+    "target_id": "1794669999001",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T19:27:21.129Z"
+  },
+  {
+    "id": "NOTIF-1794684441111-656",
+    "user_id": 3,
+    "title": "Your Thulirva Delivery Partner Has Arrived!",
+    "message": "Your delivery partner has reached your location and is within 100 metres. Please be ready to receive your order.",
+    "type": "order_arrived",
+    "target_id": "34",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T19:27:21.111Z"
+  },
+  {
     "id": "NOTIF-1794673303891-636",
     "user_id": 1794661515975,
     "title": "Order Delivered ✨",
