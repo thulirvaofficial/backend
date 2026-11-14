@@ -502,29 +502,24 @@ router.post("/", async (req, res) => {
 /* HELPER: Fetch orders with their items from PostgreSQL */
 const { getPartnerById } = require("../services/deliveryPartnerService");
 
+function calculateHaversineKm(lat1, lon1, lat2, lon2) {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+    const p = 0.017453292519943295;
+    const a = 0.5 - Math.cos((lat2 - lat1) * p) / 2 +
+        Math.cos(lat1 * p) * Math.cos(lat2 * p) *
+        (1 - Math.cos((lon2 - lon1) * p)) / 2;
+    return 12742 * Math.asin(Math.sqrt(a));
+}
+
+function calculateEtaMinutes(distanceKm) {
+    if (distanceKm == null || isNaN(distanceKm)) return null;
+    return Math.min(45, Math.max(3, Math.round(distanceKm * 4.5)));
+}
+
 async function enrichOrderWithPartner(order) {
     if (!order) return order;
     const partnerId = order.partner_id || order.delivery_partner_id || null;
-    if (partnerId) {
-        try {
-            const partner = await getPartnerById(partnerId);
-            if (partner) {
-                return {
-                    ...order,
-                    partner_id: partner.partner_id,
-                    partner_name: partner.name,
-                    partner_phone: partner.phone,
-                    partner_photo: partner.profile_photo || null,
-                    partner_vehicle: `${partner.vehicle_type || 'Electric Scooter'} (${partner.vehicle_number || ''})`.trim(),
-                    partner_rating: Number(partner.rating) || 5.0,
-                    partner_latitude: partner.current_latitude ? Number(partner.current_latitude) : null,
-                    partner_longitude: partner.current_longitude ? Number(partner.current_longitude) : null
-                };
-            }
-        } catch (_) {}
-    }
-    return {
-        ...order,
+    let partnerData = {
         partner_id: null,
         partner_name: null,
         partner_phone: null,
@@ -532,7 +527,47 @@ async function enrichOrderWithPartner(order) {
         partner_vehicle: null,
         partner_rating: null,
         partner_latitude: null,
-        partner_longitude: null
+        partner_longitude: null,
+        distance_km: null,
+        eta_minutes: null,
+        eta_display: "Calculating ETA"
+    };
+
+    if (partnerId) {
+        try {
+            const partner = await getPartnerById(partnerId);
+            if (partner) {
+                const pLat = partner.current_latitude ? Number(partner.current_latitude) : null;
+                const pLng = partner.current_longitude ? Number(partner.current_longitude) : null;
+                const cLat = order.latitude ? Number(order.latitude) : null;
+                const cLng = order.longitude ? Number(order.longitude) : null;
+
+                const dist = calculateHaversineKm(pLat, pLng, cLat, cLng);
+                const etaMins = calculateEtaMinutes(dist);
+                const etaDisplay = (dist != null && etaMins != null)
+                    ? `ETA: ${etaMins} min (${dist.toFixed(1)} km)`
+                    : "Calculating ETA";
+
+                partnerData = {
+                    partner_id: partner.partner_id,
+                    partner_name: partner.name,
+                    partner_phone: partner.phone,
+                    partner_photo: partner.profile_photo || null,
+                    partner_vehicle: `${partner.vehicle_type || 'Electric Scooter'} (${partner.vehicle_number || ''})`.trim(),
+                    partner_rating: Number(partner.rating) || 5.0,
+                    partner_latitude: pLat,
+                    partner_longitude: pLng,
+                    distance_km: dist != null ? Number(dist.toFixed(1)) : null,
+                    eta_minutes: etaMins,
+                    eta_display: etaDisplay
+                };
+            }
+        } catch (_) {}
+    }
+
+    return {
+        ...order,
+        ...partnerData
     };
 }
 
