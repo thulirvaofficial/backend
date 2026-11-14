@@ -88,3 +88,4 @@ async function testMultipartUpload() {
 }
 
 testMultipartUpload().catch(console.error);
+
