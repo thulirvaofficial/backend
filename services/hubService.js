@@ -8,14 +8,14 @@ const HUBS_FILE = path.join(DATA_DIR, "distribution_hubs.json");
 const INITIAL_HUBS = [
     {
         id: 1,
-        code: "HUB-KAN-01",
-        name: "Thulirva Farm Production & Processing Hub",
-        address: "Thulirva Organic Dairy Farms, Thimmarajampettai, Walajabad",
-        city: "Kanchipuram",
+        code: "HUB-VAL-01",
+        name: "Thulirva Central Hub (Valasaravakkam)",
+        address: "Arcot Road, Valasaravakkam",
+        city: "Chennai",
         state: "Tamil Nadu",
-        pincode: "631601",
-        latitude: 12.8342,
-        longitude: 79.7036,
+        pincode: "600087",
+        latitude: 13.0403,
+        longitude: 80.1723,
         contact_phone: "7904880944",
         is_active: true,
         serviceable_radius_km: 25

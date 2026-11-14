@@ -208,6 +208,16 @@ async function recordLocationUpdate({
         }
     } catch (_) {}
 
+    // 6. Geofence & Proximity Detection (100m Arrival for Orders, 1km Proximity for Subscriptions)
+    try {
+        const { checkGeofenceTriggers } = require("./geofenceService");
+        await checkGeofenceTriggers({
+            partner_id,
+            latitude: lat,
+            longitude: lng
+        });
+    } catch (_) {}
+
     return liveRecord;
 }
 

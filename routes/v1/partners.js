@@ -40,19 +40,23 @@ router.get("/online", optionalAuth, async (req, res) => {
 router.get("/locations", optionalAuth, async (req, res) => {
     try {
         const partners = await getPartners();
-        const locations = partners.map(p => ({
-            partner_id: p.partner_id,
-            name: p.name,
-            phone: p.phone,
-            is_online: Boolean(p.is_online),
-            latitude: p.current_latitude || 12.8025,
-            longitude: p.current_longitude || 80.2233,
-            speed: p.speed || 0,
-            heading: p.heading || 0,
-            accuracy: p.accuracy || 0,
-            active_orders_count: p.active_orders_count || 0,
-            updated_at: p.location_updated_at || p.updated_at
-        }));
+        const locations = partners.map(p => {
+            const hasGps = p.current_latitude != null && p.current_longitude != null && !isNaN(Number(p.current_latitude)) && !isNaN(Number(p.current_longitude));
+            return {
+                partner_id: p.partner_id,
+                name: p.name,
+                phone: p.phone,
+                is_online: Boolean(p.is_online),
+                location_available: hasGps,
+                latitude: hasGps ? Number(p.current_latitude) : null,
+                longitude: hasGps ? Number(p.current_longitude) : null,
+                speed: p.speed || 0,
+                heading: p.heading || 0,
+                accuracy: p.accuracy || 0,
+                active_orders_count: p.active_orders_count || 0,
+                updated_at: p.location_updated_at || p.updated_at
+            };
+        });
         return res.json({ success: true, count: locations.length, locations });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
@@ -238,13 +242,15 @@ router.get("/:id/location", optionalAuth, async (req, res) => {
     try {
         const partner = await getPartnerById(req.params.id);
         if (!partner) return res.status(404).json({ success: false, message: "Partner not found" });
+        const hasGps = partner.current_latitude != null && partner.current_longitude != null && !isNaN(Number(partner.current_latitude)) && !isNaN(Number(partner.current_longitude));
         return res.json({
             success: true,
             partner_id: partner.partner_id,
             name: partner.name,
             is_online: Boolean(partner.is_online),
-            latitude: partner.current_latitude || 12.8025,
-            longitude: partner.current_longitude || 80.2233,
+            location_available: hasGps,
+            latitude: hasGps ? Number(partner.current_latitude) : null,
+            longitude: hasGps ? Number(partner.current_longitude) : null,
             speed: partner.speed || 0,
             heading: partner.heading || 0,
             accuracy: partner.accuracy || 0,

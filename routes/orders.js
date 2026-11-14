@@ -823,30 +823,8 @@ router.get("/user/:identifier", async (req, res) => {
         }
         
         // Merge in-memory / disk orders safely (strictly product orders only)
-        const allMemOrders = getMockOrders() || [];
-        const memMap = new Map();
-        for (const m of allMemOrders) {
-            if (m && m.id != null) memMap.set(m.id.toString(), m);
-            if (m && m.order_number) memMap.set(m.order_number.toString(), m);
-        }
-
-        // Overlay DB orders with live mock/memory order fields (status, partner, coordinates)
-        const mergedDbOrders = (orders || []).map(o => {
-            if (!o || o.id == null) return o;
-            const mem = memMap.get(o.id.toString()) || (o.order_number ? memMap.get(o.order_number.toString()) : null);
-            if (!mem) return o;
-            return {
-                ...o,
-                order_status: (mem.order_status && mem.order_status !== "processing" && mem.order_status !== "pending") ? mem.order_status : o.order_status,
-                partner_id: mem.partner_id || o.partner_id,
-                latitude: o.latitude || mem.latitude,
-                longitude: o.longitude || mem.longitude,
-                address: o.address || mem.address
-            };
-        });
-
         const dbIds = new Set((orders || []).filter(o => o && o.id != null).map(o => o.id.toString()));
-        const memOrders = allMemOrders.filter(o => {
+        const memOrders = (getMockOrders() || []).filter(o => {
             if (!o) return false;
             if (o.id != null && dbIds.has(o.id.toString())) return false;
             if ((o.delivery_type || "").toLowerCase() === "subscription") return false;
@@ -862,7 +840,7 @@ router.get("/user/:identifier", async (req, res) => {
             return false;
         });
 
-        const allUserOrders = [...mergedDbOrders, ...memOrders];
+        const allUserOrders = [...orders, ...memOrders];
         allUserOrders.sort((a, b) => {
             const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
             const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
@@ -967,31 +945,24 @@ const updateOrderStatusHandler = async (req, res) => {
             await pool.query(
                 `UPDATE orders 
                  SET order_status = $1, payment_status = $2,
-                     partner_id = COALESCE($3, partner_id),
                      delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
                      updated_at = CURRENT_TIMESTAMP 
-                 WHERE id::text = $4 OR order_number = $4`,
-                [normStatus, payment_status, partnerId || null, rawId.toString()]
+                 WHERE id::text = $3 OR order_number = $3`,
+                [normStatus, payment_status, rawId.toString()]
             );
         } else if (normStatus) {
             await pool.query(
                 `UPDATE orders 
                  SET order_status = $1, 
-                     partner_id = COALESCE($2, partner_id),
                      delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
                      updated_at = CURRENT_TIMESTAMP 
-                 WHERE id::text = $3 OR order_number = $3`,
-                [normStatus, partnerId || null, rawId.toString()]
+                 WHERE id::text = $2 OR order_number = $2`,
+                [normStatus, rawId.toString()]
             );
         } else if (payment_status) {
             await pool.query(
-                `UPDATE orders SET payment_status = $1, partner_id = COALESCE($2, partner_id), updated_at = CURRENT_TIMESTAMP WHERE id::text = $3 OR order_number = $3`,
-                [payment_status, partnerId || null, rawId.toString()]
-            );
-        } else if (partnerId) {
-            await pool.query(
-                `UPDATE orders SET partner_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id::text = $2 OR order_number = $2`,
-                [partnerId, rawId.toString()]
+                `UPDATE orders SET payment_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id::text = $2 OR order_number = $2`,
+                [payment_status, rawId.toString()]
             );
         }
 
@@ -1498,17 +1469,7 @@ router.get("/:orderId/tracking", async (req, res) => {
             return res.status(404).json({ success: false, message: `Order ${orderId} not found` });
         }
 
-        const diskOrders = getMockOrders();
-        const diskOrder = diskOrders.find(o => o.id?.toString() === orderId.toString() || o.order_number === orderId.toString());
-
-        let partnerId = details.partner_id || details.partner?.partner_id;
-        let effectiveStatus = details.order_status || details.status || "confirmed";
-        if (diskOrder) {
-            if (!partnerId && diskOrder.partner_id) partnerId = diskOrder.partner_id;
-            if (diskOrder.order_status && diskOrder.order_status !== "processing" && diskOrder.order_status !== "pending") {
-                effectiveStatus = diskOrder.order_status;
-            }
-        }
+        const partnerId = details.partner_id || details.partner?.partner_id;
         let partnerLocation = null;
         let partnerInfo = details.partner ? {
             partner_id: details.partner.partner_id,
@@ -1577,8 +1538,8 @@ router.get("/:orderId/tracking", async (req, res) => {
         return res.json({
             success: true,
             order_id: details.id || orderId,
-            order_number: (diskOrder && diskOrder.order_number) || details.order_number || orderId,
-            order_status: effectiveStatus,
+            order_number: details.order_number || orderId,
+            order_status: details.order_status || details.status || "confirmed",
             order_type: details.order_type || "product",
             customer_destination: {
                 address: destinationAddress,
@@ -1587,10 +1548,10 @@ router.get("/:orderId/tracking", async (req, res) => {
                 longitude: destLng
             },
             hub_location: {
-                name: "Thulirva Dairy Hub",
-                address: "Padur, OMR, Chennai",
-                latitude: 12.8025,
-                longitude: 80.2233
+                name: "Thulirva Central Hub",
+                address: "Arcot Road, Valasaravakkam, Chennai, Tamil Nadu, India",
+                latitude: 13.0403,
+                longitude: 80.1723
             },
             partner: partnerInfo,
             partner_live_location: partnerLocation,
@@ -1622,7 +1583,7 @@ router.get("/:orderId/chat", async (req, res) => {
  */
 router.post("/:orderId/chat", async (req, res) => {
     try {
-        const { sender, sender_name, text, message } = req.body || {};
+        const { sender, sender_name, text, message, role } = req.body || {};
         const msgText = text || message;
         if (!msgText || !msgText.trim()) {
             return res.status(400).json({ success: false, message: "Message text is required" });
@@ -1631,9 +1592,25 @@ router.post("/:orderId/chat", async (req, res) => {
         const saved = await saveChatMessage(req.params.orderId, {
             sender: sender || "customer",
             sender_name,
-            text: msgText
+            text: msgText,
+            role: role || sender
         });
         return res.json({ success: true, message: saved });
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * POST /api/orders/:orderId/chat/read
+ * Mark chat messages as read by role
+ */
+router.post("/:orderId/chat/read", async (req, res) => {
+    try {
+        const { role = "customer" } = req.body || {};
+        const { markChatAsRead } = require("../services/chatService");
+        const result = await markChatAsRead(req.params.orderId, role);
+        return res.json({ success: true, ...result });
     } catch (err) {
         return res.status(400).json({ success: false, message: err.message });
     }

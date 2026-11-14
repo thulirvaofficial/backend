@@ -7,6 +7,7 @@ const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || "AIzaSyDqhJ1XV_YM
 // Known geographical coordinates across Chennai and Tamil Nadu
 const KNOWN_AREAS = [
     { keys: ["thiruverkadu", "thiruverkkadu", "tiruvekadu", "600077"], lat: 13.0694, lng: 80.1247, area: "Thiruverkadu", city: "Chennai" },
+    { keys: ["valasaravakkam", "valasarawakkam", "alwarthirunagar", "600087"], lat: 13.0403, lng: 80.1723, area: "Valasaravakkam", city: "Chennai" },
     { keys: ["porur", "ramapuram", "600116"], lat: 13.0382, lng: 80.1565, area: "Porur", city: "Chennai" },
     { keys: ["kk nagar", "k.k. nagar", "ashok nagar", "600078"], lat: 13.0410, lng: 80.1994, area: "KK Nagar", city: "Chennai" },
     { keys: ["padur", "kelambakkam", "chemmany", "603103"], lat: 12.8025, lng: 80.2233, area: "Padur", city: "Chennai" },

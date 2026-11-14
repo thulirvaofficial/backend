@@ -1369,15 +1369,17 @@ router.get("/location/:id", async (req, res) => {
         }
 
         if (!location && partner) {
+            const hasGps = partner.current_latitude != null && partner.current_longitude != null;
             location = {
                 partner_id: partner.partner_id,
-                latitude: partner.current_latitude || 12.8025,
-                longitude: partner.current_longitude || 80.2233,
+                location_available: Boolean(hasGps),
+                latitude: hasGps ? Number(partner.current_latitude) : null,
+                longitude: hasGps ? Number(partner.current_longitude) : null,
                 speed: partner.speed || 0,
                 heading: partner.heading || 0,
                 accuracy: partner.accuracy || 0,
                 is_fresh: false,
-                last_seen_seconds_ago: 9999
+                last_seen_seconds_ago: hasGps ? 9999 : null
             };
         }
 
@@ -1486,10 +1488,10 @@ router.get("/tracking/:orderId", async (req, res) => {
                 longitude: destLng
             },
             hub_location: {
-                name: "Thulirva Dairy Hub",
-                address: "Padur, OMR, Chennai",
-                latitude: 12.8025,
-                longitude: 80.2233
+                name: "Thulirva Central Hub",
+                address: "Arcot Road, Valasaravakkam, Chennai, Tamil Nadu, India",
+                latitude: 13.0403,
+                longitude: 80.1723
             },
             partner: partnerInfo,
             partner_live_location: partnerLocation,
@@ -1617,9 +1619,20 @@ router.post("/orders/:id/chat", async (req, res) => {
         const saved = await saveChatMessage(req.params.id, {
             sender: sender || "partner",
             sender_name: sender_name || "Delivery Partner",
-            text: msgText
+            text: msgText,
+            role: "partner"
         });
         return res.json({ success: true, message: saved });
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+});
+
+router.post("/orders/:id/chat/read", async (req, res) => {
+    try {
+        const { markChatAsRead } = require("../services/chatService");
+        const result = await markChatAsRead(req.params.id, "partner");
+        return res.json({ success: true, ...result });
     } catch (err) {
         return res.status(400).json({ success: false, message: err.message });
     }

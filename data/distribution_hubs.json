@@ -1,0 +1,58 @@
+[
+  {
+    "id": 1,
+    "code": "HUB-VAL-01",
+    "name": "Thulirva Central Hub (Valasaravakkam)",
+    "address": "Arcot Road, Valasaravakkam",
+    "city": "Chennai",
+    "state": "Tamil Nadu",
+    "pincode": "600087",
+    "latitude": 13.0403,
+    "longitude": 80.1723,
+    "contact_phone": "7904880944",
+    "is_active": true,
+    "serviceable_radius_km": 25
+  },
+  {
+    "id": 2,
+    "code": "HUB-OMR-02",
+    "name": "OMR South Micro-Distribution Hub",
+    "address": "Near Chettinad Health City, Rajiv Gandhi Salai, Padur",
+    "city": "Chennai",
+    "state": "Tamil Nadu",
+    "pincode": "603103",
+    "latitude": 12.8025,
+    "longitude": 80.2233,
+    "contact_phone": "9876543210",
+    "is_active": true,
+    "serviceable_radius_km": 15
+  },
+  {
+    "id": 3,
+    "code": "HUB-WST-03",
+    "name": "Chennai West Hub (Porur & Alapakkam)",
+    "address": "Mount Poonamallee Road, Porur Junction",
+    "city": "Chennai",
+    "state": "Tamil Nadu",
+    "pincode": "600116",
+    "latitude": 13.0382,
+    "longitude": 80.1565,
+    "contact_phone": "9840198223",
+    "is_active": true,
+    "serviceable_radius_km": 12
+  },
+  {
+    "id": 4,
+    "code": "HUB-CEN-04",
+    "name": "Chennai Central Hub (Koyambedu & Vadapalani)",
+    "address": "Jawaharlal Nehru Road, Koyambedu",
+    "city": "Chennai",
+    "state": "Tamil Nadu",
+    "pincode": "600107",
+    "latitude": 13.0694,
+    "longitude": 80.1948,
+    "contact_phone": "9840123456",
+    "is_active": true,
+    "serviceable_radius_km": 10
+  }
+]
