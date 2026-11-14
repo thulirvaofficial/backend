@@ -823,8 +823,30 @@ router.get("/user/:identifier", async (req, res) => {
         }
         
         // Merge in-memory / disk orders safely (strictly product orders only)
+        const allMemOrders = getMockOrders() || [];
+        const memMap = new Map();
+        for (const m of allMemOrders) {
+            if (m && m.id != null) memMap.set(m.id.toString(), m);
+            if (m && m.order_number) memMap.set(m.order_number.toString(), m);
+        }
+
+        // Overlay DB orders with live mock/memory order fields (status, partner, coordinates)
+        const mergedDbOrders = (orders || []).map(o => {
+            if (!o || o.id == null) return o;
+            const mem = memMap.get(o.id.toString()) || (o.order_number ? memMap.get(o.order_number.toString()) : null);
+            if (!mem) return o;
+            return {
+                ...o,
+                order_status: (mem.order_status && mem.order_status !== "processing" && mem.order_status !== "pending") ? mem.order_status : o.order_status,
+                partner_id: mem.partner_id || o.partner_id,
+                latitude: o.latitude || mem.latitude,
+                longitude: o.longitude || mem.longitude,
+                address: o.address || mem.address
+            };
+        });
+
         const dbIds = new Set((orders || []).filter(o => o && o.id != null).map(o => o.id.toString()));
-        const memOrders = (getMockOrders() || []).filter(o => {
+        const memOrders = allMemOrders.filter(o => {
             if (!o) return false;
             if (o.id != null && dbIds.has(o.id.toString())) return false;
             if ((o.delivery_type || "").toLowerCase() === "subscription") return false;
@@ -840,7 +862,7 @@ router.get("/user/:identifier", async (req, res) => {
             return false;
         });
 
-        const allUserOrders = [...orders, ...memOrders];
+        const allUserOrders = [...mergedDbOrders, ...memOrders];
         allUserOrders.sort((a, b) => {
             const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
             const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
