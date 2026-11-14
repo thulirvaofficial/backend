@@ -27,7 +27,8 @@ router.post("/manual", authenticateToken, adminOnly, async (req, res) => {
         if (!order) return res.status(404).json({ success: false, message: "Order not found." });
 
         order.partner_id = partner_id;
-        order.order_status = "processing";
+        order.order_status = "assigned";
+        order.status = "assigned";
         fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2), "utf-8");
 
         // Notification & Sockets

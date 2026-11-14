@@ -11,6 +11,8 @@ const {
 } = require("../../services/deliveryProofService");
 const { getPartners, getPartnerById } = require("../../services/deliveryPartnerService");
 
+const { uploadDeliveryProof } = require("../../middleware/uploadMiddleware");
+
 const router = express.Router();
 
 /* ============================================================
@@ -18,16 +20,16 @@ const router = express.Router();
 ============================================================ */
 
 /**
- * POST /api/v1/delivery-proof/:orderId/upload (or /api/orders/:orderId/delivery-proof)
+ * POST /api/v1/delivery-proof/:orderId/proof (or /api/orders/:orderId/delivery-proof)
  * Partner captures & uploads delivery proof image
  */
-router.post("/:orderId/proof", async (req, res) => {
+router.post("/:orderId/proof", uploadDeliveryProof, async (req, res) => {
     try {
         const orderId = req.params.orderId;
-        const { image, photo, proof, remarks, latitude, longitude, partner_id, sub_id } = req.body;
+        const { image, photo, proof, remarks, latitude, longitude, partner_id, sub_id } = req.body || {};
         const imageBase64 = image || photo || proof;
 
-        if (!imageBase64) {
+        if (!req.file && !imageBase64) {
             return res.status(400).json({ success: false, message: "Delivery photograph data is required." });
         }
 
@@ -35,10 +37,12 @@ router.post("/:orderId/proof", async (req, res) => {
             orderId,
             subId: sub_id,
             partnerId: partner_id || req.user?.partner_id,
+            file: req.file,
             imageBase64,
             remarks,
             latitude,
-            longitude
+            longitude,
+            markDelivered: true
         });
 
         return res.status(200).json(result);
@@ -51,10 +55,10 @@ router.post("/:orderId/proof", async (req, res) => {
  * POST /api/v1/delivery-proof/:orderId/complete (or /api/orders/:orderId/complete-delivery)
  * Final confirm delivery with mandatory photograph verification
  */
-router.post("/:orderId/complete", async (req, res) => {
+router.post("/:orderId/complete", uploadDeliveryProof, async (req, res) => {
     try {
         const orderId = req.params.orderId;
-        const { image, photo, proof, remarks, latitude, longitude, partner_id, sub_id } = req.body;
+        const { image, photo, proof, remarks, latitude, longitude, partner_id, sub_id } = req.body || {};
         const imageBase64 = image || photo || proof;
 
         const result = await completeDelivery({
@@ -64,6 +68,7 @@ router.post("/:orderId/complete", async (req, res) => {
             remarks,
             latitude,
             longitude,
+            file: req.file,
             imageBase64
         });
 

@@ -32,15 +32,41 @@ function saveJson(file, data) {
 }
 
 /**
- * Save Base64 image to server storage disk
+ * Save Multer file or Base64 image to server storage disk
  */
-function saveProofImageToDisk(base64Data, identifier = "delivery") {
-    if (!base64Data) return "";
+function saveProofImageToDisk(imageData, identifier = "delivery") {
+    if (!imageData) return "";
     try {
-        const matches = base64Data.match(/^data:image\/([a-zA-Z0-9\+\-\.]+);base64,(.+)$/);
-        const ext = matches ? (matches[1].includes("png") ? "png" : "jpg") : "jpg";
-        const rawBase64 = matches ? matches[2] : base64Data;
-        const buffer = Buffer.from(rawBase64, "base64");
+        let buffer;
+        let ext = "jpg";
+
+        // Check if Multer file object
+        if (typeof imageData === "object" && (imageData.filename || imageData.path)) {
+            const fileName = imageData.filename || path.basename(imageData.path);
+            const fullPath = imageData.path || path.join(UPLOADS_DIR, fileName);
+            if (fs.existsSync(fullPath)) {
+                const altDir = path.resolve(__dirname, "..", "..", "website", "website", "assets", "images", "uploads");
+                const altSubDir = path.join(altDir, "delivery_proofs");
+                if (!fs.existsSync(altSubDir)) {
+                    try { fs.mkdirSync(altSubDir, { recursive: true }); } catch (_) {}
+                }
+                try {
+                    const buf = fs.readFileSync(fullPath);
+                    fs.writeFileSync(path.join(altDir, fileName), buf);
+                    fs.writeFileSync(path.join(altSubDir, fileName), buf);
+                } catch (_) {}
+            }
+            return `/uploads/delivery_proofs/${fileName}`;
+        } else if (Buffer.isBuffer(imageData)) {
+            buffer = imageData;
+        } else if (typeof imageData === "string") {
+            const matches = imageData.match(/^data:image\/([a-zA-Z0-9\+\-\.]+);base64,(.+)$/);
+            ext = matches ? (matches[1].includes("png") ? "png" : "jpg") : "jpg";
+            const rawBase64 = matches ? matches[2] : imageData;
+            buffer = Buffer.from(rawBase64, "base64");
+        } else {
+            return "";
+        }
 
         const fileName = `proof_${identifier}_${Date.now()}_${Math.floor(Math.random() * 1000)}.${ext}`;
         const filePath = path.join(UPLOADS_DIR, fileName);
@@ -48,9 +74,14 @@ function saveProofImageToDisk(base64Data, identifier = "delivery") {
 
         // Also copy to website uploads so all static paths work seamlessly
         const altDir = path.resolve(__dirname, "..", "..", "website", "website", "assets", "images", "uploads");
-        if (fs.existsSync(altDir)) {
-            try { fs.writeFileSync(path.join(altDir, fileName), buffer); } catch (_) {}
+        const altSubDir = path.join(altDir, "delivery_proofs");
+        if (!fs.existsSync(altSubDir)) {
+            try { fs.mkdirSync(altSubDir, { recursive: true }); } catch (_) {}
         }
+        try {
+            fs.writeFileSync(path.join(altDir, fileName), buffer);
+            fs.writeFileSync(path.join(altSubDir, fileName), buffer);
+        } catch (_) {}
 
         return `/uploads/delivery_proofs/${fileName}`;
     } catch (err) {
@@ -60,13 +91,14 @@ function saveProofImageToDisk(base64Data, identifier = "delivery") {
 }
 
 /**
- * Save delivery proof for a Product Order or Subscription Delivery
+ * Save delivery proof for a Product Order or Subscription Delivery and mark as completed
  */
-async function saveDeliveryProof({ orderId, subId, partnerId, imageBase64, remarks, latitude, longitude }) {
+async function saveDeliveryProof({ orderId, subId, partnerId, imageBase64, file, remarks, latitude, longitude, markDelivered = true }) {
     const isSub = Boolean(subId) || (orderId && orderId.toString().startsWith("SUB-"));
     const cleanId = isSub ? (subId || orderId.toString().replace("SUB-", "")).toString() : orderId.toString();
 
-    const proofUrl = saveProofImageToDisk(imageBase64, cleanId);
+    const proofSource = file || imageBase64;
+    const proofUrl = saveProofImageToDisk(proofSource, cleanId);
     if (!proofUrl) {
         throw new Error("Invalid photograph proof or image processing failed.");
     }
@@ -85,19 +117,62 @@ async function saveDeliveryProof({ orderId, subId, partnerId, imageBase64, remar
         if (latitude) sub.delivery_latitude = Number(latitude);
         if (longitude) sub.delivery_longitude = Number(longitude);
         sub.proof_uploaded_at = timestamp;
-        sub.proof_status = "uploaded";
+
+        if (markDelivered) {
+            sub.status = "delivered";
+            sub.delivered_at = timestamp;
+            sub.proof_status = "delivered_verified";
+        } else {
+            sub.proof_status = "uploaded";
+        }
 
         saveJson(SUBS_DELIVERIES_FILE, subs);
+
+        const actualPartnerId = partnerId || sub.partner_id;
+        if (markDelivered && actualPartnerId) {
+            try {
+                await recordSubscriptionDeliveryEarning(actualPartnerId, cleanId, 25);
+                const partner = await getPartnerById(actualPartnerId);
+                if (partner) {
+                    partner.total_deliveries_count = (partner.total_deliveries_count || 0) + 1;
+                    partner.today_deliveries_count = (partner.today_deliveries_count || 0) + 1;
+                    await savePartner(partner);
+                }
+            } catch (_) {}
+        }
 
         emitToAdmin("delivery:proof:uploaded", {
             type: "subscription",
             id: cleanId,
-            partner_id: partnerId || sub.partner_id,
+            partner_id: actualPartnerId,
             proof_url: proofUrl,
+            status: sub.status,
             timestamp
         });
 
-        return { success: true, proof_url: proofUrl, delivery: sub };
+        if (markDelivered) {
+            emitToAdmin("order:delivery:completed", {
+                type: "subscription",
+                id: cleanId,
+                partner_id: actualPartnerId,
+                status: "delivered",
+                delivered_at: timestamp,
+                proof_url: proofUrl
+            });
+            emitToAdmin("delivery:status:update", { deliveryId: cleanId, status: "delivered", partnerId: actualPartnerId });
+            if (actualPartnerId) {
+                emitToPartner(actualPartnerId, "delivery:completed", { id: cleanId, status: "delivered" });
+            }
+        }
+
+        return {
+            success: true,
+            message: "Subscription delivery successfully confirmed with photo proof.",
+            proof_url: proofUrl,
+            delivery_proof_url: proofUrl,
+            status: sub.status || "delivered",
+            delivery: sub
+        };
     } else {
         const orders = loadJson(ORDERS_FILE, []);
         const order = orders.find(o => o.id?.toString() === cleanId || o.order_number === cleanId);
@@ -110,49 +185,120 @@ async function saveDeliveryProof({ orderId, subId, partnerId, imageBase64, remar
         if (latitude) order.delivery_latitude = Number(latitude);
         if (longitude) order.delivery_longitude = Number(longitude);
         order.proof_uploaded_at = timestamp;
-        order.proof_status = "uploaded";
+
+        if (markDelivered) {
+            order.order_status = "delivered";
+            order.status = "delivered";
+            order.delivered_at = timestamp;
+            order.proof_status = "delivered_verified";
+            order.timeline = order.timeline || [];
+            order.timeline.push({
+                status: "delivered",
+                title: "Order Delivered",
+                description: `Delivered by partner with proof photo. ${remarks || ''}`.trim(),
+                timestamp
+            });
+        } else {
+            order.proof_status = "uploaded";
+        }
 
         saveJson(ORDERS_FILE, orders);
 
         // Update DB if available
         try {
-            await pool.query(
-                `UPDATE orders SET updated_at = NOW() WHERE id::text = $1 OR order_number = $1`,
-                [cleanId]
-            );
+            if (markDelivered) {
+                await pool.query(
+                    `UPDATE orders SET order_status = 'delivered', delivered_at = NOW(), updated_at = NOW() WHERE id::text = $1 OR order_number = $1`,
+                    [cleanId]
+                );
+            } else {
+                await pool.query(
+                    `UPDATE orders SET updated_at = NOW() WHERE id::text = $1 OR order_number = $1`,
+                    [cleanId]
+                );
+            }
         } catch (_) {}
+
+        const actualPartnerId = partnerId || order.partner_id;
+        if (markDelivered && actualPartnerId) {
+            try {
+                await recordProductDeliveryEarning(actualPartnerId, cleanId, 40);
+                const partner = await getPartnerById(actualPartnerId);
+                if (partner) {
+                    partner.total_deliveries_count = (partner.total_deliveries_count || 0) + 1;
+                    partner.today_deliveries_count = (partner.today_deliveries_count || 0) + 1;
+                    await savePartner(partner);
+                }
+                await pool.query(
+                    `UPDATE delivery_partners SET total_deliveries_count = COALESCE(total_deliveries_count, 0) + 1, today_deliveries_count = COALESCE(today_deliveries_count, 0) + 1, updated_at = NOW() WHERE partner_id = $1`,
+                    [actualPartnerId]
+                ).catch(() => {});
+            } catch (_) {}
+        }
 
         emitToAdmin("delivery:proof:uploaded", {
             type: "order",
             id: cleanId,
-            partner_id: partnerId || order.partner_id,
+            partner_id: actualPartnerId,
             proof_url: proofUrl,
+            status: order.order_status,
             timestamp
         });
+
+        if (markDelivered) {
+            emitToAdmin("order:delivery:completed", {
+                type: "order",
+                id: cleanId,
+                partner_id: actualPartnerId,
+                status: "delivered",
+                delivered_at: timestamp,
+                proof_url: proofUrl
+            });
+            emitToAdmin("order:updated", { order_id: cleanId, status: "delivered", partner_id: actualPartnerId });
+            emitToAdmin("delivery:status:update", { order_id: cleanId, status: "delivered", partner_id: actualPartnerId });
+            if (actualPartnerId) {
+                emitToPartner(actualPartnerId, "delivery:completed", { id: cleanId, status: "delivered" });
+                emitToPartner(actualPartnerId, "order:status_updated", { order_id: cleanId, status: "delivered" });
+            }
+        }
 
         if (order.user_id) {
             emitToCustomer(order.user_id, "customer:delivery:updated", {
                 order_id: cleanId,
                 status: order.order_status,
                 has_proof: true,
-                proof_url: proofUrl
+                proof_url: proofUrl,
+                delivered_at: order.delivered_at
+            });
+            emitToCustomer(order.user_id, "order:status_updated", {
+                order_id: cleanId,
+                status: order.order_status
             });
         }
 
-        return { success: true, proof_url: proofUrl, order };
+        return {
+            success: true,
+            message: "Delivery confirmed and photo proof saved successfully.",
+            proof_url: proofUrl,
+            delivery_proof_url: proofUrl,
+            status: order.order_status || "delivered",
+            order_status: order.order_status || "delivered",
+            order
+        };
     }
 }
 
 /**
  * Complete order delivery with mandatory photo proof verification
  */
-async function completeDelivery({ orderId, subId, partnerId, remarks, latitude, longitude, imageBase64 }) {
+async function completeDelivery({ orderId, subId, partnerId, remarks, latitude, longitude, imageBase64, file, image, photo, proof }) {
     const isSub = Boolean(subId) || (orderId && orderId.toString().startsWith("SUB-"));
     const cleanId = isSub ? (subId || orderId.toString().replace("SUB-", "")).toString() : orderId.toString();
 
+    const proofSource = file || imageBase64 || image || photo || proof;
     let uploadedProofUrl = "";
-    if (imageBase64) {
-        uploadedProofUrl = saveProofImageToDisk(imageBase64, cleanId);
+    if (proofSource) {
+        uploadedProofUrl = saveProofImageToDisk(proofSource, cleanId);
     }
 
     const timestamp = new Date().toISOString();

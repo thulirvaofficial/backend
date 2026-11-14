@@ -610,13 +610,14 @@ router.post("/dispatch/manual-assign", async (req, res) => {
         const order = orders.find(o => o.id?.toString() === order_id?.toString() || o.order_number === order_id);
         if (order) {
             order.partner_id = partner_id;
-            order.order_status = "processing";
+            order.order_status = "assigned";
+            order.status = "assigned";
             if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
             fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2), "utf-8");
         }
 
         try {
-            await pool.query("UPDATE orders SET partner_id = $1, order_status = 'processing', updated_at = NOW() WHERE id::text = $2 OR order_number = $2", [partner_id, order_id]);
+            await pool.query("UPDATE orders SET partner_id = $1, order_status = 'assigned', updated_at = NOW() WHERE id::text = $2 OR order_number = $2", [partner_id, order_id]);
             await pool.query(`
                 INSERT INTO delivery_assignments (assignment_id, order_id, partner_id, assigned_by, status)
                 VALUES ($1, $2, $3, 'admin_manual', 'assigned')

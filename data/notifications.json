@@ -1,5 +1,49 @@
 [
   {
+    "id": "NOTIF-1794636136408-117",
+    "user_id": "THU-DP-0005",
+    "title": "New High Priority Order Assignment",
+    "message": "Order #ORD-7740 assigned to you at Padur Hub",
+    "type": "delivery_assignments",
+    "target_id": "ORD-7740",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T06:02:16.408Z"
+  },
+  {
+    "id": "NOTIF-1794636129793-935",
+    "user_id": "THU-DP-0005",
+    "title": "New Assignment Available",
+    "message": "Padur Hub morning milk run ready for pickup",
+    "type": "delivery_assignments",
+    "target_id": "SUB-2026-0042",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T06:02:09.795Z"
+  },
+  {
+    "id": "NOTIF-1794635244018-661",
+    "user_id": null,
+    "title": "Order Update",
+    "message": "Your order #TEST-ORD-999 status is now in_transit.",
+    "type": "order_status",
+    "target_id": "TEST-ORD-999",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T05:47:24.018Z"
+  },
+  {
+    "id": "NOTIF-1794635244003-119",
+    "user_id": null,
+    "title": "Order Update",
+    "message": "Your order #TEST-ORD-999 status is now pickup_confirmed.",
+    "type": "order_status",
+    "target_id": "TEST-ORD-999",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T05:47:24.003Z"
+  },
+  {
     "id": "NOTIF-1794572124054-272",
     "user_id": "THU-DP-0009",
     "title": "Performance Bonus!",

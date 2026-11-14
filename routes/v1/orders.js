@@ -88,6 +88,8 @@ router.get("/", async (req, res) => {
     }
 });
 
+const { validateTransition, normalizeStatus, recordStatusHistory, broadcastStatusChange } = require("../../utils/deliveryStateMachine");
+
 /**
  * PUT & POST /api/v1/orders/:id/status
  */
@@ -100,24 +102,36 @@ const updateOrderStatusHandler = async (req, res) => {
 
         if (!order) return res.status(404).json({ success: false, message: "Order not found." });
 
-        // Issue 2: Permanently lock delivered orders
-        if (order.order_status === "delivered" || order.status === "delivered") {
-            return res.status(400).json({
-                success: false,
-                error_code: "ORDER_LOCKED",
-                message: "Order has already been delivered and locked. Duplicate completion or status editing is prevented."
+        const actorPartnerId = partner_id || req.user?.partner_id || req.partner?.partner_id;
+
+        // Enforce mandatory delivery state machine
+        if (status) {
+            const check = validateTransition(order.order_status, status, {
+                partnerId: actorPartnerId,
+                orderPartnerId: order.partner_id,
+                hasProof: Boolean(order.delivery_proof || req.body?.imageBase64 || req.body?.image),
+                isAdmin: Boolean(req.user?.role === "admin" || req.headers["x-admin-key"])
             });
+
+            if (!check.valid) {
+                return res.status(check.status).json({
+                    success: false,
+                    error_code: check.code,
+                    message: check.message
+                });
+            }
         }
 
-        order.order_status = status;
-        order.status = status;
-        if (partner_id) order.partner_id = partner_id;
+        const normStatus = status ? normalizeStatus(status) : order.order_status;
+
+        order.order_status = normStatus;
+        order.status = normStatus;
+        if (actorPartnerId && !order.partner_id) order.partner_id = actorPartnerId;
         if (notes) order.notes = notes;
 
-        if (status === "delivered") {
+        if (normStatus === "delivered") {
             order.delivered_at = new Date().toISOString();
             if (order.partner_id) {
-                // Record genuine earnings
                 try {
                     await recordProductDeliveryEarning(order.partner_id, order.id || order.order_number, 40);
                 } catch (e) {
@@ -128,16 +142,32 @@ const updateOrderStatusHandler = async (req, res) => {
 
         saveOrders(orders);
 
-        // Real-time broadcasts
+        // Record status history in PostgreSQL & timeline
         try {
-            const { emitToAdmin, emitToCustomer, emitToPartner } = require("../../services/socketService");
-            emitToAdmin("order:updated", { order_id: id, status, partner_id: order.partner_id });
-            emitToAdmin("delivery:status:update", { order_id: id, status, partner_id: order.partner_id });
-            if (order.partner_id) emitToPartner(order.partner_id, "order:status_updated", { order_id: id, status });
-            if (order.user_id) emitToCustomer(order.user_id, "order:status_updated", { order_id: id, status });
+            await recordStatusHistory({
+                orderId: order.id || id,
+                status: normStatus,
+                partnerId: actorPartnerId || order.partner_id,
+                notes
+            });
+            await pool.query(
+                `UPDATE orders SET order_status = $1, delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END, updated_at = NOW() WHERE id::text = $2 OR order_number = $2`,
+                [normStatus, id.toString()]
+            );
         } catch (_) {}
 
-        return res.json({ success: true, message: `Order status updated to ${status}`, order });
+        // Real-time broadcasts
+        try {
+            broadcastStatusChange({
+                orderId: id,
+                status: normStatus,
+                partnerId: order.partner_id,
+                userId: order.user_id,
+                additionalData: { delivered_at: order.delivered_at }
+            });
+        } catch (_) {}
+
+        return res.json({ success: true, message: `Order status updated to ${normStatus}`, order });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }

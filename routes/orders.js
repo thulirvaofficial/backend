@@ -848,6 +848,8 @@ async function getOrderForNotification(id) {
 }
 
 /* UPDATE ORDER STATUS (PUT & PATCH supported) */
+const { validateTransition, normalizeStatus, recordStatusHistory, broadcastStatusChange } = require("../utils/deliveryStateMachine");
+
 const updateOrderStatusHandler = async (req, res) => {
     const rawId = req.params.id;
     const numId = parseInt(rawId);
@@ -855,43 +857,7 @@ const updateOrderStatusHandler = async (req, res) => {
     const status = req.body.status || req.body.order_status;
     const payment_status = req.body.payment_status;
     const comment = req.body.comment || `Status updated to ${status}`;
-
-    try {
-        if (status && payment_status) {
-            await pool.query(
-                `UPDATE orders 
-                 SET order_status = $1, payment_status = $2,
-                     delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
-                     updated_at = CURRENT_TIMESTAMP 
-                 WHERE id::text = $3 OR order_number = $3`,
-                [status, payment_status, rawId.toString()]
-            );
-        } else if (status) {
-            await pool.query(
-                `UPDATE orders 
-                 SET order_status = $1, 
-                     delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
-                     updated_at = CURRENT_TIMESTAMP 
-                 WHERE id::text = $2 OR order_number = $2`,
-                [status, rawId.toString()]
-            );
-        } else if (payment_status) {
-            await pool.query(
-                `UPDATE orders SET payment_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id::text = $2 OR order_number = $2`,
-                [payment_status, rawId.toString()]
-            );
-        }
-
-        if (status) {
-            await pool.query(
-                `INSERT INTO order_status_history (order_id, status, comment) 
-                 SELECT id, $1, $2 FROM orders WHERE id::text = $3 OR order_number = $3 LIMIT 1`,
-                [status, comment, rawId.toString()]
-            ).catch(() => {});
-        }
-    } catch (err) {
-        console.error("Order status update DB error:", err.message);
-    }
+    const partnerId = req.partner?.partner_id || req.body.partner_id || req.user?.partner_id;
 
     const currentOrders = getMockOrders();
     let order = currentOrders.find(o => o.id?.toString() === rawId.toString() || o.order_number === rawId.toString());
@@ -900,46 +866,106 @@ const updateOrderStatusHandler = async (req, res) => {
         if (order) currentOrders.unshift(order);
     }
 
-    if (order) {
-        if (status) {
-            order.order_status = status;
-            order.status = status;
-            if (status === "delivered") {
-                order.delivered_at = new Date().toISOString();
-                if (order.partner_id) {
-                    try {
-                        const { getPartnerById, savePartner } = require("../services/deliveryPartnerService");
-                        const partner = await getPartnerById(order.partner_id);
-                        if (partner) {
-                            partner.total_deliveries_count = (partner.total_deliveries_count || 0) + 1;
-                            partner.today_deliveries_count = (partner.today_deliveries_count || 0) + 1;
-                            await savePartner(partner);
-                        }
-                    } catch (_) {}
-                }
-            }
-        }
-        if (payment_status) order.payment_status = payment_status;
-        saveOrdersToDisk(currentOrders);
+    if (!order) {
+        return res.status(404).json({ success: false, message: "Order not found" });
+    }
 
-        // Real-time Socket Updates
-        try {
-            const { emitToAdmin, emitToCustomer, emitToPartner } = require("../services/socketService");
-            emitToAdmin("order:updated", { order_id: rawId, status, partner_id: order.partner_id });
-            emitToAdmin("delivery:status:update", { order_id: rawId, status, partner_id: order.partner_id });
-            if (order.partner_id) {
-                emitToPartner(order.partner_id, "order:status_updated", { order_id: rawId, status });
-            }
-            if (order.user_id) {
-                emitToCustomer(order.user_id, "order:status_updated", { order_id: rawId, status });
-            }
-        } catch (_) {}
+    // Enforce mandatory delivery state machine
+    if (status) {
+        const check = validateTransition(order.order_status, status, {
+            partnerId,
+            orderPartnerId: order.partner_id,
+            hasProof: Boolean(order.delivery_proof || req.body.imageBase64 || req.body.image),
+            isAdmin: Boolean(req.user?.role === "admin" || req.headers["x-admin-key"])
+        });
 
-        if (status) {
-            notifyOrderStatusChange(order, status).catch(e => {
-                console.error("[NOTIFY STATUS CHANGE ERROR]", e.message);
+        if (!check.valid) {
+            return res.status(check.status).json({
+                success: false,
+                error_code: check.code,
+                message: check.message
             });
         }
+    }
+
+    const normStatus = status ? normalizeStatus(status) : order.order_status;
+
+    try {
+        if (normStatus && payment_status) {
+            await pool.query(
+                `UPDATE orders 
+                 SET order_status = $1, payment_status = $2,
+                     delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
+                     updated_at = CURRENT_TIMESTAMP 
+                 WHERE id::text = $3 OR order_number = $3`,
+                [normStatus, payment_status, rawId.toString()]
+            );
+        } else if (normStatus) {
+            await pool.query(
+                `UPDATE orders 
+                 SET order_status = $1, 
+                     delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
+                     updated_at = CURRENT_TIMESTAMP 
+                 WHERE id::text = $2 OR order_number = $2`,
+                [normStatus, rawId.toString()]
+            );
+        } else if (payment_status) {
+            await pool.query(
+                `UPDATE orders SET payment_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id::text = $2 OR order_number = $2`,
+                [payment_status, rawId.toString()]
+            );
+        }
+
+        if (normStatus) {
+            await recordStatusHistory({
+                orderId: order.id || rawId,
+                status: normStatus,
+                partnerId: partnerId || order.partner_id,
+                notes: comment
+            });
+        }
+    } catch (err) {
+        console.error("Order status update DB error:", err.message);
+    }
+
+    if (status) {
+        order.order_status = normStatus;
+        order.status = normStatus;
+        if (partnerId && !order.partner_id) order.partner_id = partnerId;
+
+        if (normStatus === "delivered") {
+            order.delivered_at = new Date().toISOString();
+            if (order.partner_id) {
+                try {
+                    const { getPartnerById, savePartner } = require("../services/deliveryPartnerService");
+                    const partner = await getPartnerById(order.partner_id);
+                    if (partner) {
+                        partner.total_deliveries_count = (partner.total_deliveries_count || 0) + 1;
+                        partner.today_deliveries_count = (partner.today_deliveries_count || 0) + 1;
+                        await savePartner(partner);
+                    }
+                } catch (_) {}
+            }
+        }
+    }
+    if (payment_status) order.payment_status = payment_status;
+    saveOrdersToDisk(currentOrders);
+
+    // Real-time Socket Updates via state machine
+    try {
+        broadcastStatusChange({
+            orderId: rawId,
+            status: normStatus,
+            partnerId: order.partner_id,
+            userId: order.user_id,
+            additionalData: { delivered_at: order.delivered_at }
+        });
+    } catch (_) {}
+
+    if (status) {
+        notifyOrderStatusChange(order, normStatus).catch(e => {
+            console.error("[NOTIFY STATUS CHANGE ERROR]", e.message);
+        });
     }
 
     res.json({ success: true, message: "Order updated successfully", order });
@@ -1324,19 +1350,22 @@ const {
     flagDeliveryProof,
     reportDeliveryIssue
 } = require("../services/deliveryProofService");
+const { uploadDeliveryProof } = require("../middleware/uploadMiddleware");
 
-router.post("/:orderId/delivery-proof", async (req, res) => {
+router.post("/:orderId/delivery-proof", uploadDeliveryProof, async (req, res) => {
     try {
         const orderId = req.params.orderId;
-        const { image, photo, proof, remarks, latitude, longitude, partner_id, sub_id } = req.body;
+        const { image, photo, proof, remarks, latitude, longitude, partner_id, sub_id } = req.body || {};
         const result = await saveDeliveryProof({
             orderId,
             subId: sub_id,
             partnerId: partner_id || req.user?.partner_id,
+            file: req.file,
             imageBase64: image || photo || proof,
             remarks,
             latitude,
-            longitude
+            longitude,
+            markDelivered: true
         });
         return res.json(result);
     } catch (err) {
@@ -1370,10 +1399,10 @@ router.get("/:orderId/delivery-details", async (req, res) => {
     }
 });
 
-router.post("/:orderId/complete-delivery", async (req, res) => {
+router.post("/:orderId/complete-delivery", uploadDeliveryProof, async (req, res) => {
     try {
         const orderId = req.params.orderId;
-        const { image, photo, proof, remarks, latitude, longitude, partner_id, sub_id } = req.body;
+        const { image, photo, proof, remarks, latitude, longitude, partner_id, sub_id } = req.body || {};
         const result = await completeDelivery({
             orderId,
             subId: sub_id,
@@ -1381,6 +1410,7 @@ router.post("/:orderId/complete-delivery", async (req, res) => {
             remarks,
             latitude,
             longitude,
+            file: req.file,
             imageBase64: image || photo || proof
         });
         return res.json(result);

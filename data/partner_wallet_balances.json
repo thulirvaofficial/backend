@@ -19,12 +19,12 @@
   },
   {
     "partner_id": "THU-DP-0005",
-    "lifetime_earned_paise": 11500,
+    "lifetime_earned_paise": 19500,
     "total_settled_paise": 0,
-    "available_payable_paise": 11500,
+    "available_payable_paise": 19500,
     "reserved_withdrawal_paise": 0,
     "pending_settlement_paise": 0,
-    "updated_at": "2026-11-13T12:06:47.572Z"
+    "updated_at": "2026-11-14T05:47:41.316Z"
   },
   {
     "partner_id": "THU-DP-0007",

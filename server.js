@@ -203,6 +203,37 @@ app.use(
     deliveryRoutes
 );
 
+// Fallback & direct mounts for mobile app endpoints without /api prefix
+app.use(
+    "/delivery",
+    deliveryRoutes
+);
+
+app.use(
+    "/delivery-partner",
+    deliveryRoutes
+);
+
+app.use(
+    "/delivery-partners",
+    deliveryRoutes
+);
+
+app.use(
+    "/orders",
+    orderRoutes
+);
+
+app.use(
+    "/subscriptions",
+    subscriptionRoutes
+);
+
+app.use(
+    "/notifications",
+    notificationRoutes
+);
+
 app.use(
     "/api/partners",
     require("./routes/v1/partners")
@@ -266,9 +297,12 @@ const backendAssetsUploadsPath = path.resolve(__dirname, "assets", "images", "up
 [
     backendPublicUploadsPath,
     path.join(backendPublicUploadsPath, "partners"),
+    path.join(backendPublicUploadsPath, "delivery_proofs"),
     path.join(backendPublicUploadsPath, "attendance"),
     backendAssetsUploadsPath,
-    websiteUploadsPath
+    websiteUploadsPath,
+    path.join(websiteUploadsPath, "delivery_proofs"),
+    path.join(websiteUploadsPath, "partners")
 ].forEach(dir => {
     if (!fs.existsSync(dir)) {
         try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
@@ -297,6 +331,8 @@ app.use("/api/uploads", express.static(backendAssetsUploadsPath));
 
 app.use("/admin/assets", express.static(path.resolve(adminPath, "assets")));
 app.use("/admin/images", express.static(path.resolve(adminPath, "images")));
+app.use("/admin/uploads", express.static(backendPublicUploadsPath));
+app.use("/admin/uploads", express.static(websiteUploadsPath));
 
 
 /* ============================================================

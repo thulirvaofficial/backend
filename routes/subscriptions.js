@@ -1056,18 +1056,21 @@ const {
     completeDelivery,
     getDeliveryDetails
 } = require("../services/deliveryProofService");
+const { uploadDeliveryProof } = require("../middleware/uploadMiddleware");
 
-router.post("/:id/delivery-proof", async (req, res) => {
+router.post("/:id/delivery-proof", uploadDeliveryProof, async (req, res) => {
     try {
         const id = req.params.id;
-        const { image, photo, proof, remarks, latitude, longitude, partner_id } = req.body;
+        const { image, photo, proof, remarks, latitude, longitude, partner_id } = req.body || {};
         const result = await saveDeliveryProof({
             subId: id,
             partnerId: partner_id || req.user?.partner_id,
+            file: req.file,
             imageBase64: image || photo || proof,
             remarks,
             latitude,
-            longitude
+            longitude,
+            markDelivered: true
         });
         return res.json(result);
     } catch (err) {
@@ -1085,16 +1088,17 @@ router.get("/:id/delivery-details", async (req, res) => {
     }
 });
 
-router.post("/:id/complete-delivery", async (req, res) => {
+router.post("/:id/complete-delivery", uploadDeliveryProof, async (req, res) => {
     try {
         const id = req.params.id;
-        const { image, photo, proof, remarks, latitude, longitude, partner_id } = req.body;
+        const { image, photo, proof, remarks, latitude, longitude, partner_id } = req.body || {};
         const result = await completeDelivery({
             subId: id,
             partnerId: partner_id || req.user?.partner_id,
             remarks,
             latitude,
             longitude,
+            file: req.file,
             imageBase64: image || photo || proof
         });
         return res.json(result);

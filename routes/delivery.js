@@ -37,6 +37,9 @@ const {
     getPartnerById,
     savePartner
 } = require("../services/deliveryPartnerService");
+const { uploadDeliveryProof, uploadPartnerPhoto } = require("../middleware/uploadMiddleware");
+const { saveDeliveryProof, completeDelivery, getDeliveryDetails } = require("../services/deliveryProofService");
+const { validateTransition, normalizeStatus, recordStatusHistory, broadcastStatusChange } = require("../utils/deliveryStateMachine");
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "THULIRVA_CHANGE_THIS_SECRET_KEY";
@@ -778,56 +781,60 @@ router.post("/profile/update", authenticatePartner, updatePartnerProfileHandler)
 
 /**
  * POST /api/delivery/profile/photo
- * Upload or replace delivery partner profile photo
+ * Upload or replace delivery partner profile photo (supports Multipart and Base64)
  */
-router.post("/profile/photo", authenticatePartner, async (req, res) => {
+router.post("/profile/photo", authenticatePartner, uploadPartnerPhoto, async (req, res) => {
     try {
         const partnerId = req.partner.partner_id;
-        const { photo, photo_base64 } = req.body;
+        const { photo, photo_base64 } = req.body || {};
         const photoData = photo_base64 || photo;
-
-        if (!photoData || typeof photoData !== "string") {
-            return res.status(400).json({ success: false, message: "Photo data (base64) is required." });
-        }
-
-        // Validate MIME type if data URI prefix is present
-        let ext = "jpg";
-        const mimeMatch = photoData.match(/^data:image\/(jpeg|jpg|png|webp);base64,/i);
-        if (mimeMatch) {
-            ext = mimeMatch[1].toLowerCase() === "jpeg" ? "jpg" : mimeMatch[1].toLowerCase();
-        } else if (photoData.startsWith("data:")) {
-            return res.status(400).json({ success: false, message: "Invalid image format. Allowed: JPG, PNG, WebP." });
-        }
-
-        const cleanBase64 = photoData.replace(/^data:image\/\w+;base64,/, "");
-        const buffer = Buffer.from(cleanBase64, "base64");
-
-        // Validate file size (max 5MB)
-        if (buffer.length > 5 * 1024 * 1024) {
-            return res.status(400).json({
-                success: false,
-                message: "Photo file size exceeds maximum limit of 5MB."
-            });
-        }
-
         const partnersDir = path.resolve(__dirname, "..", "public", "uploads", "partners");
         if (!fs.existsSync(partnersDir)) fs.mkdirSync(partnersDir, { recursive: true });
 
-        // Retrieve existing partner to remove previous file if exists
-        const partner = await getPartnerById(partnerId);
-        if (partner && partner.profile_photo && typeof partner.profile_photo === "string") {
-            const oldBasename = path.basename(partner.profile_photo.split("?")[0]);
-            const oldPath = path.join(partnersDir, oldBasename);
-            if (fs.existsSync(oldPath)) {
-                try { fs.unlinkSync(oldPath); } catch (_) {}
+        let filename = "";
+        let photoUrl = "";
+
+        if (req.file) {
+            filename = req.file.filename;
+            photoUrl = `/uploads/partners/${filename}`;
+        } else if (photoData && typeof photoData === "string") {
+            let ext = "jpg";
+            const mimeMatch = photoData.match(/^data:image\/(jpeg|jpg|png|webp);base64,/i);
+            if (mimeMatch) {
+                ext = mimeMatch[1].toLowerCase() === "jpeg" ? "jpg" : mimeMatch[1].toLowerCase();
             }
+            const cleanBase64 = photoData.replace(/^data:image\/\w+;base64,/, "");
+            const buffer = Buffer.from(cleanBase64, "base64");
+
+            if (buffer.length > 10 * 1024 * 1024) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Photo file size exceeds maximum limit of 10MB."
+                });
+            }
+
+            filename = `profile_${partnerId}_${Date.now()}.${ext}`;
+            const filePath = path.join(partnersDir, filename);
+            fs.writeFileSync(filePath, buffer);
+            photoUrl = `/uploads/partners/${filename}`;
+        } else {
+            return res.status(400).json({ success: false, message: "Photo file or base64 data is required." });
         }
 
-        const filename = `profile_${partnerId}_${Date.now()}.${ext}`;
-        const filePath = path.join(partnersDir, filename);
-        fs.writeFileSync(filePath, buffer);
+        // Also copy to website uploads so all static paths work seamlessly
+        const altDir = path.resolve(__dirname, "..", "..", "website", "website", "assets", "images", "uploads", "partners");
+        if (!fs.existsSync(altDir)) {
+            try { fs.mkdirSync(altDir, { recursive: true }); } catch (_) {}
+        }
+        try {
+            const src = path.join(partnersDir, filename);
+            if (fs.existsSync(src)) {
+                fs.copyFileSync(src, path.join(altDir, filename));
+            }
+        } catch (_) {}
 
-        const photoUrl = `/uploads/partners/${filename}`;
+        // Retrieve existing partner
+        const partner = await getPartnerById(partnerId);
 
         // Update in central store
         if (partner) {
@@ -854,21 +861,13 @@ router.post("/profile/photo", authenticatePartner, async (req, res) => {
             success: true,
             message: "Profile photo uploaded successfully.",
             profile_photo: photoUrl,
+            photo_url: photoUrl,
             partner: {
-                partner_id: partner.partner_id,
-                name: partner.name,
-                phone: partner.phone,
-                email: partner.email,
-                profile_photo: photoUrl,
-                assigned_area: partner.assigned_area,
-                vehicle_type: partner.vehicle_type,
-                vehicle_number: partner.vehicle_number,
-                current_latitude: partner.current_latitude,
-                current_longitude: partner.current_longitude,
-                is_online: Boolean(partner.is_online),
-                is_active: Boolean(partner.is_active),
-                kyc_status: partner.kyc_status ? (partner.kyc_status === 'verified' ? 'APPROVED' : partner.kyc_status.toUpperCase()) : (partner.is_active ? 'APPROVED' : 'PENDING'),
-                registration_status: (partner.registration_status || (partner.is_active ? 'approved' : 'pending_approval')).toUpperCase()
+                partner_id: partner ? partner.partner_id : partnerId,
+                name: partner ? partner.name : "Partner",
+                phone: partner ? partner.phone : "",
+                email: partner ? partner.email : "",
+                profile_photo: photoUrl
             }
         });
     } catch (err) {
@@ -1384,12 +1383,12 @@ router.get("/product-orders", authenticatePartner, getOrdersHandler);
 
 /**
  * PUT & POST /api/delivery/orders/:id/status
- * Multi-stage workflow: accepted -> pickup_confirmed -> in_transit -> delivered / failed
+ * Multi-stage workflow: assigned -> pickup_confirmed -> in_transit -> delivered
  */
 const updatePartnerOrderStatusHandler = async (req, res) => {
     try {
         const id = req.params.id;
-        const { status, failed_reason, notes } = req.body;
+        const { status, failed_reason, notes, latitude, longitude } = req.body;
         const partnerId = req.partner.partner_id;
 
         let orders = [];
@@ -1421,10 +1420,30 @@ const updatePartnerOrderStatusHandler = async (req, res) => {
             return res.status(404).json({ success: false, message: "Order not found" });
         }
 
-        order.order_status = status;
-        order.status = status;
+        // Enforce mandatory delivery state machine
+        if (status) {
+            const check = validateTransition(order.order_status, status, {
+                partnerId,
+                orderPartnerId: order.partner_id,
+                hasProof: Boolean(order.delivery_proof || req.body?.imageBase64 || req.body?.image),
+                isAdmin: false
+            });
+
+            if (!check.valid) {
+                return res.status(check.status).json({
+                    success: false,
+                    error_code: check.code,
+                    message: check.message
+                });
+            }
+        }
+
+        const normStatus = status ? normalizeStatus(status) : order.order_status;
+
+        order.order_status = normStatus;
+        order.status = normStatus;
         order.partner_id = partnerId;
-        if (status === "delivered") {
+        if (normStatus === "delivered") {
             order.delivered_at = new Date().toISOString();
         }
         if (failed_reason) order.failed_reason = failed_reason;
@@ -1438,19 +1457,23 @@ const updatePartnerOrderStatusHandler = async (req, res) => {
                     delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
                     updated_at = NOW()
                 WHERE id::text = $3 OR order_number = $3
-            `, [status, partnerId, id.toString()]);
+            `, [normStatus, partnerId, id.toString()]);
         } catch {}
 
         // Log to order status history
         try {
-            await pool.query(`
-                INSERT INTO order_status_history (order_id, status, notes, changed_by, created_at)
-                VALUES ($1, $2, $3, $4, NOW())
-            `, [order.id || id, status, notes || `Partner status update: ${status}`, `Partner ${partnerId}`]);
+            await recordStatusHistory({
+                orderId: order.id || id,
+                status: normStatus,
+                partnerId,
+                notes: notes || `Partner status update: ${normStatus}`,
+                latitude,
+                longitude
+            });
         } catch (_) {}
 
         // If delivered, increment partner delivery count
-        if (status === "delivered") {
+        if (normStatus === "delivered") {
             try {
                 const partner = await getPartnerById(partnerId);
                 if (partner) {
@@ -1470,27 +1493,20 @@ const updatePartnerOrderStatusHandler = async (req, res) => {
 
         saveOrders(orders);
 
-        // Real-time Socket broadcasts
-        emitToAdmin("order:updated", { order_id: id, status, partner_id: partnerId });
-        emitToAdmin("delivery:status:update", { order_id: id, status, partner_id: partnerId });
-        if (order.user_id) {
-            emitToUser(order.user_id, "order:status_updated", { order_id: id, status });
-        }
+        // Real-time Socket broadcasts via state machine
         try {
-            const { getIO } = require("../services/socketService");
-            const io = getIO();
-            if (io) io.emit("order:status_updated", { order_id: id, status, partner_id: partnerId });
-        } catch (_) {}
-
-        // Push notification to Customer
-        try {
-            const { notifyOrderStatusChange } = require("../services/notificationService");
-            notifyOrderStatusChange(order, status).catch(() => {});
+            broadcastStatusChange({
+                orderId: id,
+                status: normStatus,
+                partnerId,
+                userId: order.user_id,
+                additionalData: { delivered_at: order.delivered_at }
+            });
         } catch (_) {}
 
         return res.json({
             success: true,
-            message: `Order status updated to ${status}`,
+            message: `Order status updated to ${normStatus}`,
             order
         });
     } catch (err) {
@@ -1500,6 +1516,92 @@ const updatePartnerOrderStatusHandler = async (req, res) => {
 
 router.put("/orders/:id/status", authenticatePartner, updatePartnerOrderStatusHandler);
 router.post("/orders/:id/status", authenticatePartner, updatePartnerOrderStatusHandler);
+
+/**
+ * POST /api/delivery/orders/:id/delivery-proof
+ * Delivery partner uploads photo proof and completes order
+ */
+router.post("/orders/:id/delivery-proof", authenticatePartner, uploadDeliveryProof, async (req, res) => {
+    try {
+        const id = req.params.id;
+        const partnerId = req.partner.partner_id;
+        const { remarks, latitude, longitude, image, photo, proof } = req.body || {};
+
+        const result = await saveDeliveryProof({
+            orderId: id,
+            partnerId,
+            file: req.file,
+            imageBase64: image || photo || proof,
+            remarks,
+            latitude,
+            longitude,
+            markDelivered: true
+        });
+
+        return res.json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * POST /api/delivery/subscriptions/:id/delivery-proof
+ * Delivery partner uploads photo proof for subscription delivery
+ */
+router.post("/subscriptions/:id/delivery-proof", authenticatePartner, uploadDeliveryProof, async (req, res) => {
+    try {
+        const id = req.params.id;
+        const partnerId = req.partner.partner_id;
+        const { remarks, latitude, longitude, image, photo, proof } = req.body || {};
+
+        const result = await saveDeliveryProof({
+            subId: id,
+            partnerId,
+            file: req.file,
+            imageBase64: image || photo || proof,
+            remarks,
+            latitude,
+            longitude,
+            markDelivered: true
+        });
+
+        return res.json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+});
+
+router.get("/orders/:id/delivery-proof", authenticatePartner, async (req, res) => {
+    try {
+        const details = await getDeliveryDetails(req.params.id);
+        if (!details) return res.status(404).json({ success: false, message: "Order not found" });
+        return res.json({
+            success: true,
+            order_id: req.params.id,
+            delivery_proof: details.delivery_proof,
+            delivery_proof_urls: details.delivery_proof_urls,
+            proof_status: details.proof_status
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.get("/subscriptions/:id/delivery-proof", authenticatePartner, async (req, res) => {
+    try {
+        const details = await getDeliveryDetails(`SUB-${req.params.id}`);
+        if (!details) return res.status(404).json({ success: false, message: "Subscription not found" });
+        return res.json({
+            success: true,
+            subscription_id: req.params.id,
+            delivery_proof: details.delivery_proof,
+            delivery_proof_urls: details.delivery_proof_urls,
+            proof_status: details.proof_status
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
 
 function saveOrders(orders) {
     try {
@@ -1883,17 +1985,18 @@ router.post("/notifications/read-all", authenticatePartner, markAllReadHandler);
 
 /**
  * POST /api/delivery/deliveries/:id/pickup
- * Alias for pickup / out_for_delivery
+ * Stage: Pickup Confirmed from Farm Hub
  */
 router.post("/deliveries/:id/pickup", authenticatePartner, async (req, res) => {
     try {
         const id = req.params.id;
-        const notes = req.body.notes || "Picked up from hub, out for delivery";
+        const notes = req.body.notes || "Picked up from Farm Hub";
+        const partnerId = req.partner.partner_id;
 
         // Check if subscription delivery
         if (String(id).toUpperCase().startsWith("SUB") || String(id).toUpperCase().startsWith("DLY")) {
-            const result = await updateSubscriptionDeliveryStatus(id, "out_for_delivery", notes);
-            emitToAdmin("delivery:status:update", { deliveryId: id, status: "out_for_delivery", partnerId: req.partner.partner_id });
+            const result = await updateSubscriptionDeliveryStatus(id, "pickup_confirmed", notes);
+            emitToAdmin("delivery:status:update", { deliveryId: id, status: "pickup_confirmed", partnerId });
             return res.json(result);
         }
 
@@ -1910,20 +2013,93 @@ router.post("/deliveries/:id/pickup", authenticatePartner, async (req, res) => {
             return res.status(404).json({ success: false, message: "Delivery not found" });
         }
 
+        const check = validateTransition(order.order_status, "pickup_confirmed", {
+            partnerId,
+            orderPartnerId: order.partner_id,
+            isAdmin: false
+        });
+
+        if (!check.valid) {
+            return res.status(check.status).json({ success: false, error_code: check.code, message: check.message });
+        }
+
+        order.order_status = "pickup_confirmed";
+        order.status = "pickup_confirmed";
+        order.notes = notes;
+        saveOrders(orders);
+
+        try {
+            await pool.query(`UPDATE orders SET order_status = 'pickup_confirmed', updated_at = NOW() WHERE id::text = $1 OR order_number = $1`, [id]);
+            await recordStatusHistory({ orderId: order.id || id, status: "pickup_confirmed", partnerId, notes });
+        } catch {}
+
+        broadcastStatusChange({ orderId: id, status: "pickup_confirmed", partnerId, userId: order.user_id });
+
+        return res.json({
+            success: true,
+            message: "Order picked up from Farm Hub successfully",
+            order
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * POST /api/delivery/deliveries/:id/in-transit
+ * Stage: In Transit to Customer Doorstep
+ */
+router.post("/deliveries/:id/in-transit", authenticatePartner, async (req, res) => {
+    try {
+        const id = req.params.id;
+        const notes = req.body.notes || "In transit to customer doorstep";
+        const partnerId = req.partner.partner_id;
+
+        // Check if subscription delivery
+        if (String(id).toUpperCase().startsWith("SUB") || String(id).toUpperCase().startsWith("DLY")) {
+            const result = await updateSubscriptionDeliveryStatus(id, "out_for_delivery", notes);
+            emitToAdmin("delivery:status:update", { deliveryId: id, status: "in_transit", partnerId });
+            return res.json(result);
+        }
+
+        // Product order
+        let orders = [];
+        try {
+            if (fs.existsSync(ORDERS_FILE)) {
+                orders = JSON.parse(fs.readFileSync(ORDERS_FILE, "utf-8"));
+            }
+        } catch {}
+
+        const order = orders.find(o => o.id?.toString() === id?.toString() || o.order_number === id);
+        if (!order) {
+            return res.status(404).json({ success: false, message: "Delivery not found" });
+        }
+
+        const check = validateTransition(order.order_status, "in_transit", {
+            partnerId,
+            orderPartnerId: order.partner_id,
+            isAdmin: false
+        });
+
+        if (!check.valid) {
+            return res.status(check.status).json({ success: false, error_code: check.code, message: check.message });
+        }
+
         order.order_status = "in_transit";
+        order.status = "in_transit";
         order.notes = notes;
         saveOrders(orders);
 
         try {
             await pool.query(`UPDATE orders SET order_status = 'in_transit', updated_at = NOW() WHERE id::text = $1 OR order_number = $1`, [id]);
+            await recordStatusHistory({ orderId: order.id || id, status: "in_transit", partnerId, notes });
         } catch {}
 
-        emitToAdmin("delivery:status:update", { deliveryId: id, status: "in_transit", partnerId: req.partner.partner_id });
-        emitToOrder(id, "delivery:status:update", { deliveryId: id, status: "in_transit", partnerId: req.partner.partner_id });
+        broadcastStatusChange({ orderId: id, status: "in_transit", partnerId, userId: order.user_id });
 
         return res.json({
             success: true,
-            message: "Delivery picked up and in transit",
+            message: "Delivery is now in transit",
             order
         });
     } catch (err) {
@@ -1933,52 +2109,27 @@ router.post("/deliveries/:id/pickup", authenticatePartner, async (req, res) => {
 
 /**
  * POST /api/delivery/deliveries/:id/complete
- * Alias for marking delivery as completed / delivered
+ * Stage: Final Doorstep Delivery with mandatory photo verification
  */
-router.post("/deliveries/:id/complete", authenticatePartner, async (req, res) => {
+router.post("/deliveries/:id/complete", authenticatePartner, uploadDeliveryProof, async (req, res) => {
     try {
         const id = req.params.id;
-        const notes = req.body.notes || "Successfully delivered to customer";
+        const partnerId = req.partner.partner_id;
+        const { notes, remarks, latitude, longitude, image, photo, proof } = req.body || {};
 
-        // Check if subscription delivery
-        if (String(id).toUpperCase().startsWith("SUB") || String(id).toUpperCase().startsWith("DLY")) {
-            const result = await updateSubscriptionDeliveryStatus(id, "delivered", notes);
-            emitToAdmin("delivery:status:update", { deliveryId: id, status: "delivered", partnerId: req.partner.partner_id });
-            return res.json(result);
-        }
-
-        // Product order
-        let orders = [];
-        try {
-            if (fs.existsSync(ORDERS_FILE)) {
-                orders = JSON.parse(fs.readFileSync(ORDERS_FILE, "utf-8"));
-            }
-        } catch {}
-
-        const order = orders.find(o => o.id?.toString() === id?.toString() || o.order_number === id);
-        if (!order) {
-            return res.status(404).json({ success: false, message: "Delivery not found" });
-        }
-
-        order.order_status = "delivered";
-        order.delivered_at = new Date().toISOString();
-        order.notes = notes;
-        saveOrders(orders);
-
-        try {
-            await pool.query(`UPDATE orders SET order_status = 'delivered', updated_at = NOW() WHERE id::text = $1 OR order_number = $1`, [id]);
-        } catch {}
-
-        emitToAdmin("delivery:status:update", { deliveryId: id, status: "delivered", partnerId: req.partner.partner_id });
-        emitToOrder(id, "delivery:status:update", { deliveryId: id, status: "delivered", partnerId: req.partner.partner_id });
-
-        return res.json({
-            success: true,
-            message: "Delivery marked as successfully completed",
-            order
+        const result = await completeDelivery({
+            orderId: id,
+            partnerId,
+            remarks: remarks || notes || "Doorstep delivery confirmed with photo",
+            latitude,
+            longitude,
+            file: req.file,
+            imageBase64: image || photo || proof
         });
+
+        return res.json(result);
     } catch (err) {
-        return res.status(500).json({ success: false, message: err.message });
+        return res.status(400).json({ success: false, message: err.message });
     }
 });
 
