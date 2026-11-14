@@ -18,7 +18,7 @@ const ALLOWED_EXTS = /jpeg|jpg|png|webp/;
 function imageFileFilter(req, file, cb) {
     const ext = path.extname(file.originalname).toLowerCase().replace(".", "");
     const mime = file.mimetype.toLowerCase();
-    if (ALLOWED_EXTS.test(ext) || mime.includes("image") || mime.includes("octet-stream")) {
+    if (ALLOWED_EXTS.test(ext) || mime.includes("image") || mime.includes("octet-stream") || mime.includes("binary") || !ext || ext === "tmp") {
         cb(null, true);
     } else {
         cb(new Error("Only image files (JPG, PNG, WEBP) are permitted."));
@@ -32,7 +32,8 @@ const proofStorage = multer.diskStorage({
     },
     filename: (req, file, cb) => {
         const id = req.params.orderId || req.params.id || "order";
-        const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
+        let ext = path.extname(file.originalname).toLowerCase() || ".jpg";
+        if (ext === ".tmp" || !ext || ext === ".") ext = ".jpg";
         const cleanExt = ext.startsWith(".") ? ext : `.${ext}`;
         const uniqueSuffix = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
         cb(null, `proof_${id}_${uniqueSuffix}${cleanExt}`);
@@ -58,6 +59,8 @@ const uploadDeliveryProof = (req, res, next) => {
         { name: "photo", maxCount: 1 },
         { name: "image", maxCount: 1 },
         { name: "proof", maxCount: 1 },
+        { name: "delivery_proof", maxCount: 1 },
+        { name: "proof_image", maxCount: 1 },
         { name: "file", maxCount: 1 }
     ]);
 
@@ -72,6 +75,8 @@ const uploadDeliveryProof = (req, res, next) => {
                           req.files["photo"]?.[0] ||
                           req.files["image"]?.[0] ||
                           req.files["proof"]?.[0] ||
+                          req.files["delivery_proof"]?.[0] ||
+                          req.files["proof_image"]?.[0] ||
                           req.files["file"]?.[0];
             if (found) req.file = found;
         }

@@ -1,1 +1,23 @@
-[]
+[
+  {
+    "partner_id": "DP-TEST-9999",
+    "name": "Vigneshwaran M (Test)",
+    "phone": "9840515293",
+    "email": "",
+    "profile_photo": "/uploads/partners/profile_DP-TEST-9999_1794648719196.jpg",
+    "is_online": true,
+    "is_active": true,
+    "registration_status": "approved",
+    "kyc_status": "APPROVED",
+    "rating": 5,
+    "total_deliveries_count": 3,
+    "vehicle_type": "Electric Scooter",
+    "vehicle_number": "TN 09 CY 4567",
+    "assigned_area": "Padur",
+    "current_latitude": 12.8025,
+    "current_longitude": 80.2233,
+    "created_at": "2026-11-14T08:54:04.807Z",
+    "updated_at": "2026-11-14T09:31:59.781Z",
+    "today_deliveries_count": 3
+  }
+]

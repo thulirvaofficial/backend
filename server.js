@@ -334,6 +334,23 @@ app.use("/admin/images", express.static(path.resolve(adminPath, "images")));
 app.use("/admin/uploads", express.static(backendPublicUploadsPath));
 app.use("/admin/uploads", express.static(websiteUploadsPath));
 
+// 5. Fallback for missing images in upload routes (Never return HTML to Flutter image decoders!)
+const TRANSPARENT_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
+
+const missingImageFallback = (req, res, next) => {
+    if (req.path && req.path.match(/\.(jpg|jpeg|png|webp|gif|svg)$/i)) {
+        res.set("Content-Type", "image/png");
+        res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+        return res.status(404).send(TRANSPARENT_PNG);
+    }
+    next();
+};
+
+app.use("/uploads", missingImageFallback);
+app.use("/api/uploads", missingImageFallback);
+app.use("/assets/images/uploads", missingImageFallback);
+app.use("/admin/uploads", missingImageFallback);
+
 
 /* ============================================================
    API STATUS

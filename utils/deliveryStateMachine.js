@@ -1,35 +1,35 @@
 const { pool } = require("../config/database");
-const { emitToAdmin, emitToCustomer, emitToPartner } = require("../services/socketService");
+const { emitToAdmin, emitToCustomer, emitToPartner, emitToOrder, getIO } = require("../services/socketService");
 
 /**
- * Normalized Delivery Lifecycle States:
- * 1. PLACED / CONFIRMED / ASSIGNED
- * 2. PICKUP_CONFIRMED
- * 3. IN_TRANSIT
- * 4. DELIVERED
+ * Strict Delivery Lifecycle States:
+ * 1. PLACED
+ * 2. CONFIRMED
+ * 3. PREPARING
+ * 4. ASSIGNED
+ * 5. PICKED_UP
+ * 6. OUT_FOR_DELIVERY
+ * 7. DELIVERED
  */
 
 function normalizeStatus(raw) {
-    if (!raw) return "assigned";
+    if (!raw) return "placed";
     const s = raw.toString().trim().toLowerCase().replace(/[\s\-]/g, "_");
-    if (s === "pickup" || s === "hub_pickup" || s === "picked_up" || s === "pickup_confirmed") {
-        return "pickup_confirmed";
-    }
-    if (s === "in_transit" || s === "out_for_delivery" || s === "transit" || s === "delivering") {
-        return "in_transit";
-    }
-    if (s === "delivered" || s === "completed" || s === "doorstep_delivered") {
-        return "delivered";
-    }
-    if (s === "assigned" || s === "processing" || s === "placed" || s === "confirmed" || s === "accepted" || s === "ready_for_pickup") {
-        return "assigned";
-    }
+    if (s === "placed") return "placed";
+    if (s === "confirmed" || s === "order_confirmed") return "confirmed";
+    if (s === "preparing" || s === "processing") return "preparing";
+    if (s === "assigned" || s === "rider_assigned" || s === "partner_assigned") return "assigned";
+    if (s === "picked_up" || s === "pickup_confirmed" || s === "pickup" || s === "hub_pickup") return "picked_up";
+    if (s === "out_for_delivery" || s === "in_transit" || s === "transit" || s === "delivering" || s === "shipped") return "out_for_delivery";
+    if (s === "delivered" || s === "completed" || s === "doorstep_delivered") return "delivered";
+    if (s === "cancelled" || s === "canceled") return "cancelled";
+    if (s === "failed" || s === "delivery_failed") return "failed";
     return s;
 }
 
 /**
  * Validate Transition along the mandatory lifecycle:
- * ASSIGNED -> PICKUP_CONFIRMED -> IN_TRANSIT -> DELIVERED
+ * PLACED -> CONFIRMED -> PREPARING -> ASSIGNED -> PICKED_UP -> OUT_FOR_DELIVERY -> DELIVERED
  */
 function validateTransition(currentStatusRaw, targetStatusRaw, { partnerId, orderPartnerId, hasProof = false, isAdmin = false } = {}) {
     const current = normalizeStatus(currentStatusRaw);
@@ -68,44 +68,57 @@ function validateTransition(currentStatusRaw, targetStatusRaw, { partnerId, orde
     }
 
     // Cancellation / failure allowed from active stages
-    if (target === "cancelled" || target === "failed" || target === "delivery_failed") {
+    if (target === "cancelled" || target === "failed") {
         return { valid: true, current, target };
     }
 
-    // 3. Stage 1 -> Stage 2: ASSIGNED -> PICKUP_CONFIRMED
-    if (target === "pickup_confirmed") {
-        if (current !== "assigned") {
-            return {
-                valid: false,
-                code: "INVALID_TRANSITION",
-                status: 400,
-                message: `Cannot confirm pickup from current status "${currentStatusRaw}".`
-            };
+    // Step-by-step state transition rules
+    if (target === "confirmed") {
+        if (current === "placed") return { valid: true, current, target };
+    }
+
+    if (target === "preparing") {
+        if (current === "placed" || current === "confirmed") return { valid: true, current, target };
+    }
+
+    if (target === "assigned") {
+        if (current === "placed" || current === "confirmed" || current === "preparing") return { valid: true, current, target };
+    }
+
+    // PICKED_UP: From assigned, preparing, or confirmed
+    if (target === "picked_up") {
+        if (current === "assigned" || current === "preparing" || current === "confirmed") {
+            return { valid: true, current, target };
         }
-        return { valid: true, current, target };
+        return {
+            valid: false,
+            code: "INVALID_TRANSITION",
+            status: 400,
+            message: `Cannot confirm pickup from current status "${currentStatusRaw}". Order must be assigned first.`
+        };
     }
 
-    // 4. Stage 2 -> Stage 3: PICKUP_CONFIRMED -> IN_TRANSIT
-    if (target === "in_transit") {
-        if (current !== "pickup_confirmed") {
-            return {
-                valid: false,
-                code: "PICKUP_REQUIRED",
-                status: 400,
-                message: "Cannot start delivery: order must be picked up from hub/store first."
-            };
+    // OUT_FOR_DELIVERY: From picked_up (or assigned)
+    if (target === "out_for_delivery") {
+        if (current === "picked_up" || current === "assigned") {
+            return { valid: true, current, target };
         }
-        return { valid: true, current, target };
+        return {
+            valid: false,
+            code: "PICKUP_REQUIRED",
+            status: 400,
+            message: "Cannot start delivery: order must be picked up from hub/store first."
+        };
     }
 
-    // 5. Stage 3 -> Stage 4: IN_TRANSIT -> DELIVERED
+    // DELIVERED: From out_for_delivery (requires mandatory delivery proof)
     if (target === "delivered") {
-        if (current !== "in_transit") {
+        if (current !== "out_for_delivery" && current !== "picked_up") {
             return {
                 valid: false,
                 code: "TRANSIT_REQUIRED",
                 status: 400,
-                message: "Cannot mark delivered: order must be in transit before completing delivery."
+                message: "Cannot mark delivered: order must be out for delivery first."
             };
         }
         if (!hasProof) {
@@ -138,7 +151,7 @@ async function recordStatusHistory({ orderId, status, partnerId, notes, latitude
         await pool.query(`
             INSERT INTO order_status_history (order_id, status, notes, changed_by, created_at)
             VALUES ($1, $2, $3, $4, NOW())
-        `, [orderId, status, notes || `Stage advanced to ${status}`, actor]);
+        `, [String(orderId), status, notes || `Stage advanced to ${status}`, actor]);
     } catch (_) {}
 
     return {
@@ -158,41 +171,57 @@ function broadcastStatusChange({ orderId, status, partnerId, userId, additionalD
     const norm = normalizeStatus(status);
 
     const payload = {
-        order_id: orderId,
+        order_id: String(orderId),
+        orderId: String(orderId),
         status: norm,
+        order_status: norm,
         raw_status: status,
         partner_id: partnerId,
+        user_id: userId,
         timestamp: new Date().toISOString(),
         ...additionalData
     };
 
-    // Generic updates
+    // 1. Broadcast to Admin Channel
     emitToAdmin("order:updated", payload);
+    emitToAdmin("order:status_updated", payload);
     emitToAdmin("delivery:status:update", payload);
+    emitToAdmin(`order:${norm}`, payload);
 
-    // Stage-specific socket events required by UI
-    if (norm === "pickup_confirmed") {
-        emitToAdmin("order:pickup_confirmed", payload);
-        if (partnerId) emitToPartner(partnerId, "order:pickup_confirmed", payload);
-        if (userId) emitToCustomer(userId, "order:pickup_confirmed", payload);
-    } else if (norm === "in_transit") {
-        emitToAdmin("order:in_transit", payload);
-        if (partnerId) emitToPartner(partnerId, "order:in_transit", payload);
-        if (userId) emitToCustomer(userId, "order:in_transit", payload);
-    } else if (norm === "delivered") {
-        emitToAdmin("order:delivered", payload);
-        emitToAdmin("order:delivery:completed", payload);
-        if (partnerId) emitToPartner(partnerId, "delivery:completed", payload);
-        if (userId) emitToCustomer(userId, "order:delivered", payload);
-    }
+    // 2. Broadcast to Order-specific room (Customer App & Live Tracking)
+    emitToOrder(orderId, "order:status_updated", payload);
+    emitToOrder(orderId, "order:status", payload);
+    emitToOrder(orderId, "order:updated", payload);
+    emitToOrder(orderId, `order:${norm}`, payload);
 
+    // 3. Broadcast to Delivery Partner
     if (partnerId) {
         emitToPartner(partnerId, "order:status_updated", payload);
+        emitToPartner(partnerId, `order:${norm}`, payload);
     }
+
+    // 4. Broadcast to Customer
     if (userId) {
         emitToCustomer(userId, "order:status_updated", payload);
         emitToCustomer(userId, "customer:delivery:updated", payload);
+        emitToCustomer(userId, `order:${norm}`, payload);
     }
+
+    // 5. Global broadcast across all sockets for active views
+    try {
+        const io = getIO();
+        if (io) {
+            io.emit("order:status_updated", payload);
+            io.emit("delivery:status:update", payload);
+            io.emit(`order:${norm}`, payload);
+            if (norm === "out_for_delivery") {
+                io.emit("order:in_transit", payload);
+            }
+            if (norm === "picked_up") {
+                io.emit("order:pickup_confirmed", payload);
+            }
+        }
+    } catch (_) {}
 }
 
 module.exports = {
@@ -201,4 +230,3 @@ module.exports = {
     recordStatusHistory,
     broadcastStatusChange
 };
-

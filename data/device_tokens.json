@@ -1,0 +1,20 @@
+[
+  {
+    "token": "fcm_test_token_step5_partner_1234567890_abcdef",
+    "platform": "android",
+    "user_id": "THU-DP-001",
+    "role": "partner",
+    "is_active": false,
+    "created_at": "2026-11-14T09:27:35.568Z",
+    "updated_at": "2026-11-14T09:32:00.003Z"
+  },
+  {
+    "token": "fcm_delivery_partner_direct_token_999888777_xyz",
+    "platform": "android",
+    "user_id": "THU-DP-002",
+    "role": "partner",
+    "is_active": true,
+    "created_at": "2026-11-14T09:27:35.598Z",
+    "updated_at": "2026-11-14T09:32:00.021Z"
+  }
+]

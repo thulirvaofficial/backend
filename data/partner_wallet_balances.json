@@ -1,1 +1,20 @@
-[]
+[
+  {
+    "partner_id": "THU-DP-0001",
+    "lifetime_earned_paise": 12000,
+    "total_settled_paise": 0,
+    "available_payable_paise": 12000,
+    "reserved_withdrawal_paise": 0,
+    "pending_settlement_paise": 0,
+    "updated_at": "2026-11-14T09:31:58.350Z"
+  },
+  {
+    "partner_id": "DP-TEST-9999",
+    "lifetime_earned_paise": 12000,
+    "total_settled_paise": 0,
+    "available_payable_paise": 12000,
+    "reserved_withdrawal_paise": 0,
+    "pending_settlement_paise": 0,
+    "updated_at": "2026-11-14T09:31:59.765Z"
+  }
+]

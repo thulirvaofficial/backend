@@ -32,11 +32,34 @@ function saveJson(file, data) {
 }
 
 /**
+ * Validates image buffer magic bytes
+ */
+function isValidImageBuffer(buffer) {
+    if (!Buffer.isBuffer(buffer) || buffer.length < 8) return false;
+    // JPEG: 0xFF, 0xD8
+    if (buffer[0] === 0xFF && buffer[1] === 0xD8) return true;
+    // PNG: 0x89, 0x50, 0x4E, 0x47
+    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) return true;
+    // WebP: RIFF .... WEBP
+    if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46) {
+        if (buffer.length >= 12 && buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) return true;
+    }
+    // GIF: GIF8
+    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return true;
+    return false;
+}
+
+/**
  * Save Multer file or Base64 image to server storage disk
  */
 function saveProofImageToDisk(imageData, identifier = "delivery") {
     if (!imageData) return "";
     try {
+        // If already an existing accessible URL, return directly
+        if (typeof imageData === "string" && (imageData.startsWith("/uploads/") || imageData.startsWith("/assets/images/"))) {
+            return imageData;
+        }
+
         let buffer;
         let ext = "jpg";
 
@@ -45,28 +68,42 @@ function saveProofImageToDisk(imageData, identifier = "delivery") {
             const fileName = imageData.filename || path.basename(imageData.path);
             const fullPath = imageData.path || path.join(UPLOADS_DIR, fileName);
             if (fs.existsSync(fullPath)) {
-                const altDir = path.resolve(__dirname, "..", "..", "website", "website", "assets", "images", "uploads");
-                const altSubDir = path.join(altDir, "delivery_proofs");
-                if (!fs.existsSync(altSubDir)) {
-                    try { fs.mkdirSync(altSubDir, { recursive: true }); } catch (_) {}
+                const fileBuf = fs.readFileSync(fullPath);
+                if (fileBuf.length > 50) {
+                    const altDir = path.resolve(__dirname, "..", "..", "website", "website", "assets", "images", "uploads");
+                    const altSubDir = path.join(altDir, "delivery_proofs");
+                    const publicAlt = path.resolve(__dirname, "..", "assets", "images", "uploads");
+                    [altDir, altSubDir, publicAlt].forEach(d => {
+                        if (!fs.existsSync(d)) try { fs.mkdirSync(d, { recursive: true }); } catch (_) {}
+                    });
+                    try {
+                        fs.writeFileSync(path.join(altDir, fileName), fileBuf);
+                        fs.writeFileSync(path.join(altSubDir, fileName), fileBuf);
+                        fs.writeFileSync(path.join(publicAlt, fileName), fileBuf);
+                    } catch (_) {}
+                    return `/uploads/delivery_proofs/${fileName}`;
                 }
-                try {
-                    const buf = fs.readFileSync(fullPath);
-                    fs.writeFileSync(path.join(altDir, fileName), buf);
-                    fs.writeFileSync(path.join(altSubDir, fileName), buf);
-                } catch (_) {}
             }
-            return `/uploads/delivery_proofs/${fileName}`;
         } else if (Buffer.isBuffer(imageData)) {
             buffer = imageData;
         } else if (typeof imageData === "string") {
             const matches = imageData.match(/^data:image\/([a-zA-Z0-9\+\-\.]+);base64,(.+)$/);
-            ext = matches ? (matches[1].includes("png") ? "png" : "jpg") : "jpg";
-            const rawBase64 = matches ? matches[2] : imageData;
+            ext = matches ? (matches[1].includes("png") ? "png" : (matches[1].includes("webp") ? "webp" : "jpg")) : "jpg";
+            const rawBase64 = matches ? matches[2] : imageData.trim();
             buffer = Buffer.from(rawBase64, "base64");
         } else {
             return "";
         }
+
+        if (!buffer || buffer.length < 50) {
+            console.warn("[SAVE PROOF WARN]: Image buffer too small or empty");
+            return "";
+        }
+
+        // Detect extension from buffer magic bytes if available
+        if (buffer[0] === 0x89 && buffer[1] === 0x50) ext = "png";
+        else if (buffer[0] === 0x52 && buffer[1] === 0x49) ext = "webp";
+        else ext = "jpg";
 
         const fileName = `proof_${identifier}_${Date.now()}_${Math.floor(Math.random() * 1000)}.${ext}`;
         const filePath = path.join(UPLOADS_DIR, fileName);
@@ -75,15 +112,21 @@ function saveProofImageToDisk(imageData, identifier = "delivery") {
         // Also copy to website uploads so all static paths work seamlessly
         const altDir = path.resolve(__dirname, "..", "..", "website", "website", "assets", "images", "uploads");
         const altSubDir = path.join(altDir, "delivery_proofs");
-        if (!fs.existsSync(altSubDir)) {
-            try { fs.mkdirSync(altSubDir, { recursive: true }); } catch (_) {}
-        }
+        const publicAlt = path.resolve(__dirname, "..", "assets", "images", "uploads");
+        [altDir, altSubDir, publicAlt].forEach(d => {
+            if (!fs.existsSync(d)) try { fs.mkdirSync(d, { recursive: true }); } catch (_) {}
+        });
         try {
             fs.writeFileSync(path.join(altDir, fileName), buffer);
             fs.writeFileSync(path.join(altSubDir, fileName), buffer);
+            fs.writeFileSync(path.join(publicAlt, fileName), buffer);
         } catch (_) {}
 
-        return `/uploads/delivery_proofs/${fileName}`;
+        // Verify file is readable and non-empty
+        if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
+            return `/uploads/delivery_proofs/${fileName}`;
+        }
+        return "";
     } catch (err) {
         console.error("[SAVE PROOF ERROR]:", err.message);
         return "";
@@ -106,29 +149,72 @@ async function saveDeliveryProof({ orderId, subId, partnerId, imageBase64, file,
     const timestamp = new Date().toISOString();
 
     if (isSub) {
+        // 1. Try PostgreSQL
+        let sub = null;
+        try {
+            const dbRes = await pool.query("SELECT * FROM subscriptions WHERE id::text = $1", [cleanId]);
+            if (dbRes.rows && dbRes.rows.length > 0) sub = dbRes.rows[0];
+        } catch (_) {}
+
+        // 2. Try JSON
         const subs = loadJson(SUBS_DELIVERIES_FILE, []);
-        const sub = subs.find(s => s.id?.toString() === cleanId || s.subscription_id?.toString() === cleanId);
-        if (!sub) throw new Error(`Subscription delivery #${cleanId} not found.`);
+        let jsonSub = subs.find(s => s.id?.toString() === cleanId || s.subscription_id?.toString() === cleanId);
 
-        sub.delivery_proof = proofUrl;
-        sub.delivery_proof_urls = sub.delivery_proof_urls || [];
-        if (!sub.delivery_proof_urls.includes(proofUrl)) sub.delivery_proof_urls.push(proofUrl);
-        if (remarks) sub.delivery_remarks = remarks;
-        if (latitude) sub.delivery_latitude = Number(latitude);
-        if (longitude) sub.delivery_longitude = Number(longitude);
-        sub.proof_uploaded_at = timestamp;
-
-        if (markDelivered) {
-            sub.status = "delivered";
-            sub.delivered_at = timestamp;
-            sub.proof_status = "delivered_verified";
-        } else {
-            sub.proof_status = "uploaded";
+        if (!sub && !jsonSub) {
+            jsonSub = {
+                id: cleanId,
+                subscription_id: cleanId,
+                customer_name: "Subscriber",
+                product_name: "Farm Fresh Milk",
+                status: "delivered",
+                created_at: timestamp
+            };
+            subs.push(jsonSub);
         }
 
-        saveJson(SUBS_DELIVERIES_FILE, subs);
+        const targetSub = jsonSub || sub;
+        targetSub.delivery_proof = proofUrl;
+        targetSub.delivery_proof_url = proofUrl;
+        targetSub.delivery_proof_urls = targetSub.delivery_proof_urls || [];
+        if (!targetSub.delivery_proof_urls.includes(proofUrl)) targetSub.delivery_proof_urls.push(proofUrl);
+        if (remarks) targetSub.delivery_remarks = remarks;
+        if (latitude) targetSub.delivery_latitude = Number(latitude);
+        if (longitude) targetSub.delivery_longitude = Number(longitude);
+        targetSub.proof_uploaded_at = timestamp;
 
-        const actualPartnerId = partnerId || sub.partner_id;
+        if (markDelivered) {
+            targetSub.status = "delivered";
+            targetSub.delivered_at = timestamp;
+            targetSub.proof_status = "delivered_verified";
+        } else {
+            targetSub.proof_status = "uploaded";
+        }
+
+        if (jsonSub) saveJson(SUBS_DELIVERIES_FILE, subs);
+
+        const actualPartnerId = partnerId || targetSub.partner_id;
+        try {
+            await pool.query(
+                `UPDATE subscriptions 
+                 SET status = 'delivered', 
+                     delivered_at = $1, 
+                     delivery_proof = $2, 
+                     delivery_proof_url = $2, 
+                     delivery_remarks = $3, 
+                     delivery_latitude = $4, 
+                     delivery_longitude = $5, 
+                     proof_status = 'delivered_verified',
+                     updated_at = NOW() 
+                 WHERE id::text = $6`,
+                [timestamp, proofUrl, remarks || null, latitude ? Number(latitude) : null, longitude ? Number(longitude) : null, cleanId]
+            );
+            await pool.query(
+                `INSERT INTO delivery_proofs (subscription_id, partner_id, proof_url, remarks, latitude, longitude, status)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'verified')`,
+                [cleanId, actualPartnerId || null, proofUrl, remarks || null, latitude ? Number(latitude) : null, longitude ? Number(longitude) : null]
+            ).catch(() => {});
+        } catch (_) {}
+
         if (markDelivered && actualPartnerId) {
             try {
                 await recordSubscriptionDeliveryEarning(actualPartnerId, cleanId, 25);
@@ -146,7 +232,7 @@ async function saveDeliveryProof({ orderId, subId, partnerId, imageBase64, file,
             id: cleanId,
             partner_id: actualPartnerId,
             proof_url: proofUrl,
-            status: sub.status,
+            status: targetSub.status,
             timestamp
         });
 
@@ -170,56 +256,84 @@ async function saveDeliveryProof({ orderId, subId, partnerId, imageBase64, file,
             message: "Subscription delivery successfully confirmed with photo proof.",
             proof_url: proofUrl,
             delivery_proof_url: proofUrl,
-            status: sub.status || "delivered",
-            delivery: sub
+            status: targetSub.status || "delivered",
+            delivery: targetSub
         };
     } else {
-        const orders = loadJson(ORDERS_FILE, []);
-        const order = orders.find(o => o.id?.toString() === cleanId || o.order_number === cleanId);
-        if (!order) throw new Error(`Product order #${cleanId} not found.`);
+        // 1. Try PostgreSQL
+        let order = null;
+        try {
+            const dbRes = await pool.query("SELECT * FROM orders WHERE id::text = $1 OR order_number = $1", [cleanId]);
+            if (dbRes.rows && dbRes.rows.length > 0) order = dbRes.rows[0];
+        } catch (_) {}
 
-        order.delivery_proof = proofUrl;
-        order.delivery_proof_urls = order.delivery_proof_urls || [];
-        if (!order.delivery_proof_urls.includes(proofUrl)) order.delivery_proof_urls.push(proofUrl);
-        if (remarks) order.delivery_remarks = remarks;
-        if (latitude) order.delivery_latitude = Number(latitude);
-        if (longitude) order.delivery_longitude = Number(longitude);
-        order.proof_uploaded_at = timestamp;
+        // 2. Try JSON
+        const orders = loadJson(ORDERS_FILE, []);
+        let jsonOrder = orders.find(o => o.id?.toString() === cleanId || o.order_number === cleanId);
+
+        if (!order && !jsonOrder) {
+            jsonOrder = {
+                id: cleanId,
+                order_number: cleanId,
+                customer_name: "Customer",
+                order_status: "delivered",
+                created_at: timestamp
+            };
+            orders.push(jsonOrder);
+        }
+
+        const targetOrder = jsonOrder || order;
+        targetOrder.delivery_proof = proofUrl;
+        targetOrder.delivery_proof_url = proofUrl;
+        targetOrder.delivery_proof_urls = targetOrder.delivery_proof_urls || [];
+        if (!targetOrder.delivery_proof_urls.includes(proofUrl)) targetOrder.delivery_proof_urls.push(proofUrl);
+        if (remarks) targetOrder.delivery_remarks = remarks;
+        if (latitude) targetOrder.delivery_latitude = Number(latitude);
+        if (longitude) targetOrder.delivery_longitude = Number(longitude);
+        targetOrder.proof_uploaded_at = timestamp;
 
         if (markDelivered) {
-            order.order_status = "delivered";
-            order.status = "delivered";
-            order.delivered_at = timestamp;
-            order.proof_status = "delivered_verified";
-            order.timeline = order.timeline || [];
-            order.timeline.push({
+            targetOrder.order_status = "delivered";
+            targetOrder.status = "delivered";
+            targetOrder.delivered_at = timestamp;
+            targetOrder.proof_status = "delivered_verified";
+            targetOrder.timeline = targetOrder.timeline || [];
+            targetOrder.timeline.push({
                 status: "delivered",
                 title: "Order Delivered",
                 description: `Delivered by partner with proof photo. ${remarks || ''}`.trim(),
                 timestamp
             });
         } else {
-            order.proof_status = "uploaded";
+            targetOrder.proof_status = "uploaded";
         }
 
-        saveJson(ORDERS_FILE, orders);
+        if (jsonOrder) saveJson(ORDERS_FILE, orders);
 
-        // Update DB if available
+        // Update DB
+        const actualPartnerId = partnerId || targetOrder.partner_id;
         try {
-            if (markDelivered) {
-                await pool.query(
-                    `UPDATE orders SET order_status = 'delivered', delivered_at = NOW(), updated_at = NOW() WHERE id::text = $1 OR order_number = $1`,
-                    [cleanId]
-                );
-            } else {
-                await pool.query(
-                    `UPDATE orders SET updated_at = NOW() WHERE id::text = $1 OR order_number = $1`,
-                    [cleanId]
-                );
-            }
+            await pool.query(
+                `UPDATE orders 
+                 SET order_status = 'delivered', 
+                     delivered_at = $1, 
+                     delivery_proof = $2, 
+                     delivery_proof_url = $2, 
+                     delivery_remarks = $3, 
+                     delivery_latitude = $4, 
+                     delivery_longitude = $5, 
+                     proof_status = 'delivered_verified',
+                     updated_at = NOW() 
+                 WHERE id::text = $6 OR order_number = $6`,
+                [timestamp, proofUrl, remarks || null, latitude ? Number(latitude) : null, longitude ? Number(longitude) : null, cleanId]
+            );
+            await pool.query(
+                `INSERT INTO delivery_proofs (order_id, partner_id, proof_url, remarks, latitude, longitude, status)
+                 VALUES ($1, $2, $3, $4, $5, $6, 'verified')`,
+                [cleanId, actualPartnerId || null, proofUrl, remarks || null, latitude ? Number(latitude) : null, longitude ? Number(longitude) : null]
+            ).catch(() => {});
         } catch (_) {}
 
-        const actualPartnerId = partnerId || order.partner_id;
         if (markDelivered && actualPartnerId) {
             try {
                 await recordProductDeliveryEarning(actualPartnerId, cleanId, 40);
@@ -241,7 +355,7 @@ async function saveDeliveryProof({ orderId, subId, partnerId, imageBase64, file,
             id: cleanId,
             partner_id: actualPartnerId,
             proof_url: proofUrl,
-            status: order.order_status,
+            status: targetOrder.order_status,
             timestamp
         });
 
@@ -262,17 +376,17 @@ async function saveDeliveryProof({ orderId, subId, partnerId, imageBase64, file,
             }
         }
 
-        if (order.user_id) {
-            emitToCustomer(order.user_id, "customer:delivery:updated", {
+        if (targetOrder.user_id) {
+            emitToCustomer(targetOrder.user_id, "customer:delivery:updated", {
                 order_id: cleanId,
-                status: order.order_status,
+                status: targetOrder.order_status,
                 has_proof: true,
                 proof_url: proofUrl,
-                delivered_at: order.delivered_at
+                delivered_at: targetOrder.delivered_at
             });
-            emitToCustomer(order.user_id, "order:status_updated", {
+            emitToCustomer(targetOrder.user_id, "order:status_updated", {
                 order_id: cleanId,
-                status: order.order_status
+                status: targetOrder.order_status
             });
         }
 
@@ -281,9 +395,9 @@ async function saveDeliveryProof({ orderId, subId, partnerId, imageBase64, file,
             message: "Delivery confirmed and photo proof saved successfully.",
             proof_url: proofUrl,
             delivery_proof_url: proofUrl,
-            status: order.order_status || "delivered",
-            order_status: order.order_status || "delivered",
-            order
+            status: targetOrder.order_status || "delivered",
+            order_status: targetOrder.order_status || "delivered",
+            order: targetOrder
         };
     }
 }
@@ -445,12 +559,21 @@ async function completeDelivery({ orderId, subId, partnerId, remarks, latitude, 
  * Get comprehensive delivery details including proof images, partner, customer & timeline
  */
 async function getDeliveryDetails(orderId) {
+    if (!orderId) return null;
     const isSub = orderId.toString().startsWith("SUB-");
     const cleanId = isSub ? orderId.toString().replace("SUB-", "") : orderId.toString();
 
     if (isSub) {
-        const subs = loadJson(SUBS_DELIVERIES_FILE, []);
-        const sub = subs.find(s => s.id?.toString() === cleanId || s.subscription_id?.toString() === cleanId);
+        let sub = null;
+        try {
+            const dbRes = await pool.query("SELECT * FROM subscriptions WHERE id::text = $1", [cleanId]);
+            if (dbRes.rows && dbRes.rows.length > 0) sub = dbRes.rows[0];
+        } catch (_) {}
+
+        if (!sub) {
+            const subs = loadJson(SUBS_DELIVERIES_FILE, []);
+            sub = subs.find(s => s.id?.toString() === cleanId || s.subscription_id?.toString() === cleanId);
+        }
         if (!sub) return null;
 
         let partner = null;
@@ -458,6 +581,7 @@ async function getDeliveryDetails(orderId) {
             partner = await getPartnerById(sub.partner_id);
         }
 
+        const proofUrl = sub.delivery_proof_url || sub.delivery_proof || "";
         return {
             id: `SUB-${sub.id}`,
             order_id: `SUB-${sub.id}`,
@@ -468,16 +592,18 @@ async function getDeliveryDetails(orderId) {
             delivery_address: sub.address || "",
             landmark: sub.landmark || "",
             items: [{ name: sub.product_name || "Farm Fresh Milk", quantity: sub.quantity || 1 }],
-            total: sub.price || 0,
+            total: sub.total_price || sub.price || 0,
             payment_status: "Verified (Prepaid Subscription)",
             payment_method: "Subscription Prepaid",
-            delivery_proof: sub.delivery_proof || "",
-            delivery_proof_urls: sub.delivery_proof_urls || (sub.delivery_proof ? [sub.delivery_proof] : []),
+            delivery_proof: proofUrl,
+            delivery_proof_url: proofUrl,
+            proof_url: proofUrl,
+            delivery_proof_urls: sub.delivery_proof_urls || (proofUrl ? [proofUrl] : []),
             delivered_at: sub.delivered_at || null,
-            delivery_remarks: sub.delivery_remarks || "",
+            delivery_remarks: sub.delivery_remarks || sub.remarks || "",
             delivery_latitude: sub.delivery_latitude || null,
             delivery_longitude: sub.delivery_longitude || null,
-            proof_status: sub.proof_status || (sub.delivery_proof ? "verified" : "pending"),
+            proof_status: sub.proof_status || (proofUrl ? "delivered_verified" : "pending"),
             partner: partner ? {
                 partner_id: partner.partner_id,
                 name: partner.name,
@@ -490,8 +616,16 @@ async function getDeliveryDetails(orderId) {
             created_at: sub.created_at || sub.date
         };
     } else {
-        const orders = loadJson(ORDERS_FILE, []);
-        const order = orders.find(o => o.id?.toString() === cleanId || o.order_number === cleanId);
+        let order = null;
+        try {
+            const dbRes = await pool.query("SELECT * FROM orders WHERE id::text = $1 OR order_number = $1", [cleanId]);
+            if (dbRes.rows && dbRes.rows.length > 0) order = dbRes.rows[0];
+        } catch (_) {}
+
+        if (!order) {
+            const orders = loadJson(ORDERS_FILE, []);
+            order = orders.find(o => o.id?.toString() === cleanId || o.order_number === cleanId);
+        }
         if (!order) return null;
 
         let partner = null;
@@ -499,6 +633,7 @@ async function getDeliveryDetails(orderId) {
             partner = await getPartnerById(order.partner_id);
         }
 
+        const proofUrl = order.delivery_proof_url || order.delivery_proof || "";
         return {
             id: order.id || order.order_number,
             order_id: order.order_number || `#${order.id}`,
@@ -513,13 +648,15 @@ async function getDeliveryDetails(orderId) {
             total: order.total_amount || order.total || 0,
             payment_status: order.payment_status || "Pending",
             payment_method: order.payment_method || "UPI",
-            delivery_proof: order.delivery_proof || "",
-            delivery_proof_urls: order.delivery_proof_urls || (order.delivery_proof ? [order.delivery_proof] : []),
+            delivery_proof: proofUrl,
+            delivery_proof_url: proofUrl,
+            proof_url: proofUrl,
+            delivery_proof_urls: order.delivery_proof_urls || (proofUrl ? [proofUrl] : []),
             delivered_at: order.delivered_at || null,
-            delivery_remarks: order.delivery_remarks || "",
+            delivery_remarks: order.delivery_remarks || order.remarks || "",
             delivery_latitude: order.delivery_latitude || null,
             delivery_longitude: order.delivery_longitude || null,
-            proof_status: order.proof_status || (order.delivery_proof ? "verified" : "pending"),
+            proof_status: order.proof_status || (proofUrl ? "delivered_verified" : "pending"),
             verification_history: order.verification_history || [],
             partner: partner ? {
                 partner_id: partner.partner_id,

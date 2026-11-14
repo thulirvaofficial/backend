@@ -1062,9 +1062,18 @@ router.post("/:id/delivery-proof", uploadDeliveryProof, async (req, res) => {
     try {
         const id = req.params.id;
         const { image, photo, proof, remarks, latitude, longitude, partner_id } = req.body || {};
+        let resolvedPartnerId = partner_id || req.user?.partner_id || req.partner?.partner_id || req.headers["x-partner-id"];
+        if (!resolvedPartnerId && req.headers.authorization && req.headers.authorization.startsWith("Bearer ")) {
+            try {
+                const token = req.headers.authorization.split(" ")[1];
+                const jwt = require("jsonwebtoken");
+                const decoded = jwt.decode(token);
+                if (decoded) resolvedPartnerId = decoded.partner_id || decoded.id;
+            } catch (_) {}
+        }
         const result = await saveDeliveryProof({
             subId: id,
-            partnerId: partner_id || req.user?.partner_id,
+            partnerId: resolvedPartnerId,
             file: req.file,
             imageBase64: image || photo || proof,
             remarks,

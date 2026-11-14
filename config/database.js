@@ -167,11 +167,34 @@ async function initializeDatabase() {
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_slot VARCHAR(100)",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_code VARCHAR(50)",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(10,2) DEFAULT 0",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_proof TEXT",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_proof_url TEXT",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_remarks TEXT",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_latitude NUMERIC(10,6)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_longitude NUMERIC(10,6)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS proof_status VARCHAR(50)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS partner_id VARCHAR(50)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS partner_name VARCHAR(150)",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS partner_phone VARCHAR(30)",
             `CREATE TABLE IF NOT EXISTS order_status_history (
                 id SERIAL PRIMARY KEY,
                 order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
                 status VARCHAR(50),
                 comment TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )`,
+            `CREATE TABLE IF NOT EXISTS delivery_proofs (
+                id SERIAL PRIMARY KEY,
+                order_id VARCHAR(100),
+                subscription_id VARCHAR(100),
+                partner_id VARCHAR(50),
+                proof_url TEXT NOT NULL,
+                file_path TEXT,
+                remarks TEXT,
+                latitude NUMERIC(10,6),
+                longitude NUMERIC(10,6),
+                status VARCHAR(50) DEFAULT 'verified',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )`
         ];
@@ -273,6 +296,16 @@ async function initializeDatabase() {
             "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS notes TEXT",
             "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP",
             "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS verified_by VARCHAR(150)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS delivery_proof TEXT",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS delivery_proof_url TEXT",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS delivery_remarks TEXT",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS delivery_latitude NUMERIC(10,6)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS delivery_longitude NUMERIC(10,6)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS proof_status VARCHAR(50)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS partner_id VARCHAR(50)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS partner_name VARCHAR(150)",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS partner_phone VARCHAR(30)",
             "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
             "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
         ];

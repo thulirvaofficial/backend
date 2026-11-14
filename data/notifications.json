@@ -1,5 +1,115 @@
 [
   {
+    "id": "NOTIF-1794648720610-897",
+    "user_id": "THU-DP-001",
+    "title": "🚨 NEW DELIVERY ASSIGNMENT",
+    "message": "New order #ORD-9999 ready for pickup from Farm Hub",
+    "type": "delivery_assignment",
+    "target_id": "ORD-9999",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T09:32:00.610Z"
+  },
+  {
+    "id": "NOTIF-1794648719656-727",
+    "user_id": "cust_test_1",
+    "title": "Order Update",
+    "message": "Your order #ORD-TEST-1794648719506 status is now assigned.",
+    "type": "order_status",
+    "target_id": "ORD-TEST-1794648719506",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T09:31:59.656Z"
+  },
+  {
+    "id": "NOTIF-1794648719633-569",
+    "user_id": "cust_test_1",
+    "title": "Order Packed 📦",
+    "message": "Your order has been safely packed with natural freshness guarantees.",
+    "type": "order_status",
+    "target_id": "ORD-TEST-1794648719506",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T09:31:59.633Z"
+  },
+  {
+    "id": "NOTIF-1794648719600-571",
+    "user_id": "cust_test_1",
+    "title": "Order Confirmed ✓",
+    "message": "Your Thulirva order has been confirmed! Farm fresh produce is being prepared.",
+    "type": "order_status",
+    "target_id": "ORD-TEST-1794648719506",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T09:31:59.600Z"
+  },
+  {
+    "id": "NOTIF-1794647714881-477",
+    "user_id": "cust_test_1",
+    "title": "Order Update",
+    "message": "Your order #ORD-TEST-1794647714711 status is now assigned.",
+    "type": "order_status",
+    "target_id": "ORD-TEST-1794647714711",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T09:15:14.881Z"
+  },
+  {
+    "id": "NOTIF-1794647714852-94",
+    "user_id": "cust_test_1",
+    "title": "Order Packed 📦",
+    "message": "Your order has been safely packed with natural freshness guarantees.",
+    "type": "order_status",
+    "target_id": "ORD-TEST-1794647714711",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T09:15:14.852Z"
+  },
+  {
+    "id": "NOTIF-1794647714823-214",
+    "user_id": "cust_test_1",
+    "title": "Order Confirmed ✓",
+    "message": "Your Thulirva order has been confirmed! Farm fresh produce is being prepared.",
+    "type": "order_status",
+    "target_id": "ORD-TEST-1794647714711",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T09:15:14.823Z"
+  },
+  {
+    "id": "NOTIF-1794647654068-451",
+    "user_id": "cust_test_1",
+    "title": "Order Update",
+    "message": "Your order #ORD-TEST-1794647653860 status is now assigned.",
+    "type": "order_status",
+    "target_id": "ORD-TEST-1794647653860",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T09:14:14.068Z"
+  },
+  {
+    "id": "NOTIF-1794647654046-531",
+    "user_id": "cust_test_1",
+    "title": "Order Packed 📦",
+    "message": "Your order has been safely packed with natural freshness guarantees.",
+    "type": "order_status",
+    "target_id": "ORD-TEST-1794647653860",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T09:14:14.046Z"
+  },
+  {
+    "id": "NOTIF-1794647654015-673",
+    "user_id": "cust_test_1",
+    "title": "Order Confirmed ✓",
+    "message": "Your Thulirva order has been confirmed! Farm fresh produce is being prepared.",
+    "type": "order_status",
+    "target_id": "ORD-TEST-1794647653860",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T09:14:14.015Z"
+  },
+  {
     "id": "NOTIF-1794636136408-117",
     "user_id": "THU-DP-0005",
     "title": "New High Priority Order Assignment",
