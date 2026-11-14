@@ -1507,6 +1507,24 @@ router.get("/:orderId/tracking", async (req, res) => {
             } catch (_) {}
         }
 
+        // Genuine geocoding resolution for customer delivery destination
+        const { geocodeAddress } = require("../services/geocodingService");
+        const destinationAddress = details.delivery_address || details.address || details.shipping_address || "";
+        const destinationCity = details.city || "";
+        const destinationPincode = details.pincode || "";
+
+        let destLat = details.latitude || details.delivery_latitude;
+        let destLng = details.longitude || details.delivery_longitude;
+
+        if (!destLat || !destLng || isNaN(Number(destLat)) || isNaN(Number(destLng))) {
+            const geo = await geocodeAddress({ address: destinationAddress, city: destinationCity, pincode: destinationPincode });
+            destLat = geo.latitude;
+            destLng = geo.longitude;
+        } else {
+            destLat = Number(destLat);
+            destLng = Number(destLng);
+        }
+
         return res.json({
             success: true,
             order_id: details.id || orderId,
@@ -1514,10 +1532,10 @@ router.get("/:orderId/tracking", async (req, res) => {
             order_status: details.order_status || details.status || "confirmed",
             order_type: details.order_type || "product",
             customer_destination: {
-                address: details.address || "",
-                city: details.city || "",
-                latitude: details.latitude ? Number(details.latitude) : 12.8090,
-                longitude: details.longitude ? Number(details.longitude) : 80.2280
+                address: destinationAddress,
+                city: destinationCity || "Chennai",
+                latitude: destLat,
+                longitude: destLng
             },
             hub_location: {
                 name: "Thulirva Dairy Hub",
@@ -1532,6 +1550,43 @@ router.get("/:orderId/tracking", async (req, res) => {
         });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * GET /api/orders/:orderId/chat
+ * Retrieve persistent chat history between customer and delivery partner
+ */
+router.get("/:orderId/chat", async (req, res) => {
+    try {
+        const { getChatMessages } = require("../services/chatService");
+        const messages = await getChatMessages(req.params.orderId);
+        return res.json({ success: true, order_id: req.params.orderId, messages });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * POST /api/orders/:orderId/chat
+ * Post in-app chat message between customer and delivery partner
+ */
+router.post("/:orderId/chat", async (req, res) => {
+    try {
+        const { sender, sender_name, text, message } = req.body || {};
+        const msgText = text || message;
+        if (!msgText || !msgText.trim()) {
+            return res.status(400).json({ success: false, message: "Message text is required" });
+        }
+        const { saveChatMessage } = require("../services/chatService");
+        const saved = await saveChatMessage(req.params.orderId, {
+            sender: sender || "customer",
+            sender_name,
+            text: msgText
+        });
+        return res.json({ success: true, message: saved });
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
     }
 });
 

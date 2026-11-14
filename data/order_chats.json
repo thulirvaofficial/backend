@@ -1,0 +1,20 @@
+{
+  "1794661515994": [
+    {
+      "id": "sys-1794661515994-0",
+      "order_id": "1794661515994",
+      "sender": "system",
+      "sender_name": "Thulirva Support",
+      "text": "Chat connected with your delivery partner. You can send delivery notes or questions directly here.",
+      "timestamp": "2026-11-14T16:57:30.444Z"
+    },
+    {
+      "id": "msg_1794675450488_8bj6g",
+      "order_id": "1794661515994",
+      "sender": "customer",
+      "sender_name": "Customer Anand",
+      "text": "Please leave the packet inside the gate box.",
+      "timestamp": "2026-11-14T16:57:30.488Z"
+    }
+  ]
+}

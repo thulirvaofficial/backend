@@ -1343,16 +1343,31 @@ router.post("/location/update", (req, res, next) => {
 });
 
 /**
- * GET /api/delivery/location/:partnerId
- * Retrieve real-time or last known location for a specific partner
+ * GET /api/delivery/location/:id
+ * Retrieve real-time or last known location for a specific partner OR for an order's assigned partner
  */
-router.get("/location/:partnerId", async (req, res) => {
+router.get("/location/:id", async (req, res) => {
     try {
-        const partnerId = req.params.partnerId;
+        const id = req.params.id;
+        let partnerId = id;
         const { getPartnerLiveLocation } = require("../services/gpsService");
-        let location = await getPartnerLiveLocation(partnerId);
 
+        // Check if id is an order ID rather than a partner ID
+        let location = await getPartnerLiveLocation(partnerId);
         let partner = await getPartnerById(partnerId);
+
+        if (!location && !partner) {
+            // Attempt to resolve as order or subscription ID
+            try {
+                const details = await getDeliveryDetails(id);
+                if (details && (details.partner_id || details.partner?.partner_id)) {
+                    partnerId = details.partner_id || details.partner.partner_id;
+                    location = await getPartnerLiveLocation(partnerId);
+                    partner = await getPartnerById(partnerId);
+                }
+            } catch (_) {}
+        }
+
         if (!location && partner) {
             location = {
                 partner_id: partner.partner_id,
@@ -1367,7 +1382,7 @@ router.get("/location/:partnerId", async (req, res) => {
         }
 
         if (!location && !partner) {
-            return res.status(404).json({ success: false, message: `Partner ${partnerId} not found` });
+            return res.status(404).json({ success: false, message: `Partner or order ${id} not found` });
         }
 
         return res.json({
@@ -1379,6 +1394,234 @@ router.get("/location/:partnerId", async (req, res) => {
         });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * GET /api/delivery/tracking/:orderId
+ * Order tracking endpoint on delivery router
+ */
+router.get("/tracking/:orderId", async (req, res) => {
+    try {
+        const orderId = req.params.orderId;
+        const details = await getDeliveryDetails(orderId);
+        if (!details) {
+            return res.status(404).json({ success: false, message: `Order ${orderId} not found` });
+        }
+
+        const partnerId = details.partner_id || details.partner?.partner_id;
+        let partnerLocation = null;
+        let partnerInfo = details.partner ? {
+            partner_id: details.partner.partner_id,
+            name: details.partner.name,
+            phone: details.partner.phone,
+            photo_url: details.partner.profile_photo || null,
+            vehicle_type: details.partner.vehicle_type || "Electric Scooter",
+            vehicle_number: details.partner.vehicle_number || "",
+            rating: Number(details.partner.rating) || 5.0,
+            is_online: Boolean(details.partner.is_online)
+        } : null;
+
+        if (partnerId) {
+            try {
+                const { getPartnerLiveLocation } = require("../services/gpsService");
+                partnerLocation = await getPartnerLiveLocation(partnerId);
+            } catch (_) {}
+
+            try {
+                const p = await getPartnerById(partnerId);
+                if (p) {
+                    partnerInfo = {
+                        partner_id: p.partner_id,
+                        name: p.name,
+                        phone: p.phone,
+                        photo_url: p.profile_photo || null,
+                        vehicle_type: p.vehicle_type || "Electric Scooter",
+                        vehicle_number: p.vehicle_number || "",
+                        rating: Number(p.rating) || 5.0,
+                        is_online: Boolean(p.is_online)
+                    };
+                    if (!partnerLocation && p.current_latitude && p.current_longitude) {
+                        partnerLocation = {
+                            partner_id: p.partner_id,
+                            latitude: Number(p.current_latitude),
+                            longitude: Number(p.current_longitude),
+                            speed: Number(p.speed) || 0,
+                            heading: Number(p.heading) || 0,
+                            accuracy: Number(p.accuracy) || 0,
+                            is_fresh: false
+                        };
+                    }
+                }
+            } catch (_) {}
+        }
+
+        const { geocodeAddress } = require("../services/geocodingService");
+        const destinationAddress = details.delivery_address || details.address || details.shipping_address || "";
+        const destinationCity = details.city || "";
+        const destinationPincode = details.pincode || "";
+
+        let destLat = details.latitude || details.delivery_latitude;
+        let destLng = details.longitude || details.delivery_longitude;
+
+        if (!destLat || !destLng || isNaN(Number(destLat)) || isNaN(Number(destLng))) {
+            const geo = await geocodeAddress({ address: destinationAddress, city: destinationCity, pincode: destinationPincode });
+            destLat = geo.latitude;
+            destLng = geo.longitude;
+        } else {
+            destLat = Number(destLat);
+            destLng = Number(destLng);
+        }
+
+        return res.json({
+            success: true,
+            order_id: details.id || orderId,
+            order_number: details.order_number || orderId,
+            order_status: details.order_status || details.status || "confirmed",
+            order_type: details.order_type || "product",
+            customer_destination: {
+                address: destinationAddress,
+                city: destinationCity || "Chennai",
+                latitude: destLat,
+                longitude: destLng
+            },
+            hub_location: {
+                name: "Thulirva Dairy Hub",
+                address: "Padur, OMR, Chennai",
+                latitude: 12.8025,
+                longitude: 80.2233
+            },
+            partner: partnerInfo,
+            partner_live_location: partnerLocation,
+            timeline: details.timeline || [],
+            estimated_delivery_time: details.estimated_delivery_time || "15-20 mins"
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * POST /api/delivery/accept/:orderId
+ * Partner accepts an order or subscription delivery
+ */
+router.post("/accept/:orderId", async (req, res) => {
+    try {
+        const orderId = req.params.orderId;
+        const partnerId = req.partner?.partner_id || req.body?.partner_id || req.body?.partnerId;
+        if (!partnerId) {
+            return res.status(400).json({ success: false, message: "partner_id is required" });
+        }
+
+        const isSub = orderId.toString().startsWith("SUB-");
+        const cleanId = isSub ? orderId.toString().replace("SUB-", "") : orderId.toString();
+
+        if (isSub) {
+            const subs = loadJson(SUBS_DELIVERIES_FILE, []);
+            const sub = subs.find(s => s.id?.toString() === cleanId || s.subscription_id?.toString() === cleanId);
+            if (sub) {
+                sub.partner_id = partnerId;
+                sub.status = "assigned";
+                saveJson(SUBS_DELIVERIES_FILE, subs);
+            }
+        } else {
+            const orders = loadJson(ORDERS_FILE, []);
+            const order = orders.find(o => o.id?.toString() === cleanId || o.order_number === cleanId);
+            if (order) {
+                order.partner_id = partnerId;
+                order.order_status = "assigned";
+                saveJson(ORDERS_FILE, orders);
+            }
+        }
+
+        try {
+            const { broadcastStatusChange } = require("../utils/deliveryStateMachine");
+            broadcastStatusChange(orderId, "assigned", { partnerId });
+        } catch (_) {}
+
+        return res.json({ success: true, message: `Order ${orderId} accepted and assigned to partner ${partnerId}` });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * POST /api/delivery/status/:orderId
+ * Delivery status update handler
+ */
+router.post("/status/:orderId", async (req, res) => {
+    try {
+        const orderId = req.params.orderId;
+        const status = req.body?.status || req.body?.order_status;
+        const partnerId = req.partner?.partner_id || req.body?.partner_id || req.body?.partnerId;
+
+        if (!status) {
+            return res.status(400).json({ success: false, message: "status is required" });
+        }
+
+        const isSub = orderId.toString().startsWith("SUB-");
+        const cleanId = isSub ? orderId.toString().replace("SUB-", "") : orderId.toString();
+
+        if (isSub) {
+            const subs = loadJson(SUBS_DELIVERIES_FILE, []);
+            const sub = subs.find(s => s.id?.toString() === cleanId || s.subscription_id?.toString() === cleanId);
+            if (sub) {
+                sub.status = status;
+                if (partnerId) sub.partner_id = partnerId;
+                saveJson(SUBS_DELIVERIES_FILE, subs);
+            }
+        } else {
+            const orders = loadJson(ORDERS_FILE, []);
+            const order = orders.find(o => o.id?.toString() === cleanId || o.order_number === cleanId);
+            if (order) {
+                order.order_status = status;
+                if (partnerId) order.partner_id = partnerId;
+                saveJson(ORDERS_FILE, orders);
+            }
+        }
+
+        try {
+            const { broadcastStatusChange } = require("../utils/deliveryStateMachine");
+            broadcastStatusChange(orderId, status, { partnerId });
+        } catch (_) {}
+
+        return res.json({ success: true, message: `Order ${orderId} status updated to ${status}` });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * In-App Chat endpoints on delivery router
+ * GET /api/delivery/orders/:id/chat
+ * POST /api/delivery/orders/:id/chat
+ */
+router.get("/orders/:id/chat", async (req, res) => {
+    try {
+        const { getChatMessages } = require("../services/chatService");
+        const messages = await getChatMessages(req.params.id);
+        return res.json({ success: true, order_id: req.params.id, messages });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.post("/orders/:id/chat", async (req, res) => {
+    try {
+        const { sender, sender_name, text, message } = req.body || {};
+        const msgText = text || message;
+        if (!msgText || !msgText.trim()) {
+            return res.status(400).json({ success: false, message: "Message text is required" });
+        }
+        const { saveChatMessage } = require("../services/chatService");
+        const saved = await saveChatMessage(req.params.id, {
+            sender: sender || "partner",
+            sender_name: sender_name || "Delivery Partner",
+            text: msgText
+        });
+        return res.json({ success: true, message: saved });
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
     }
 });
 

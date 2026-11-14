@@ -202,6 +202,23 @@ function initSocketServer(httpServer) {
         socket.on("partner:availability", handleStatusUpdate);
         socket.on("partner:status:update", handleStatusUpdate);
 
+        // In-App Chat message event
+        socket.on("chat:message", async (data) => {
+            try {
+                if (!data) return;
+                const orderId = data.orderId || data.order_id;
+                const text = data.text || data.message;
+                const sender = data.sender || (socket.partnerId ? "partner" : "customer");
+                const sender_name = data.sender_name || data.senderName;
+                if (!orderId || !text) return;
+
+                const { saveChatMessage } = require("./chatService");
+                await saveChatMessage(orderId, { sender, sender_name, text });
+            } catch (chatErr) {
+                console.error("[SOCKET CHAT ERROR]", chatErr.message);
+            }
+        });
+
         socket.on("disconnect", () => {
             if (socket.partnerId) {
                 console.log(`[SOCKET DISCONNECT] Partner ${socket.partnerId} disconnected`);
