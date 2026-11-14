@@ -945,24 +945,31 @@ const updateOrderStatusHandler = async (req, res) => {
             await pool.query(
                 `UPDATE orders 
                  SET order_status = $1, payment_status = $2,
+                     partner_id = COALESCE($3, partner_id),
                      delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
                      updated_at = CURRENT_TIMESTAMP 
-                 WHERE id::text = $3 OR order_number = $3`,
-                [normStatus, payment_status, rawId.toString()]
+                 WHERE id::text = $4 OR order_number = $4`,
+                [normStatus, payment_status, partnerId || null, rawId.toString()]
             );
         } else if (normStatus) {
             await pool.query(
                 `UPDATE orders 
                  SET order_status = $1, 
+                     partner_id = COALESCE($2, partner_id),
                      delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
                      updated_at = CURRENT_TIMESTAMP 
-                 WHERE id::text = $2 OR order_number = $2`,
-                [normStatus, rawId.toString()]
+                 WHERE id::text = $3 OR order_number = $3`,
+                [normStatus, partnerId || null, rawId.toString()]
             );
         } else if (payment_status) {
             await pool.query(
-                `UPDATE orders SET payment_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id::text = $2 OR order_number = $2`,
-                [payment_status, rawId.toString()]
+                `UPDATE orders SET payment_status = $1, partner_id = COALESCE($2, partner_id), updated_at = CURRENT_TIMESTAMP WHERE id::text = $3 OR order_number = $3`,
+                [payment_status, partnerId || null, rawId.toString()]
+            );
+        } else if (partnerId) {
+            await pool.query(
+                `UPDATE orders SET partner_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id::text = $2 OR order_number = $2`,
+                [partnerId, rawId.toString()]
             );
         }
 
@@ -1469,7 +1476,17 @@ router.get("/:orderId/tracking", async (req, res) => {
             return res.status(404).json({ success: false, message: `Order ${orderId} not found` });
         }
 
-        const partnerId = details.partner_id || details.partner?.partner_id;
+        const diskOrders = getMockOrders();
+        const diskOrder = diskOrders.find(o => o.id?.toString() === orderId.toString() || o.order_number === orderId.toString());
+
+        let partnerId = details.partner_id || details.partner?.partner_id;
+        let effectiveStatus = details.order_status || details.status || "confirmed";
+        if (diskOrder) {
+            if (!partnerId && diskOrder.partner_id) partnerId = diskOrder.partner_id;
+            if (diskOrder.order_status && diskOrder.order_status !== "processing" && diskOrder.order_status !== "pending") {
+                effectiveStatus = diskOrder.order_status;
+            }
+        }
         let partnerLocation = null;
         let partnerInfo = details.partner ? {
             partner_id: details.partner.partner_id,
@@ -1538,8 +1555,8 @@ router.get("/:orderId/tracking", async (req, res) => {
         return res.json({
             success: true,
             order_id: details.id || orderId,
-            order_number: details.order_number || orderId,
-            order_status: details.order_status || details.status || "confirmed",
+            order_number: (diskOrder && diskOrder.order_number) || details.order_number || orderId,
+            order_status: effectiveStatus,
             order_type: details.order_type || "product",
             customer_destination: {
                 address: destinationAddress,

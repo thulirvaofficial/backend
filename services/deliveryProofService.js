@@ -622,9 +622,19 @@ async function getDeliveryDetails(orderId) {
             if (dbRes.rows && dbRes.rows.length > 0) order = dbRes.rows[0];
         } catch (_) {}
 
+        const diskOrders = loadJson(ORDERS_FILE, []);
+        const diskOrder = diskOrders.find(o => o.id?.toString() === cleanId || o.order_number === cleanId);
+
         if (!order) {
-            const orders = loadJson(ORDERS_FILE, []);
-            order = orders.find(o => o.id?.toString() === cleanId || o.order_number === cleanId);
+            order = diskOrder;
+        } else if (diskOrder) {
+            // Merge in-memory/disk fields if database fields are missing or more recent
+            if (!order.partner_id && diskOrder.partner_id) order.partner_id = diskOrder.partner_id;
+            if (diskOrder.order_status && diskOrder.order_status !== "processing" && diskOrder.order_status !== "pending") {
+                order.order_status = diskOrder.order_status;
+            }
+            if (!order.latitude && diskOrder.latitude) order.latitude = diskOrder.latitude;
+            if (!order.longitude && diskOrder.longitude) order.longitude = diskOrder.longitude;
         }
         if (!order) return null;
 
