@@ -188,16 +188,36 @@ function broadcastStatusChange({ orderId, status, partnerId, userId, additionalD
     emitToAdmin("delivery:status:update", payload);
     emitToAdmin(`order:${norm}`, payload);
 
+    // Explicit delivery lifecycle events specified in master tracking protocol
+    if (norm === "assigned") emitToAdmin("delivery:assigned", payload);
+    if (norm === "accepted") emitToAdmin("delivery:accepted", payload);
+    if (norm === "arrived") emitToAdmin("delivery:arrived", payload);
+    if (norm === "picked_up") emitToAdmin("delivery:picked_up", payload);
+    if (norm === "out_for_delivery" || norm === "in_transit") emitToAdmin("delivery:in_transit", payload);
+    if (norm === "delivered") emitToAdmin("delivery:delivered", payload);
+
     // 2. Broadcast to Order-specific room (Customer App & Live Tracking)
     emitToOrder(orderId, "order:status_updated", payload);
     emitToOrder(orderId, "order:status", payload);
     emitToOrder(orderId, "order:updated", payload);
     emitToOrder(orderId, `order:${norm}`, payload);
+    if (norm === "assigned") emitToOrder(orderId, "delivery:assigned", payload);
+    if (norm === "accepted") emitToOrder(orderId, "delivery:accepted", payload);
+    if (norm === "arrived") emitToOrder(orderId, "delivery:arrived", payload);
+    if (norm === "picked_up") emitToOrder(orderId, "delivery:picked_up", payload);
+    if (norm === "out_for_delivery" || norm === "in_transit") emitToOrder(orderId, "delivery:in_transit", payload);
+    if (norm === "delivered") emitToOrder(orderId, "delivery:delivered", payload);
 
     // 3. Broadcast to Delivery Partner
     if (partnerId) {
         emitToPartner(partnerId, "order:status_updated", payload);
         emitToPartner(partnerId, `order:${norm}`, payload);
+        if (norm === "assigned") emitToPartner(partnerId, "delivery:assigned", payload);
+        if (norm === "accepted") emitToPartner(partnerId, "delivery:accepted", payload);
+        if (norm === "arrived") emitToPartner(partnerId, "delivery:arrived", payload);
+        if (norm === "picked_up") emitToPartner(partnerId, "delivery:picked_up", payload);
+        if (norm === "out_for_delivery" || norm === "in_transit") emitToPartner(partnerId, "delivery:in_transit", payload);
+        if (norm === "delivered") emitToPartner(partnerId, "delivery:delivered", payload);
     }
 
     // 4. Broadcast to Customer
@@ -205,6 +225,8 @@ function broadcastStatusChange({ orderId, status, partnerId, userId, additionalD
         emitToCustomer(userId, "order:status_updated", payload);
         emitToCustomer(userId, "customer:delivery:updated", payload);
         emitToCustomer(userId, `order:${norm}`, payload);
+        if (norm === "out_for_delivery" || norm === "in_transit") emitToCustomer(userId, "delivery:in_transit", payload);
+        if (norm === "delivered") emitToCustomer(userId, "delivery:delivered", payload);
     }
 
     // 5. Global broadcast across all sockets for active views
@@ -214,12 +236,18 @@ function broadcastStatusChange({ orderId, status, partnerId, userId, additionalD
             io.emit("order:status_updated", payload);
             io.emit("delivery:status:update", payload);
             io.emit(`order:${norm}`, payload);
-            if (norm === "out_for_delivery") {
-                io.emit("order:in_transit", payload);
-            }
+            if (norm === "assigned") io.emit("delivery:assigned", payload);
+            if (norm === "accepted") io.emit("delivery:accepted", payload);
+            if (norm === "arrived") io.emit("delivery:arrived", payload);
             if (norm === "picked_up") {
+                io.emit("delivery:picked_up", payload);
                 io.emit("order:pickup_confirmed", payload);
             }
+            if (norm === "out_for_delivery" || norm === "in_transit") {
+                io.emit("delivery:in_transit", payload);
+                io.emit("order:in_transit", payload);
+            }
+            if (norm === "delivered") io.emit("delivery:delivered", payload);
         }
     } catch (_) {}
 }

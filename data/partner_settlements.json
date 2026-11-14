@@ -1,5 +1,26 @@
 [
   {
+    "id": "SETTLE-1794667161814-915",
+    "settlement_id": "SETTLE-1794667161814-915",
+    "partner_id": "THU-DP-0006",
+    "period_start": "2026-11-07",
+    "period_end": "2026-11-13",
+    "total_orders_count": 1,
+    "total_subs_count": 1,
+    "gross_amount_paise": 7500,
+    "gross_amount_rupees": 75,
+    "deductions_paise": 5000,
+    "deductions_rupees": 50,
+    "net_amount_paise": 2500,
+    "net_amount_rupees": 25,
+    "payment_mode": "NEFT",
+    "utr_number": "UTR-WEEKLY-20261113-771122",
+    "status": "completed",
+    "settled_by": "Thulirva Operations Admin",
+    "settled_at": "2026-11-14T14:39:21.814Z",
+    "notes": "End-of-week remaining balance settlement"
+  },
+  {
     "id": "SETTLE-1794661541813-584",
     "settlement_id": "SETTLE-1794661541813-584",
     "partner_id": "THU-DP-0005",

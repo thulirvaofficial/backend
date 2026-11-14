@@ -1230,51 +1230,156 @@ router.patch("/availability", authenticatePartner, updatePartnerStatusHandler);
  * POST /api/delivery/location
  * GPS tracking updates from mobile app foreground/background service
  */
-router.post("/location", authenticatePartner, async (req, res) => {
-    const partnerId = req.partner.partner_id;
-    const { latitude, longitude, speed = 0, heading = 0, accuracy = 0 } = req.body;
+/**
+ * Shared Partner Location Ingestion Handler
+ * POST /api/delivery/location
+ * POST /api/delivery/location/update
+ */
+const handlePartnerLocationUpdate = async (req, res) => {
+    let partnerId = req.partner?.partner_id || req.body?.partner_id || req.body?.partnerId || req.query?.partnerId;
+    const { latitude, longitude, speed = 0, heading = 0, accuracy = 0, active_delivery_id, orderId } = req.body || {};
 
-    if (!latitude || !longitude) {
+    if (!partnerId) {
+        return res.status(401).json({ success: false, message: "Authentication required or partnerId missing" });
+    }
+
+    if (latitude === undefined || longitude === undefined) {
         return res.status(400).json({ success: false, message: "Latitude and longitude required" });
     }
 
     const lat = parseFloat(latitude);
     const lng = parseFloat(longitude);
-
-    try {
-        await pool.query(`
-            UPDATE delivery_partners 
-            SET current_latitude = $1, current_longitude = $2, location_updated_at = NOW(), updated_at = NOW()
-            WHERE partner_id = $3
-        `, [lat, lng, partnerId]);
-
-        await pool.query(`
-            INSERT INTO partner_location_history (partner_id, latitude, longitude, speed, heading, accuracy)
-            VALUES ($1, $2, $3, $4, $5, $6)
-        `, [partnerId, lat, lng, speed, heading, accuracy]);
-    } catch {}
-
-    let partner = await getPartnerById(partnerId);
-    if (partner) {
-        partner.current_latitude = lat;
-        partner.current_longitude = lng;
-        partner.speed = speed;
-        partner.heading = heading;
-        partner.last_active_at = new Date().toISOString();
-        await savePartner(partner);
+    if (isNaN(lat) || isNaN(lng)) {
+        return res.status(400).json({ success: false, message: "Invalid numeric coordinates" });
     }
 
-    emitToAdmin("delivery:location:update", {
-        partnerId,
-        latitude: lat,
-        longitude: lng,
-        speed,
-        heading,
-        accuracy,
-        timestamp: new Date().toISOString()
-    });
+    const activeDeliveryId = active_delivery_id || orderId || null;
 
-    return res.json({ success: true, message: "Location updated" });
+    let update = null;
+    try {
+        const { recordLocationUpdate } = require("../services/gpsService");
+        update = await recordLocationUpdate({
+            partner_id: partnerId,
+            latitude: lat,
+            longitude: lng,
+            speed: parseFloat(speed) || 0,
+            heading: parseFloat(heading) || 0,
+            accuracy: parseFloat(accuracy) || 0,
+            active_delivery_id: activeDeliveryId
+        });
+    } catch (gpsErr) {
+        // Fallback to direct DB/file update
+        try {
+            await pool.query(`
+                UPDATE delivery_partners 
+                SET current_latitude = $1, current_longitude = $2, location_updated_at = NOW(), updated_at = NOW(), is_online = true
+                WHERE partner_id = $3
+            `, [lat, lng, partnerId]);
+        } catch {}
+
+        const partner = await getPartnerById(partnerId);
+        if (partner) {
+            partner.current_latitude = lat;
+            partner.current_longitude = lng;
+            partner.speed = parseFloat(speed) || 0;
+            partner.heading = parseFloat(heading) || 0;
+            partner.accuracy = parseFloat(accuracy) || 0;
+            partner.last_active_at = new Date().toISOString();
+            await savePartner(partner);
+        }
+    }
+
+    // Broadcast Socket.IO events to all relevant channels
+    try {
+        const { emitToAdmin, emitToOrder, emitToPartner } = require("../services/socketService");
+        const payload = {
+            partnerId,
+            partner_id: partnerId,
+            latitude: lat,
+            longitude: lng,
+            speed: parseFloat(speed) || 0,
+            heading: parseFloat(heading) || 0,
+            accuracy: parseFloat(accuracy) || 0,
+            orderId: activeDeliveryId,
+            active_delivery_id: activeDeliveryId,
+            timestamp: new Date().toISOString()
+        };
+
+        emitToAdmin("delivery:location_updated", payload);
+        emitToAdmin("delivery:location:update", payload);
+        emitToAdmin("partner:location:updated", payload);
+        emitToAdmin("fleet:location:updated", payload);
+
+        if (activeDeliveryId) {
+            emitToOrder(activeDeliveryId, "delivery:location_updated", payload);
+            emitToOrder(activeDeliveryId, "delivery:location:update", payload);
+            emitToOrder(activeDeliveryId, "partner:location:updated", payload);
+        }
+
+        emitToPartner(partnerId, "delivery:location_updated", payload);
+    } catch (_) {}
+
+    return res.json({
+        success: true,
+        message: "Location updated successfully",
+        location: update || {
+            partner_id: partnerId,
+            latitude: lat,
+            longitude: lng,
+            speed: parseFloat(speed) || 0,
+            heading: parseFloat(heading) || 0,
+            accuracy: parseFloat(accuracy) || 0,
+            updated_at: new Date().toISOString()
+        }
+    });
+};
+
+router.post("/location", authenticatePartner, handlePartnerLocationUpdate);
+router.post("/location/update", (req, res, next) => {
+    if (req.headers["authorization"]) {
+        return authenticatePartner(req, res, () => handlePartnerLocationUpdate(req, res));
+    }
+    return handlePartnerLocationUpdate(req, res);
+});
+
+/**
+ * GET /api/delivery/location/:partnerId
+ * Retrieve real-time or last known location for a specific partner
+ */
+router.get("/location/:partnerId", async (req, res) => {
+    try {
+        const partnerId = req.params.partnerId;
+        const { getPartnerLiveLocation } = require("../services/gpsService");
+        let location = await getPartnerLiveLocation(partnerId);
+
+        let partner = await getPartnerById(partnerId);
+        if (!location && partner) {
+            location = {
+                partner_id: partner.partner_id,
+                latitude: partner.current_latitude || 12.8025,
+                longitude: partner.current_longitude || 80.2233,
+                speed: partner.speed || 0,
+                heading: partner.heading || 0,
+                accuracy: partner.accuracy || 0,
+                is_fresh: false,
+                last_seen_seconds_ago: 9999
+            };
+        }
+
+        if (!location && !partner) {
+            return res.status(404).json({ success: false, message: `Partner ${partnerId} not found` });
+        }
+
+        return res.json({
+            success: true,
+            partner_id: partnerId,
+            name: partner?.name || "Partner",
+            is_online: Boolean(partner?.is_online),
+            location
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
 });
 
 /* ============================================================

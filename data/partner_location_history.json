@@ -28,5 +28,65 @@
     "accuracy": 4.2,
     "active_delivery_id": null,
     "recorded_at": "2026-11-14T13:05:41.361Z"
+  },
+  {
+    "partner_id": "THU-DP-0006",
+    "latitude": 12.8025,
+    "longitude": 80.2233,
+    "speed": 16.5,
+    "heading": 45,
+    "accuracy": 4.2,
+    "active_delivery_id": null,
+    "recorded_at": "2026-11-14T14:39:21.342Z"
+  },
+  {
+    "partner_id": "DP-001",
+    "latitude": 12.8055,
+    "longitude": 80.2245,
+    "speed": 28.5,
+    "heading": 42,
+    "accuracy": 3.5,
+    "active_delivery_id": "ORD-001",
+    "recorded_at": "2026-11-14T16:12:59.134Z"
+  },
+  {
+    "partner_id": "THU-DP-0004",
+    "latitude": 12.806,
+    "longitude": 80.225,
+    "speed": 25,
+    "heading": 60,
+    "accuracy": 2,
+    "active_delivery_id": "1794661515994",
+    "recorded_at": "2026-11-14T16:14:16.329Z"
+  },
+  {
+    "partner_id": "THU-DP-0004",
+    "latitude": 12.8088,
+    "longitude": 80.2265,
+    "speed": 32.4,
+    "heading": 72,
+    "accuracy": 3,
+    "active_delivery_id": "1794661515994",
+    "recorded_at": "2026-11-14T16:20:47.765Z"
+  },
+  {
+    "partner_id": "THU-DP-0004",
+    "latitude": 12.8088,
+    "longitude": 80.2265,
+    "speed": 32.4,
+    "heading": 72,
+    "accuracy": 3,
+    "active_delivery_id": "1794661515994",
+    "recorded_at": "2026-11-14T16:21:43.188Z"
+  },
+  {
+    "partner_id": "THU-DP-0004",
+    "latitude": 12.8075,
+    "longitude": 80.226,
+    "speed": 29.5,
+    "heading": 55,
+    "accuracy": 2.5,
+    "active_delivery_id": "1794661515994",
+    "recorded_at": "2026-11-14T16:25:31.831Z"
   }
 ]

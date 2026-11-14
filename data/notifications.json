@@ -1,5 +1,62 @@
 [
   {
+    "id": "NOTIF-1794673303891-636",
+    "user_id": 1794661515975,
+    "title": "Order Delivered ✨",
+    "message": "Your order has been successfully delivered. Thank you for choosing Thulirva!",
+    "type": "order_status",
+    "target_id": "1794661515994",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T16:21:43.891Z"
+  },
+  {
+    "id": "NOTIF-1794667161844-88",
+    "user_id": "THU-DP-0006",
+    "title": "Performance Bonus!",
+    "message": "You have completed 100% of deliveries in Padur on time today.",
+    "type": "bonus",
+    "target_id": null,
+    "is_read": true,
+    "for_admin": false,
+    "created_at": "2026-11-14T14:39:21.844Z",
+    "isRead": true,
+    "read_at": "2026-11-14T14:39:21.863Z"
+  },
+  {
+    "id": "NOTIF-1794667161566-402",
+    "user_id": "THU-DP-0006",
+    "title": "THULIRVA – NEW DELIVERY! 🌾",
+    "message": "New order assigned to you.\nCustomer: Anand Sundaram\nAddress: Flat 302, Urban Tree Oxygen, Padur, Rajiv Gandhi Salai, Chennai\nOrder: #THU-20261114-8984",
+    "type": "delivery_assignment",
+    "target_id": "1794661515996",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T14:39:21.566Z"
+  },
+  {
+    "id": "NOTIF-1794667161556-10",
+    "user_id": 1794667161518,
+    "title": "Order Placed! 🌾",
+    "message": "Your Thulirva order #THU-20261114-8984 worth ₹180 has been placed successfully.",
+    "type": "order_status",
+    "target_id": "1794661515996",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T14:39:21.556Z"
+  },
+  {
+    "id": "NOTIF-1794667161552-123",
+    "user_id": null,
+    "title": "New Order Received! 🔔",
+    "message": "New Home Delivery Order #1794661515996 received from Anand Sundaram worth ₹180.",
+    "type": "new_order",
+    "target_id": "1794661515996",
+    "is_read": false,
+    "for_admin": true,
+    "created_at": "2026-11-14T14:39:21.553Z"
+  },
+  {
     "id": "NOTIF-1794661547887-247",
     "user_id": null,
     "title": "Out for Delivery 🚚",

@@ -25,5 +25,14 @@
     "reserved_withdrawal_paise": 0,
     "pending_settlement_paise": 0,
     "updated_at": "2026-11-14T13:05:47.916Z"
+  },
+  {
+    "partner_id": "THU-DP-0006",
+    "lifetime_earned_paise": 7500,
+    "total_settled_paise": 7500,
+    "available_payable_paise": 0,
+    "reserved_withdrawal_paise": 0,
+    "pending_settlement_paise": 0,
+    "updated_at": "2026-11-14T14:39:21.816Z"
   }
 ]

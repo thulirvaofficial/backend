@@ -92,51 +92,77 @@ function initSocketServer(httpServer) {
                     // Ignore DB errors
                 }
 
-                // 2. Update persistent JSON store (Single Source of Truth)
+                // 2. Update persistent JSON store (Single Source of Truth) via gpsService
                 try {
-                    const { getPartnerById, savePartner } = require("./deliveryPartnerService");
-                    const partner = await getPartnerById(partnerId);
-                    if (partner) {
-                        partner.current_latitude = latitude;
-                        partner.current_longitude = longitude;
-                        partner.speed = speed;
-                        partner.heading = heading;
-                        partner.accuracy = accuracy;
-                        partner.location_updated_at = new Date().toISOString();
-                        partner.last_active_at = new Date().toISOString();
-                        await savePartner(partner);
+                    const { recordLocationUpdate } = require("./gpsService");
+                    await recordLocationUpdate({
+                        partner_id: partnerId,
+                        latitude,
+                        longitude,
+                        speed,
+                        heading,
+                        accuracy,
+                        active_delivery_id: data.orderId || data.active_delivery_id || null
+                    });
+                } catch (gpsErr) {
+                    try {
+                        const { getPartnerById, savePartner } = require("./deliveryPartnerService");
+                        const partner = await getPartnerById(partnerId);
+                        if (partner) {
+                            partner.current_latitude = latitude;
+                            partner.current_longitude = longitude;
+                            partner.speed = speed;
+                            partner.heading = heading;
+                            partner.accuracy = accuracy;
+                            partner.location_updated_at = new Date().toISOString();
+                            partner.last_active_at = new Date().toISOString();
+                            await savePartner(partner);
+                        }
+                    } catch (diskErr) {
+                        console.warn("[SOCKET LOCATION DISK SAVE WARN]:", diskErr.message);
                     }
-                } catch (diskErr) {
-                    console.warn("[SOCKET LOCATION DISK SAVE WARN]:", diskErr.message);
                 }
 
                 const updatePayload = {
                     partnerId,
+                    partner_id: partnerId,
                     latitude,
                     longitude,
                     speed,
                     heading,
                     accuracy,
+                    orderId: data.orderId || data.active_delivery_id || null,
+                    active_delivery_id: data.orderId || data.active_delivery_id || null,
                     timestamp: new Date().toISOString()
                 };
 
                 // Broadcast live location to Admin channel
+                io.to("admin_channel").emit("delivery:location_updated", updatePayload);
                 io.to("admin_channel").emit("delivery:location:update", updatePayload);
                 io.to("admin_channel").emit("fleet:location:updated", updatePayload);
                 io.to("admin_channel").emit("partner:location:updated", updatePayload);
+                io.to("admin_channel").emit("partner:location_updated", updatePayload);
 
                 // Broadcast to active order room if specified
-                if (data.orderId) {
-                    io.to(`order_${data.orderId}`).emit("delivery:location:update", updatePayload);
-                    io.to(`order_${data.orderId}`).emit("partner:location:updated", updatePayload);
+                const targetOrderId = data.orderId || data.active_delivery_id;
+                if (targetOrderId) {
+                    io.to(`order_${targetOrderId}`).emit("delivery:location_updated", updatePayload);
+                    io.to(`order_${targetOrderId}`).emit("delivery:location:update", updatePayload);
+                    io.to(`order_${targetOrderId}`).emit("partner:location:updated", updatePayload);
+                    io.to(`order_${targetOrderId}`).emit("partner:location_updated", updatePayload);
                 }
+
+                // Broadcast to partner's own room
+                io.to(`partner_${partnerId}`).emit("delivery:location_updated", updatePayload);
             } catch (err) {
                 console.error("[SOCKET LOCATION ERROR]", err.message);
             }
         };
 
         socket.on("delivery:location:update", handleLocationUpdate);
+        socket.on("delivery:location_updated", handleLocationUpdate);
         socket.on("partner:location:update", handleLocationUpdate);
+        socket.on("partner:location_updated", handleLocationUpdate);
 
         // Partner availability / status toggle
         const handleStatusUpdate = async (data) => {
