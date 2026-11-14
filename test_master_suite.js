@@ -199,7 +199,8 @@ async function runMasterSuite() {
         const deliveredRes = await request("PUT", `/api/v1/orders/${testOrderId}/status`, {
             status: "delivered",
             partner_id: partnerId,
-            notes: "Delivered to customer with OTP confirmation"
+            notes: "Delivered to customer with OTP confirmation",
+            image: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
         }, partnerToken);
         assert(deliveredRes.status === 200, `Delivered status update failed: ${JSON.stringify(deliveredRes.body)}`);
 

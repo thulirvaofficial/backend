@@ -406,7 +406,12 @@ router.post("/", async (req, res) => {
             // Only fall back if database is completely offline/unreachable
         }
 
-        const finalId = createdOrderId || (getMockOrders().length ? Math.max(...getMockOrders().map(o => o.id)) + 1 : 1001);
+        let fallbackId = Date.now();
+        const numericIds = (getMockOrders() || []).map(o => Number(o.id)).filter(n => !isNaN(n) && n > 0);
+        if (numericIds.length > 0) {
+            fallbackId = Math.max(...numericIds) + 1;
+        }
+        const finalId = createdOrderId || fallbackId;
 
         const orderData = {
             id: finalId,
