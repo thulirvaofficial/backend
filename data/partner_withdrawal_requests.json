@@ -1,1 +1,17 @@
-[]
+[
+  {
+    "id": "WDR-1794661541756-167",
+    "request_id": "WDR-1794661541756-167",
+    "partner_id": "THU-DP-0005",
+    "amount_paise": 5000,
+    "amount_rupees": 50,
+    "status": "settled",
+    "bank_account_id": "BANK-1794661541738-993",
+    "notes": "Mid-week fuel expense withdrawal",
+    "reviewer_notes": "Disbursed via IMPS banking gateway",
+    "utr_number": "UTR-IMPS-20261113-559988",
+    "requested_at": "2026-11-14T13:05:41.756Z",
+    "reviewed_at": "2026-11-14T13:05:41.785Z",
+    "settled_at": "2026-11-14T13:05:41.785Z"
+  }
+]

@@ -1,1 +1,41 @@
-[]
+[
+  {
+    "partner_id": "THU-DP-0003",
+    "latitude": 12.8025,
+    "longitude": 80.2233,
+    "accuracy": 4.2,
+    "speed": 16.5,
+    "heading": 45,
+    "active_delivery_id": null,
+    "device_timestamp": "2026-11-14T13:04:01.961Z",
+    "server_timestamp": "2026-11-14T13:04:02.123Z",
+    "is_fresh": true,
+    "last_seen_seconds_ago": 0
+  },
+  {
+    "partner_id": "THU-DP-0004",
+    "latitude": 12.8025,
+    "longitude": 80.2233,
+    "accuracy": 4.2,
+    "speed": 16.5,
+    "heading": 45,
+    "active_delivery_id": null,
+    "device_timestamp": "2026-11-14T13:05:15.819Z",
+    "server_timestamp": "2026-11-14T13:05:15.823Z",
+    "is_fresh": true,
+    "last_seen_seconds_ago": 0
+  },
+  {
+    "partner_id": "THU-DP-0005",
+    "latitude": 12.8025,
+    "longitude": 80.2233,
+    "accuracy": 4.2,
+    "speed": 16.5,
+    "heading": 45,
+    "active_delivery_id": null,
+    "device_timestamp": "2026-11-14T13:05:41.358Z",
+    "server_timestamp": "2026-11-14T13:05:41.361Z",
+    "is_fresh": true,
+    "last_seen_seconds_ago": 0
+  }
+]

@@ -1,1 +1,32 @@
-[]
+[
+  {
+    "partner_id": "THU-DP-0003",
+    "latitude": 12.8025,
+    "longitude": 80.2233,
+    "speed": 16.5,
+    "heading": 45,
+    "accuracy": 4.2,
+    "active_delivery_id": null,
+    "recorded_at": "2026-11-14T13:04:02.123Z"
+  },
+  {
+    "partner_id": "THU-DP-0004",
+    "latitude": 12.8025,
+    "longitude": 80.2233,
+    "speed": 16.5,
+    "heading": 45,
+    "accuracy": 4.2,
+    "active_delivery_id": null,
+    "recorded_at": "2026-11-14T13:05:15.823Z"
+  },
+  {
+    "partner_id": "THU-DP-0005",
+    "latitude": 12.8025,
+    "longitude": 80.2233,
+    "speed": 16.5,
+    "heading": 45,
+    "accuracy": 4.2,
+    "active_delivery_id": null,
+    "recorded_at": "2026-11-14T13:05:41.361Z"
+  }
+]

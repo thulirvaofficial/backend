@@ -1,1 +1,19 @@
-[]
+[
+  {
+    "id": 1794661541599,
+    "daily_id": "DLY-SUB-TEST-1794661541599",
+    "subscription_id": "SUB-1794661541599",
+    "delivery_date": "2026-11-14",
+    "customer_name": "Meenakshi Sundaram",
+    "customer_phone": "9840112233",
+    "address": "House 8, Lotus Gardens, Padur, Chennai",
+    "product_name": "Daily Farm Fresh Milk (1 Litre)",
+    "quantity": 1,
+    "delivery_slot": "06:00 AM - 07:30 AM",
+    "status": "delivered",
+    "created_at": "2026-11-14T13:05:41.599Z",
+    "delivered_at": "2026-11-14T13:05:41.602Z",
+    "notes": "Delivered milk bottle to doorstep milk box in Padur",
+    "partner_id": "THU-DP-0005"
+  }
+]

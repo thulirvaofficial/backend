@@ -1,5 +1,126 @@
 [
   {
+    "id": "NOTIF-1794661547887-247",
+    "user_id": null,
+    "title": "Out for Delivery 🚚",
+    "message": "Your early morning farm delivery is on the way! Freshness arriving shortly.",
+    "type": "order_status",
+    "target_id": "TEST-ORD-999",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T13:05:47.887Z"
+  },
+  {
+    "id": "NOTIF-1794661547603-830",
+    "user_id": null,
+    "title": "Out for Delivery 🚚",
+    "message": "Your early morning farm delivery is on the way! Freshness arriving shortly.",
+    "type": "order_status",
+    "target_id": "TEST-ORD-999",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T13:05:47.603Z"
+  },
+  {
+    "id": "NOTIF-1794661541842-245",
+    "user_id": "THU-DP-0005",
+    "title": "Performance Bonus!",
+    "message": "You have completed 100% of deliveries in Padur on time today.",
+    "type": "bonus",
+    "target_id": null,
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T13:05:41.842Z"
+  },
+  {
+    "id": "NOTIF-1794661541540-335",
+    "user_id": "THU-DP-0005",
+    "title": "THULIRVA – NEW DELIVERY! 🌾",
+    "message": "New order assigned to you.\nCustomer: Anand Sundaram\nAddress: Flat 302, Urban Tree Oxygen, Padur, Rajiv Gandhi Salai, Chennai\nOrder: #THU-20261114-9821",
+    "type": "delivery_assignment",
+    "target_id": "1794661515995",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T13:05:41.540Z"
+  },
+  {
+    "id": "NOTIF-1794661541533-636",
+    "user_id": 1794661541511,
+    "title": "Order Placed! 🌾",
+    "message": "Your Thulirva order #THU-20261114-9821 worth ₹180 has been placed successfully.",
+    "type": "order_status",
+    "target_id": "1794661515995",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T13:05:41.533Z"
+  },
+  {
+    "id": "NOTIF-1794661541531-41",
+    "user_id": null,
+    "title": "New Order Received! 🔔",
+    "message": "New Home Delivery Order #1794661515995 received from Anand Sundaram worth ₹180.",
+    "type": "new_order",
+    "target_id": "1794661515995",
+    "is_read": false,
+    "for_admin": true,
+    "created_at": "2026-11-14T13:05:41.531Z"
+  },
+  {
+    "id": "NOTIF-1794661516008-275",
+    "user_id": "THU-DP-0004",
+    "title": "THULIRVA – NEW DELIVERY! 🌾",
+    "message": "New order assigned to you.\nCustomer: Anand Sundaram\nAddress: Flat 302, Urban Tree Oxygen, Padur, Rajiv Gandhi Salai, Chennai\nOrder: #THU-20261114-2155",
+    "type": "delivery_assignment",
+    "target_id": "1794661515994",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T13:05:16.008Z"
+  },
+  {
+    "id": "NOTIF-1794661515999-98",
+    "user_id": 1794661515975,
+    "title": "Order Placed! 🌾",
+    "message": "Your Thulirva order #THU-20261114-2155 worth ₹180 has been placed successfully.",
+    "type": "order_status",
+    "target_id": "1794661515994",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T13:05:15.999Z"
+  },
+  {
+    "id": "NOTIF-1794661515998-751",
+    "user_id": null,
+    "title": "New Order Received! 🔔",
+    "message": "New Home Delivery Order #1794661515994 received from Anand Sundaram worth ₹180.",
+    "type": "new_order",
+    "target_id": "1794661515994",
+    "is_read": false,
+    "for_admin": true,
+    "created_at": "2026-11-14T13:05:15.998Z"
+  },
+  {
+    "id": "NOTIF-1794661442322-736",
+    "user_id": 1794661442288,
+    "title": "Order Placed! 🌾",
+    "message": "Your Thulirva order #THU-20261114-6455 worth ₹180 has been placed successfully.",
+    "type": "order_status",
+    "target_id": null,
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-14T13:04:02.322Z"
+  },
+  {
+    "id": "NOTIF-1794661442320-208",
+    "user_id": null,
+    "title": "New Order Received! 🔔",
+    "message": "New Home Delivery Order #NaN received from Anand Sundaram worth ₹180.",
+    "type": "new_order",
+    "target_id": null,
+    "is_read": false,
+    "for_admin": true,
+    "created_at": "2026-11-14T13:04:02.320Z"
+  },
+  {
     "id": "NOTIF-1794648720610-897",
     "user_id": "THU-DP-001",
     "title": "🚨 NEW DELIVERY ASSIGNMENT",

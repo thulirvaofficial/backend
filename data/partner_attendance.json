@@ -1,1 +1,19 @@
-[]
+[
+  {
+    "id": "ATT-1794661541713-THU-DP-0005",
+    "date": "2026-11-14",
+    "partner_id": "THU-DP-0005",
+    "partner_name": "Vigneshwaran M",
+    "check_in_time": "2026-11-14T13:05:41.713Z",
+    "check_in_photo": "/uploads/attendance/checkin_THU-DP-0005_1794661541712.jpg",
+    "check_in_location": {
+      "latitude": 12.8025,
+      "longitude": 80.2233
+    },
+    "check_out_time": null,
+    "check_out_photo": null,
+    "check_out_location": null,
+    "working_hours": null,
+    "status": "checked_in"
+  }
+]

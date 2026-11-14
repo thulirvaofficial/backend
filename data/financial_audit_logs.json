@@ -1,5 +1,77 @@
 [
   {
+    "id": 1794661547961,
+    "action": "EARNING_CREDITED",
+    "partner_id": "THU-DP-0005",
+    "admin_name": "System Automated",
+    "amount_paise": 4000,
+    "amount_rupees": 40,
+    "before_balance_paise": 0,
+    "after_balance_paise": 4000,
+    "notes": "Credited ₹40 for delivery_order #TEST-ORD-999",
+    "created_at": "2026-11-14T13:05:47.919Z"
+  },
+  {
+    "id": 1794661541911,
+    "action": "WEEKLY_SALARY_SETTLED",
+    "partner_id": "THU-DP-0005",
+    "admin_name": "Thulirva Operations Admin",
+    "amount_paise": 2500,
+    "amount_rupees": 25,
+    "before_balance_paise": 2500,
+    "after_balance_paise": 0,
+    "notes": "Settled ₹75 for 1 orders and 1 subscriptions. UTR: UTR-WEEKLY-20261113-771122. History preserved.",
+    "created_at": "2026-11-14T13:05:41.820Z"
+  },
+  {
+    "id": 1794661542254,
+    "action": "WITHDRAWAL_SETTLED",
+    "partner_id": "THU-DP-0005",
+    "admin_name": "Thulirva Operations Admin",
+    "amount_paise": 5000,
+    "amount_rupees": 50,
+    "before_balance_paise": 2500,
+    "after_balance_paise": 2500,
+    "notes": "Withdrawal #WDR-1794661541756-167 settled via Bank Transfer. UTR: UTR-IMPS-20261113-559988.",
+    "created_at": "2026-11-14T13:05:41.789Z"
+  },
+  {
+    "id": 1794661542417,
+    "action": "WITHDRAWAL_REQUESTED",
+    "partner_id": "THU-DP-0005",
+    "admin_name": "Partner Self",
+    "amount_paise": 5000,
+    "amount_rupees": 50,
+    "before_balance_paise": 7500,
+    "after_balance_paise": 2500,
+    "notes": "Withdrawal request #WDR-1794661541756-167 of ₹50 placed. Amount reserved.",
+    "created_at": "2026-11-14T13:05:41.762Z"
+  },
+  {
+    "id": 1794661541693,
+    "action": "EARNING_CREDITED",
+    "partner_id": "THU-DP-0005",
+    "admin_name": "System Automated",
+    "amount_paise": 3500,
+    "amount_rupees": 35,
+    "before_balance_paise": 4000,
+    "after_balance_paise": 7500,
+    "notes": "Credited ₹35 for delivery_subscription #DLY-SUB-TEST-1794661541599",
+    "created_at": "2026-11-14T13:05:41.616Z"
+  },
+  {
+    "id": 1794661541694,
+    "action": "EARNING_CREDITED",
+    "partner_id": "THU-DP-0005",
+    "admin_name": "System Automated",
+    "amount_paise": 4000,
+    "amount_rupees": 40,
+    "before_balance_paise": 0,
+    "after_balance_paise": 4000,
+    "notes": "Credited ₹40 for delivery_order #1794661515995",
+    "created_at": "2026-11-14T13:05:41.570Z"
+  },
+  {
     "id": 1794648720609,
     "action": "EARNING_CREDITED",
     "partner_id": "DP-TEST-9999",
