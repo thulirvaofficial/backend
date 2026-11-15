@@ -88,5 +88,25 @@
     "accuracy": 2.5,
     "active_delivery_id": "1794661515994",
     "recorded_at": "2026-11-14T16:25:31.831Z"
+  },
+  {
+    "partner_id": "THU-DP-0001",
+    "latitude": 12.802145,
+    "longitude": 80.222912,
+    "speed": 24.5,
+    "heading": 65,
+    "accuracy": 3.2,
+    "active_delivery_id": null,
+    "recorded_at": "2026-11-14T23:58:43.047Z"
+  },
+  {
+    "partner_id": "THU-DP-0001",
+    "latitude": 12.802145,
+    "longitude": 80.222912,
+    "speed": 24.5,
+    "heading": 65,
+    "accuracy": 3.2,
+    "active_delivery_id": null,
+    "recorded_at": "2026-11-14T23:59:59.343Z"
   }
 ]

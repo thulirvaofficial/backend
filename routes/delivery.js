@@ -506,15 +506,14 @@ const loginPartnerHandler = async (req, res) => {
             { expiresIn: "30d" }
         );
 
-        // Update partner online status and last_active_at
+        // Update partner last_active_at
         try {
             await pool.query(
-                "UPDATE delivery_partners SET is_online = true, last_active_at = NOW(), updated_at = NOW() WHERE partner_id = $1",
+                "UPDATE delivery_partners SET last_active_at = NOW(), updated_at = NOW() WHERE partner_id = $1",
                 [partner.partner_id]
             );
         } catch {}
 
-        partner.is_online = true;
         partner.last_active_at = new Date().toISOString();
         await savePartner(partner);
 
@@ -532,7 +531,7 @@ const loginPartnerHandler = async (req, res) => {
                 vehicle_number: partner.vehicle_number,
                 current_latitude: partner.current_latitude,
                 current_longitude: partner.current_longitude,
-                is_online: true,
+                is_online: Boolean(partner.is_online),
                 rating: partner.rating || 5.0,
                 total_deliveries_count: partner.total_deliveries_count || 0,
                 registration_status: regStatus,
@@ -1180,20 +1179,52 @@ const updatePartnerStatusHandler = async (req, res) => {
 
     // Issue 6: Block going offline if active deliveries exist
     if (!Boolean(is_online) && !req.body.force) {
+        let activeCount = 0;
         try {
             const activeRes = await pool.query(
-                "SELECT id, order_status FROM orders WHERE partner_id = $1 AND LOWER(COALESCE(order_status, '')) IN ('assigned', 'accepted', 'in_transit', 'out_for_delivery')",
+                "SELECT id, order_status FROM orders WHERE partner_id = $1 AND LOWER(COALESCE(order_status, '')) IN ('assigned', 'accepted', 'in_transit', 'out_for_delivery', 'picked_up')",
                 [partnerId]
             );
             if (activeRes.rows && activeRes.rows.length > 0) {
-                return res.status(400).json({
-                    success: false,
-                    has_active_deliveries: true,
-                    active_count: activeRes.rows.length,
-                    message: `Cannot go offline while you have ${activeRes.rows.length} active delivery in progress. Complete all assigned orders before ending your shift.`
-                });
+                activeCount = activeRes.rows.length;
             }
         } catch (_) {}
+
+        // Disk fallback for orders
+        if (activeCount === 0 && fs.existsSync(ORDERS_FILE)) {
+            try {
+                const orders = JSON.parse(fs.readFileSync(ORDERS_FILE, "utf-8"));
+                const active = orders.filter(o => {
+                    const pId = o.partner_id || o.delivery_partner_id;
+                    const status = (o.order_status || o.status || '').toLowerCase();
+                    return pId === partnerId && ['assigned', 'accepted', 'in_transit', 'out_for_delivery', 'picked_up'].includes(status);
+                });
+                activeCount += active.length;
+            } catch (_) {}
+        }
+
+        // Check active subscriptions
+        try {
+            const subsFile = path.join(DATA_DIR, "subscription_deliveries.json");
+            if (fs.existsSync(subsFile)) {
+                const subsData = JSON.parse(fs.readFileSync(subsFile, "utf-8"));
+                const activeSubs = (subsData.deliveries || []).filter(d => {
+                    const pId = d.partner_id || d.assigned_partner_id;
+                    const status = (d.status || '').toLowerCase();
+                    return pId === partnerId && ['assigned', 'out_for_delivery', 'in_transit'].includes(status);
+                });
+                activeCount += activeSubs.length;
+            }
+        } catch (_) {}
+
+        if (activeCount > 0) {
+            return res.status(400).json({
+                success: false,
+                has_active_deliveries: true,
+                active_count: activeCount,
+                message: `Cannot go offline while you have ${activeCount} active delivery in progress. Complete all assigned orders before ending your shift.`
+            });
+        }
     }
 
     try {
@@ -1206,14 +1237,37 @@ const updatePartnerStatusHandler = async (req, res) => {
     const partner = await getPartnerById(partnerId);
     if (partner) {
         partner.is_online = Boolean(is_online);
+        partner.last_active_at = new Date().toISOString();
+        if (!Boolean(is_online)) {
+            // Clear current coordinates on offline so stale location is not displayed as live
+            partner.current_latitude = null;
+            partner.current_longitude = null;
+        }
         await savePartner(partner);
     }
 
-    emitToAdmin("partner:status:changed", {
+    // Clean up live locations file if partner is going offline
+    try {
+        const liveFile = path.join(DATA_DIR, "partner_live_locations.json");
+        if (fs.existsSync(liveFile)) {
+            const liveLocations = JSON.parse(fs.readFileSync(liveFile, "utf-8"));
+            const filtered = Boolean(is_online)
+                ? liveLocations
+                : liveLocations.filter(l => l.partner_id !== partnerId);
+            fs.writeFileSync(liveFile, JSON.stringify(filtered, null, 2), "utf-8");
+        }
+    } catch (_) {}
+
+    const statusPayload = {
         partnerId,
+        partner_id: partnerId,
         is_online: Boolean(is_online),
         timestamp: new Date().toISOString()
-    });
+    };
+
+    emitToAdmin("partner:status:changed", statusPayload);
+    emitToAdmin("partner:status:updated", statusPayload);
+    emitToAdmin("fleet:partner_status", statusPayload);
 
     return res.json({
         success: true,
@@ -1237,7 +1291,7 @@ router.patch("/availability", authenticatePartner, updatePartnerStatusHandler);
  */
 const handlePartnerLocationUpdate = async (req, res) => {
     let partnerId = req.partner?.partner_id || req.body?.partner_id || req.body?.partnerId || req.query?.partnerId;
-    const { latitude, longitude, speed = 0, heading = 0, accuracy = 0, active_delivery_id, orderId } = req.body || {};
+    const { latitude, longitude, speed = 0, heading = 0, accuracy = 0, altitude = 0, locationSource = 'device_gps', active_delivery_id, orderId } = req.body || {};
 
     if (!partnerId) {
         return res.status(401).json({ success: false, message: "Authentication required or partnerId missing" });
@@ -1265,6 +1319,8 @@ const handlePartnerLocationUpdate = async (req, res) => {
             speed: parseFloat(speed) || 0,
             heading: parseFloat(heading) || 0,
             accuracy: parseFloat(accuracy) || 0,
+            altitude: parseFloat(altitude) || 0,
+            locationSource: locationSource || 'device_gps',
             active_delivery_id: activeDeliveryId
         });
     } catch (gpsErr) {
@@ -1284,7 +1340,9 @@ const handlePartnerLocationUpdate = async (req, res) => {
             partner.speed = parseFloat(speed) || 0;
             partner.heading = parseFloat(heading) || 0;
             partner.accuracy = parseFloat(accuracy) || 0;
+            partner.is_online = true;
             partner.last_active_at = new Date().toISOString();
+            partner.location_updated_at = new Date().toISOString();
             await savePartner(partner);
         }
     }
@@ -1300,6 +1358,10 @@ const handlePartnerLocationUpdate = async (req, res) => {
             speed: parseFloat(speed) || 0,
             heading: parseFloat(heading) || 0,
             accuracy: parseFloat(accuracy) || 0,
+            altitude: parseFloat(altitude) || 0,
+            locationSource: locationSource || 'device_gps',
+            isOnline: true,
+            is_online: true,
             orderId: activeDeliveryId,
             active_delivery_id: activeDeliveryId,
             timestamp: new Date().toISOString()
@@ -1308,6 +1370,9 @@ const handlePartnerLocationUpdate = async (req, res) => {
         emitToAdmin("delivery:location_updated", payload);
         emitToAdmin("delivery:location:update", payload);
         emitToAdmin("partner:location:updated", payload);
+        emitToAdmin("fleet:location:updated", payload);
+        emitToAdmin("fleet:partner_location", payload);
+        emitToAdmin("partner:location_update", payload);
         emitToAdmin("fleet:location:updated", payload);
 
         if (activeDeliveryId) {

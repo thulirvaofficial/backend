@@ -84,8 +84,8 @@ router.getOrders = () => getMockOrders();
 /* CREATE ORDER */
 router.post("/", async (req, res) => {
     try {
+        const address = req.body.address || req.body.delivery_address || req.body.shipping_address || "";
         const {
-            address,
             city,
             state,
             pincode,
@@ -537,8 +537,27 @@ async function enrichOrderWithPartner(order) {
         try {
             const partner = await getPartnerById(partnerId);
             if (partner) {
-                const pLat = partner.current_latitude ? Number(partner.current_latitude) : null;
-                const pLng = partner.current_longitude ? Number(partner.current_longitude) : null;
+                let pLat = null;
+                let pLng = null;
+
+                if (partner.is_online) {
+                    try {
+                        const { getPartnerLiveLocation } = require("../services/gpsService");
+                        const live = await getPartnerLiveLocation(partnerId);
+                        if (live && live.is_fresh && live.latitude && live.longitude) {
+                            pLat = Number(live.latitude);
+                            pLng = Number(live.longitude);
+                        } else if (partner.current_latitude && partner.current_longitude) {
+                            const upd = partner.location_updated_at ? new Date(partner.location_updated_at).getTime() : 0;
+                            const ageSec = (Date.now() - upd) / 1000;
+                            if (ageSec <= 300) {
+                                pLat = Number(partner.current_latitude);
+                                pLng = Number(partner.current_longitude);
+                            }
+                        }
+                    } catch (_) {}
+                }
+
                 const cLat = order.latitude ? Number(order.latitude) : null;
                 const cLng = order.longitude ? Number(order.longitude) : null;
 
@@ -546,7 +565,7 @@ async function enrichOrderWithPartner(order) {
                 const etaMins = calculateEtaMinutes(dist);
                 const etaDisplay = (dist != null && etaMins != null)
                     ? `ETA: ${etaMins} min (${dist.toFixed(1)} km)`
-                    : "Calculating ETA";
+                    : (partner.is_online ? "Calculating ETA" : "Partner offline");
 
                 partnerData = {
                     partner_id: partner.partner_id,
@@ -1502,16 +1521,36 @@ router.get("/:orderId/tracking", async (req, res) => {
                         rating: Number(p.rating) || 5.0,
                         is_online: Boolean(p.is_online)
                     };
-                    if (!partnerLocation && p.current_latitude && p.current_longitude) {
-                        partnerLocation = {
-                            partner_id: p.partner_id,
-                            latitude: Number(p.current_latitude),
-                            longitude: Number(p.current_longitude),
-                            speed: Number(p.speed) || 0,
-                            heading: Number(p.heading) || 0,
-                            accuracy: Number(p.accuracy) || 0,
-                            is_fresh: false
-                        };
+                    if (p.is_online) {
+                        try {
+                            const { getPartnerLiveLocation } = require("../services/gpsService");
+                            const live = await getPartnerLiveLocation(partnerId);
+                            if (live && live.is_fresh && live.latitude && live.longitude) {
+                                partnerLocation = {
+                                    partner_id: p.partner_id,
+                                    latitude: Number(live.latitude),
+                                    longitude: Number(live.longitude),
+                                    speed: Number(live.speed) || 0,
+                                    heading: Number(live.heading) || 0,
+                                    accuracy: Number(live.accuracy) || 0,
+                                    is_fresh: true
+                                };
+                            } else if (p.current_latitude && p.current_longitude) {
+                                const upd = p.location_updated_at ? new Date(p.location_updated_at).getTime() : 0;
+                                const ageSec = (Date.now() - upd) / 1000;
+                                if (ageSec <= 300) {
+                                    partnerLocation = {
+                                        partner_id: p.partner_id,
+                                        latitude: Number(p.current_latitude),
+                                        longitude: Number(p.current_longitude),
+                                        speed: Number(p.speed) || 0,
+                                        heading: Number(p.heading) || 0,
+                                        accuracy: Number(p.accuracy) || 0,
+                                        is_fresh: true
+                                    };
+                                }
+                            }
+                        } catch (_) {}
                     }
                 }
             } catch (_) {}
