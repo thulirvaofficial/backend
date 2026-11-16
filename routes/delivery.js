@@ -2095,12 +2095,20 @@ const updatePartnerOrderStatusHandler = async (req, res) => {
         try {
             await pool.query(`
                 UPDATE orders 
-                SET order_status = $1, partner_id = COALESCE(partner_id, $2),
+                SET order_status = $1, partner_id = COALESCE(NULLIF(partner_id, ''), $2),
                     delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
                     updated_at = NOW()
                 WHERE id::text = $3 OR order_number = $3
             `, [normStatus, partnerId, id.toString()]);
-        } catch {}
+        } catch (dbErr) {
+            console.error("[UPDATE PARTNER ORDER DB ERROR]", dbErr.message);
+        }
+
+        try {
+            if (fs.existsSync(ORDERS_FILE)) {
+                fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2), "utf-8");
+            }
+        } catch (_) {}
 
         // Log to order status history
         try {

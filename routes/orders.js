@@ -972,19 +972,21 @@ const updateOrderStatusHandler = async (req, res) => {
             await pool.query(
                 `UPDATE orders 
                  SET order_status = $1, payment_status = $2,
+                     partner_id = COALESCE(NULLIF(partner_id, ''), $4),
                      delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
                      updated_at = CURRENT_TIMESTAMP 
                  WHERE id::text = $3 OR order_number = $3`,
-                [normStatus, payment_status, rawId.toString()]
+                [normStatus, payment_status, rawId.toString(), partnerId || null]
             );
         } else if (normStatus) {
             await pool.query(
                 `UPDATE orders 
                  SET order_status = $1, 
+                     partner_id = COALESCE(NULLIF(partner_id, ''), $3),
                      delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
                      updated_at = CURRENT_TIMESTAMP 
                  WHERE id::text = $2 OR order_number = $2`,
-                [normStatus, rawId.toString()]
+                [normStatus, rawId.toString(), partnerId || null]
             );
         } else if (payment_status) {
             await pool.query(
