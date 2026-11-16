@@ -72,7 +72,8 @@ async function sendNotification({
     targetId = null,
     forAdmin = false,
     token = null,
-    tokens: directTokens = null
+    tokens: directTokens = null,
+    data = null
 }) {
     const payload = {
         id: "NOTIF-" + Date.now() + "-" + Math.floor(Math.random() * 1000),
@@ -136,7 +137,9 @@ async function sendNotification({
                     const res = await pool.query(
                         "SELECT token FROM device_tokens " +
                         "WHERE (user_id::text = $1::text " +
-                        "       OR user_id IN (SELECT id FROM users WHERE phone = $1::text OR email = $1::text OR id::text = $1::text)) " +
+                        "       OR user_id IN (SELECT id::text FROM users WHERE phone = $1::text OR email = $1::text OR id::text = $1::text) " +
+                        "       OR user_id IN (SELECT partner_id FROM delivery_partners WHERE partner_id = $1::text OR phone = $1::text OR email = $1::text) " +
+                        "       OR user_id IN (SELECT phone FROM delivery_partners WHERE partner_id = $1::text OR phone = $1::text OR email = $1::text)) " +
                         "  AND is_active = true",
                         [userId.toString()]
                     );
@@ -193,19 +196,26 @@ async function sendNotification({
                 },
                 data: {
                     target_id: targetId ? targetId.toString() : "",
+                    order_id: (data?.order_id || targetId || "").toString(),
+                    assignment_id: (data?.assignment_id || "").toString(),
+                    customer_name: (data?.customer_name || "").toString(),
+                    delivery_location: (data?.delivery_location || "").toString(),
+                    order_amount: (data?.order_amount || "").toString(),
                     type: type || "order",
                     title: title,
                     body: message,
-                    click_action: "FLUTTER_NOTIFICATION_CLICK"
+                    timestamp: new Date().toISOString(),
+                    click_action: "FLUTTER_NOTIFICATION_CLICK",
+                    ...(data || {})
                 },
                 android: {
                     priority: "high",
                     notification: {
                         channelId: targetChannelId,
-                        sound: "thulirva_notification",
+                        sound: "default",
                         priority: "max",
                         defaultVibrateTimings: true,
-                        defaultSound: false,
+                        defaultSound: true,
                         visibility: "public"
                     }
                 },

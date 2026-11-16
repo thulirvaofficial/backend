@@ -22,8 +22,33 @@
     "platform": "android",
     "user_id": "delivery_partner",
     "role": "partner",
-    "is_active": true,
+    "is_active": false,
     "created_at": "2026-11-14T19:59:14.504Z",
     "updated_at": "2026-11-14T19:59:32.931Z"
+  },
+  {
+    "token": "fcm_kamsh_oppo_test_token_2026_abcdef1234567890",
+    "platform": "android",
+    "user_id": "THU-DP-0001",
+    "role": "partner",
+    "is_active": false,
+    "created_at": "2026-11-16T11:27:17.031Z"
+  },
+  {
+    "token": "test-fcm-token-123",
+    "platform": "android",
+    "user_id": null,
+    "role": "customer",
+    "is_active": false,
+    "created_at": "2026-11-16T11:39:46.615Z",
+    "updated_at": "2026-11-16T11:39:46.639Z"
+  },
+  {
+    "token": "fcm-device-token-oppo-f25-pro",
+    "platform": "android",
+    "user_id": null,
+    "role": "customer",
+    "is_active": false,
+    "created_at": "2026-11-16T11:40:13.090Z"
   }
 ]

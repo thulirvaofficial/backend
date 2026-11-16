@@ -633,10 +633,19 @@ router.post("/dispatch/manual-assign", async (req, res) => {
 
         sendNotification({
             userId: partner_id,
-            title: "THULIRVA – NEW DELIVERY! 🌾",
-            message: `New order assigned to you.\nCustomer: ${order?.customer_name || 'Customer'}\nArea: ${order?.city || order?.address || 'Chennai'}\nOrder: #${order?.order_number || order_id}\nType: Home Delivery`,
-            type: "delivery_assignment",
-            targetId: order_id.toString()
+            title: "New Thulirva Order!",
+            message: "You have received a new delivery order. Check the order details and accept the assignment.",
+            type: "NEW_ORDER_ASSIGNED",
+            targetId: order_id.toString(),
+            data: {
+                order_id: String(order_id),
+                customer_name: order?.customer_name || 'Customer',
+                delivery_location: order?.address || order?.city || 'Chennai',
+                order_amount: String(order?.total || 0),
+                assignment_id: `ASG-MANUAL-${order_id}`,
+                type: "NEW_ORDER_ASSIGNED",
+                timestamp: new Date().toISOString()
+            }
         }).catch(() => {});
 
         try {

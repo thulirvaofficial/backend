@@ -477,6 +477,14 @@ router.post("/", async (req, res) => {
             forAdmin: false
         }).catch(() => {});
 
+        // Instant auto-dispatch notification to delivery partner
+        try {
+            const { initiateSmartDispatch } = require("../services/dispatchEngine");
+            initiateSmartDispatch(finalId).catch(err => console.warn("[AUTO-DISPATCH WARN]:", err.message));
+        } catch (dispatchErr) {
+            console.warn("[AUTO-DISPATCH REQUIRE ERR]:", dispatchErr.message);
+        }
+
         // Payment notifications if proof or transaction ID is present
         if (transaction_id || savedProof) {
             sendPaymentNotification({

@@ -164,6 +164,16 @@ app.use(
 );
 
 app.use(
+    "/api/api/notifications",
+    notificationRoutes
+);
+
+app.use(
+    "/api/delivery/notifications",
+    notificationRoutes
+);
+
+app.use(
     "/api/settings",
     settingsRoutes
 );

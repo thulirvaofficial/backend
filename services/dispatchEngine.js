@@ -149,10 +149,19 @@ async function offerOrderToPartner(order, partner) {
         // Send FCM High-Priority Push Notification to Partner
         sendNotification({
             userId: partnerId,
-            title: "🚨 New Delivery Request!",
-            message: `Order #${orderId} for ${order.customer_name || 'Customer'} - ₹${order.total || 0}. Tap to accept within 20s.`,
-            type: "new_delivery_request",
-            targetId: orderId.toString()
+            title: "New Thulirva Order!",
+            message: "You have received a new delivery order. Check the order details and accept the assignment.",
+            type: "NEW_ORDER_ASSIGNED",
+            targetId: orderId.toString(),
+            data: {
+                order_id: String(orderId),
+                customer_name: order.customer_name || 'Customer',
+                delivery_location: order.address || order.city || 'Chennai',
+                order_amount: String(order.total || 0),
+                assignment_id: `ASG-${orderId}-${partnerId}`,
+                type: "NEW_ORDER_ASSIGNED",
+                timestamp: new Date().toISOString()
+            }
         }).catch(() => {});
 
         const offerPayload = {

@@ -42,6 +42,9 @@ jobs:
             for site in /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*; do
               if [ -f "$site" ]; then
                 sudo sed -i 's/client_max_body_size .*/client_max_body_size 25M;/g' "$site" 2>/dev/null || true
+                if ! grep -q "location /uploads/" "$site"; then
+                  sudo sed -i '/location \/api/i \    location /uploads/ {\n        proxy_pass http://127.0.0.1:5500/uploads/;\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n    }\n' "$site" 2>/dev/null || true
+                fi
               fi
             done
 

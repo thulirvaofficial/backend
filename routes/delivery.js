@@ -887,7 +887,7 @@ router.post("/profile/photo", authenticatePartner, uploadPartnerPhoto, async (re
             if (fs.existsSync(fullFilePath)) {
                 fileBuffer = fs.readFileSync(fullFilePath);
             }
-            photoUrl = `/uploads/partners/${filename}`;
+            photoUrl = `/api/uploads/partners/${filename}`;
         } else if (photoData && typeof photoData === "string") {
             let ext = "jpg";
             const mimeMatch = photoData.match(/^data:image\/(jpeg|jpg|png|webp);base64,/i);
@@ -907,7 +907,7 @@ router.post("/profile/photo", authenticatePartner, uploadPartnerPhoto, async (re
             filename = `profile_${partnerId}_${Date.now()}.${ext}`;
             const filePath = path.join(partnersDir, filename);
             fs.writeFileSync(filePath, fileBuffer);
-            photoUrl = `/uploads/partners/${filename}`;
+            photoUrl = `/api/uploads/partners/${filename}`;
         } else {
             return res.status(400).json({ success: false, message: "Photo file or base64 data is required." });
         }
@@ -1979,6 +1979,49 @@ const getOrdersHandler = async (req, res) => {
 
 router.get("/orders", authenticatePartner, getOrdersHandler);
 router.get("/product-orders", authenticatePartner, getOrdersHandler);
+
+/**
+ * GET /api/delivery/orders/:id
+ * Retrieve single order details for delivery partner
+ */
+router.get("/orders/:id", authenticatePartner, async (req, res) => {
+    try {
+        const id = req.params.id;
+        const partnerId = req.partner.partner_id;
+
+        let orders = [];
+        try {
+            if (fs.existsSync(ORDERS_FILE)) {
+                orders = JSON.parse(fs.readFileSync(ORDERS_FILE, "utf-8"));
+            }
+        } catch {}
+
+        let order = orders.find(o => o.id?.toString() === id?.toString() || o.order_number === id);
+
+        if (!order) {
+            try {
+                const dbRes = await pool.query(
+                    "SELECT * FROM orders WHERE id::text = $1 OR order_number = $1",
+                    [id.toString()]
+                );
+                if (dbRes.rows && dbRes.rows.length) {
+                    order = dbRes.rows[0];
+                }
+            } catch (_) {}
+        }
+
+        if (!order) {
+            return res.status(404).json({ success: false, message: "Order not found." });
+        }
+
+        return res.json({ success: true, order, data: order });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+router.get("/product-orders/:id", authenticatePartner, async (req, res) => {
+    return req.app.handle(req, res);
+});
 
 /**
  * PUT & POST /api/delivery/orders/:id/status

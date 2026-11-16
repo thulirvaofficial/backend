@@ -108,5 +108,15 @@
     "accuracy": 3.2,
     "active_delivery_id": null,
     "recorded_at": "2026-11-14T23:59:59.343Z"
+  },
+  {
+    "partner_id": "THU-DP-0001",
+    "latitude": 12.802145,
+    "longitude": 80.222912,
+    "speed": 24.5,
+    "heading": 65,
+    "accuracy": 3.2,
+    "active_delivery_id": null,
+    "recorded_at": "2026-11-16T10:05:33.494Z"
   }
 ]

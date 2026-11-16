@@ -74,8 +74,28 @@ function getDeviceTokens({ forAdmin = false, userId = null, role = null }) {
                 .filter(t => (t.role === 'partner' || t.role === 'delivery_partner') && t.is_active)
                 .map(t => t.token);
         }
+
+        // Collect matching aliases (e.g. partner ID, phone number, email)
+        const matchingIds = new Set([uid]);
+        try {
+            const partnersFile = path.join(DATA_DIR, 'delivery_partners.json');
+            if (fs.existsSync(partnersFile)) {
+                const partners = JSON.parse(fs.readFileSync(partnersFile, 'utf-8'));
+                const p = partners.find(part =>
+                    part.partner_id?.toLowerCase() === uid ||
+                    part.phone === uid ||
+                    part.email?.toLowerCase() === uid
+                );
+                if (p) {
+                    if (p.partner_id) matchingIds.add(p.partner_id.toLowerCase());
+                    if (p.phone) matchingIds.add(p.phone.toLowerCase());
+                    if (p.email) matchingIds.add(p.email.toLowerCase());
+                }
+            }
+        } catch (_) {}
+
         return DEVICE_TOKENS
-            .filter(t => t.user_id && t.user_id.toString().toLowerCase() === uid && t.is_active)
+            .filter(t => t.user_id && matchingIds.has(t.user_id.toString().toLowerCase()) && t.is_active)
             .map(t => t.token);
     }
     // All active customer tokens

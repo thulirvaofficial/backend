@@ -1,5 +1,38 @@
 [
   {
+    "id": "NOTIF-1794829213097-767",
+    "user_id": null,
+    "title": "New Thulirva Order!",
+    "message": "You have received a new delivery order. Check the order details and accept the assignment.",
+    "type": "test_alert",
+    "target_id": "TEST-01",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-16T11:40:13.097Z"
+  },
+  {
+    "id": "NOTIF-1794823533774-448",
+    "user_id": 1,
+    "title": "Order Placed! 🌾",
+    "message": "Your Thulirva order #THU-20261116-5981 worth ₹160 has been placed successfully.",
+    "type": "order_status",
+    "target_id": "1794669999003",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-16T10:05:33.774Z"
+  },
+  {
+    "id": "NOTIF-1794823533770-469",
+    "user_id": null,
+    "title": "New Order Received! 🔔",
+    "message": "New Home Delivery Order #1794669999003 received from Valued Customer worth ₹160.",
+    "type": "new_order",
+    "target_id": "1794669999003",
+    "is_read": false,
+    "for_admin": true,
+    "created_at": "2026-11-16T10:05:33.770Z"
+  },
+  {
     "id": "NOTIF-1794700799547-95",
     "user_id": 1,
     "title": "Order Placed! 🌾",
