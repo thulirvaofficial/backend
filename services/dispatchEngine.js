@@ -334,11 +334,13 @@ async function handleOfferTimeout(orderId, partnerId) {
 
     try {
         // Mark offer expired
-        await pool.query(`
-            UPDATE dispatch_offers 
-            SET status = 'expired', response_time = NOW(), rejection_reason = 'Timed out (no response in 3 minutes)'
-            WHERE order_id = $1 AND partner_id = $2 AND status = 'pending'
-        `, [orderId, partnerId]);
+        try {
+            await pool.query(`
+                UPDATE dispatch_offers 
+                SET status = 'expired', response_time = NOW(), rejection_reason = 'Timed out (no response in 3 minutes)'
+                WHERE order_id = $1 AND partner_id = $2 AND status = 'pending'
+            `, [orderId, partnerId]);
+        } catch (_) {}
 
         // Emit real-time expiry to partner so UI immediately dismisses alert and cancels notification sound
         emitToPartner(partnerId, "dispatch:expired", {
@@ -402,20 +404,35 @@ async function handleOfferReject(orderId, partnerId, reason = 'Not Available') {
     inMemoryOffers.delete(partnerId);
 
     try {
-        await pool.query(`
-            UPDATE dispatch_offers 
-            SET status = 'rejected', response_time = NOW(), rejection_reason = $1
-            WHERE order_id = $2 AND partner_id = $3 AND status = 'pending'
-        `, [reason, orderId, partnerId]);
+        try {
+            await pool.query(`
+                UPDATE dispatch_offers 
+                SET status = 'rejected', response_time = NOW(), rejection_reason = $1
+                WHERE order_id = $2 AND partner_id = $3 AND status = 'pending'
+            `, [reason, orderId, partnerId]);
+        } catch (_) {}
 
         emitToPartner(partnerId, "dispatch:rejected", {
             order_id: String(orderId),
             reason
         });
 
-        const oRes = await pool.query("SELECT * FROM orders WHERE id = $1", [orderId]);
-        if (oRes.rows.length === 0) return { success: false, message: "Order not found" };
-        const order = oRes.rows[0];
+        let order = null;
+        try {
+            const oRes = await pool.query("SELECT * FROM orders WHERE id::text = $1 OR order_number = $1", [String(orderId)]);
+            if (oRes.rows.length > 0) order = oRes.rows[0];
+        } catch (_) {}
+
+        if (!order) {
+            try {
+                if (fs.existsSync(ORDERS_FILE)) {
+                    const localOrders = JSON.parse(fs.readFileSync(ORDERS_FILE, "utf-8"));
+                    order = localOrders.find(o => String(o.id) === String(orderId) || String(o.order_number) === String(orderId));
+                }
+            } catch (_) {}
+        }
+
+        if (!order) return { success: false, message: "Order not found" };
 
         // Try next partner immediately
         const nextPartner = await findNextEligiblePartner(orderId, order.delivery_type || 'order', [partnerId]);
@@ -423,10 +440,12 @@ async function handleOfferReject(orderId, partnerId, reason = 'Not Available') {
             await offerOrderToPartner(order, nextPartner);
             return { success: true, message: `Offer rejected. Forwarded to ${nextPartner.name}.` };
         } else {
-            await pool.query(`
-                UPDATE orders SET order_status = 'no_partner_available', updated_at = NOW()
-                WHERE id = $1 AND order_status = 'dispatching'
-            `, [orderId]).catch(() => {});
+            try {
+                await pool.query(`
+                    UPDATE orders SET order_status = 'no_partner_available', updated_at = NOW()
+                    WHERE (id::text = $1 OR order_number = $1) AND order_status = 'dispatching'
+                `, [String(orderId)]);
+            } catch (_) {}
 
             return { success: true, message: "Offer rejected. No further partners available; marked for manual assignment." };
         }

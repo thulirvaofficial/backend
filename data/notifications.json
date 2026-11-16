@@ -1,5 +1,49 @@
 [
   {
+    "id": "NOTIF-1794839603089-237",
+    "user_id": "THU-DP-0001",
+    "title": "🚨 New Thulirva Order #THU-20261116-2084",
+    "message": "New delivery order (₹380, 2 items) at Near Valasaravakkam Water Tank. Tap to accept within 3 minutes!",
+    "type": "NEW_ORDER_ASSIGNED",
+    "target_id": "1794669999005",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-16T14:33:23.089Z"
+  },
+  {
+    "id": "NOTIF-1794838997918-904",
+    "user_id": "THU-DP-0001",
+    "title": "🚨 New Thulirva Order #THU-20261116-2084",
+    "message": "New delivery order (₹380, 2 items) at Near Valasaravakkam Water Tank. Tap to accept within 3 minutes!",
+    "type": "NEW_ORDER_ASSIGNED",
+    "target_id": "1794669999005",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-16T14:23:17.918Z"
+  },
+  {
+    "id": "NOTIF-1794838997865-423",
+    "user_id": null,
+    "title": "Order Placed! 🌾",
+    "message": "Your Thulirva order #THU-20261116-2084 worth ₹380 has been placed successfully.",
+    "type": "order_status",
+    "target_id": "1794669999005",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-16T14:23:17.865Z"
+  },
+  {
+    "id": "NOTIF-1794838997863-315",
+    "user_id": null,
+    "title": "New Order Received! 🔔",
+    "message": "New Home Delivery Order #1794669999005 received from Ananya S (Real Customer) worth ₹380.",
+    "type": "new_order",
+    "target_id": "1794669999005",
+    "is_read": false,
+    "for_admin": true,
+    "created_at": "2026-11-16T14:23:17.863Z"
+  },
+  {
     "id": "NOTIF-1794838239119-196",
     "user_id": null,
     "title": "Order Placed! 🌾",
