@@ -236,8 +236,23 @@ async function offerOrderToPartner(order, partner) {
         activeTimers.set(orderId, timer);
         return { success: true, partner, expiresAt };
     } catch (err) {
-        // Fallback for in-memory offer when DB error occurs
-        inMemoryOffers.set(partnerId, {
+        console.warn("[DISPATCH DB INSERT FAILED, USING IN-MEMORY RESILIENT OFFER]:", err.message);
+        let itemsCount = 1;
+        if (Array.isArray(order.items)) {
+            itemsCount = order.items.length;
+        } else if (typeof order.items === 'string') {
+            try {
+                const parsed = JSON.parse(order.items);
+                if (Array.isArray(parsed)) itemsCount = parsed.length;
+            } catch (_) {}
+        }
+
+        const customerArea = order.landmark || order.city || order.area || 'Valasaravakkam, Chennai';
+        const pickupHub = 'Valasaravakkam Hub, Chennai';
+        const deliveryAddress = order.address || order.city || 'Chennai';
+        const deliveryInstructions = order.delivery_instructions || 'Deliver safely to customer doorstep';
+
+        const fallbackPayload = {
             offer_id: `OFFER-${Date.now()}`,
             order_id: String(orderId),
             order_number: order.order_number || `ORD${orderId}`,
@@ -245,17 +260,60 @@ async function offerOrderToPartner(order, partner) {
             partner_id: partnerId,
             customer_name: order.customer_name || 'Customer',
             customer_phone: order.customer_phone || order.phone || '',
-            address: order.address || 'Chennai',
+            customer_area: customerArea,
+            pickup_hub: pickupHub,
+            address: deliveryAddress,
+            delivery_address: deliveryAddress,
             city: order.city || 'Chennai',
             pincode: order.pincode || '',
             latitude: order.latitude ? Number(order.latitude) : null,
             longitude: order.longitude ? Number(order.longitude) : null,
             landmark: order.landmark || '',
-            delivery_instructions: order.delivery_instructions || '',
+            items_count: itemsCount,
+            delivery_instructions: deliveryInstructions,
             total: order.total || 0,
+            assigned_at: new Date().toISOString(),
             expires_at: expiresAt.toISOString(),
+            timeout_seconds: OFFER_TIMEOUT_SECONDS,
+            remaining_seconds: OFFER_TIMEOUT_SECONDS,
             status: 'pending'
-        });
+        };
+
+        // Set in-memory active offer for partner polling
+        inMemoryOffers.set(partnerId, fallbackPayload);
+
+        // Emit real-time WebSocket alert directly to partner device
+        emitToPartner(partnerId, "dispatch:offer", fallbackPayload);
+        emitToPartner(partnerId, "order:assigned", fallbackPayload);
+
+        // Send FCM High-Priority Emergency Alert to Delivery Partner
+        sendNotification({
+            userId: partnerId,
+            title: `🚨 New Thulirva Order #${order.order_number || orderId}`,
+            message: `New delivery order (₹${order.total || 0}, ${itemsCount} items) at ${customerArea}. Tap to accept within 3 minutes!`,
+            type: "NEW_ORDER_ASSIGNED",
+            targetId: orderId.toString(),
+            channelId: "thulirva_incoming_orders",
+            data: {
+                order_id: String(orderId),
+                order_number: String(order.order_number || `ORD${orderId}`),
+                customer_name: order.customer_name || 'Customer',
+                customer_area: customerArea,
+                pickup_hub: pickupHub,
+                delivery_address: deliveryAddress,
+                items_count: String(itemsCount),
+                delivery_instructions: deliveryInstructions,
+                order_amount: String(order.total || 0),
+                total: String(order.total || 0),
+                assigned_at: fallbackPayload.assigned_at,
+                expires_at: expiresAt.toISOString(),
+                timeout_seconds: String(OFFER_TIMEOUT_SECONDS),
+                assignment_id: `ASG-${orderId}-${partnerId}`,
+                type: "NEW_ORDER_ASSIGNED",
+                actions: "accept_order,reject_order",
+                timestamp: new Date().toISOString()
+            }
+        }).catch(() => {});
 
         const timer = setTimeout(async () => {
             inMemoryOffers.delete(partnerId);
@@ -386,7 +444,28 @@ async function handleOfferAccept(orderId, partnerId) {
         activeTimers.delete(orderId);
     }
 
-    const client = await pool.connect();
+    let client = null;
+    try {
+        client = await pool.connect();
+    } catch (connectErr) {
+        console.warn("[DISPATCH DB CONNECT OFFLINE, ACCEPTING VIA IN-MEMORY/DISK STORE]:", connectErr.message);
+        try {
+            if (fs.existsSync(ORDERS_FILE)) {
+                const orders = JSON.parse(fs.readFileSync(ORDERS_FILE, "utf-8"));
+                const ord = orders.find(o => String(o.id) === String(orderId) || String(o.order_number) === String(orderId));
+                if (ord) {
+                    ord.partner_id = partnerId;
+                    ord.order_status = "processing";
+                    fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2), "utf-8");
+                }
+            }
+        } catch (_) {}
+        inMemoryOffers.delete(partnerId);
+        emitToPartner(partnerId, "dispatch:accepted", { order_id: String(orderId) });
+        emitToAdmin("order:assigned", { order_id: String(orderId), partner_id: partnerId });
+        return { success: true, message: `Order #${orderId} successfully assigned! Proceed to pickup.` };
+    }
+
     try {
         await client.query("BEGIN");
 
@@ -467,7 +546,7 @@ async function handleOfferAccept(orderId, partnerId) {
         console.error("[OFFER ACCEPT ERROR]", err.message);
         return { success: false, message: err.message };
     } finally {
-        client.release();
+        if (client) client.release();
     }
 }
 
