@@ -2093,13 +2093,24 @@ const updatePartnerOrderStatusHandler = async (req, res) => {
 
         // Also update in DB if available
         try {
-            await pool.query(`
-                UPDATE orders 
-                SET order_status = $1, partner_id = COALESCE(NULLIF(partner_id, ''), $2),
-                    delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
-                    updated_at = NOW()
-                WHERE id::text = $3 OR order_number = $3
-            `, [normStatus, partnerId, id.toString()]);
+            const num = parseInt(id, 10);
+            if (!isNaN(num)) {
+                await pool.query(`
+                    UPDATE orders 
+                    SET order_status = $1, partner_id = $2,
+                        delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
+                        updated_at = NOW()
+                    WHERE id = $3 OR order_number = $4
+                `, [normStatus, partnerId, num, id.toString()]);
+            } else {
+                await pool.query(`
+                    UPDATE orders 
+                    SET order_status = $1, partner_id = $2,
+                        delivered_at = CASE WHEN $1 = 'delivered' THEN NOW() ELSE delivered_at END,
+                        updated_at = NOW()
+                    WHERE order_number = $3
+                `, [normStatus, partnerId, id.toString()]);
+            }
         } catch (dbErr) {
             console.error("[UPDATE PARTNER ORDER DB ERROR]", dbErr.message);
         }

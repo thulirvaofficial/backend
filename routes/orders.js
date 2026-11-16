@@ -898,6 +898,15 @@ router.get("/:id", async (req, res) => {
             orders = await getOrdersWithItems("WHERE order_number = $1", [idParam]);
         }
         if (orders.length > 0) {
+            // Synchronize with disk store if disk has newer live dispatch state
+            const diskOrder = getMockOrders().find(o => o.id == idParam || o.order_number == idParam);
+            if (diskOrder) {
+                if (diskOrder.partner_id && !orders[0].partner_id) orders[0].partner_id = diskOrder.partner_id;
+                if (diskOrder.order_status && orders[0].order_status === 'pending' && diskOrder.order_status !== 'pending') {
+                    orders[0].order_status = diskOrder.order_status;
+                    orders[0].status = diskOrder.order_status;
+                }
+            }
             const histRes = await pool.query(
                 "SELECT * FROM order_status_history WHERE order_id = $1 ORDER BY created_at ASC",
                 [orders[0].id]
