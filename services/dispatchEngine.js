@@ -8,7 +8,7 @@ const DATA_DIR = path.resolve(__dirname, "..", "data");
 const PARTNERS_FILE = path.join(DATA_DIR, "delivery_partners.json");
 const ORDERS_FILE = path.join(DATA_DIR, "orders.json");
 
-const OFFER_TIMEOUT_SECONDS = 20;
+const OFFER_TIMEOUT_SECONDS = 180; // 3-minute acceptance window per partner
 const activeTimers = new Map(); // orderId -> NodeJS.Timeout
 const inMemoryOffers = new Map(); // partnerId -> offer object
 
@@ -146,23 +146,20 @@ async function offerOrderToPartner(order, partner) {
 
         console.log(`[DISPATCH] Sent offer for Order #${orderId} to Partner ${partner.name} (${partnerId}). Expires in ${OFFER_TIMEOUT_SECONDS}s.`);
 
-        // Send FCM High-Priority Push Notification to Partner
-        sendNotification({
-            userId: partnerId,
-            title: "New Thulirva Order!",
-            message: "You have received a new delivery order. Check the order details and accept the assignment.",
-            type: "NEW_ORDER_ASSIGNED",
-            targetId: orderId.toString(),
-            data: {
-                order_id: String(orderId),
-                customer_name: order.customer_name || 'Customer',
-                delivery_location: order.address || order.city || 'Chennai',
-                order_amount: String(order.total || 0),
-                assignment_id: `ASG-${orderId}-${partnerId}`,
-                type: "NEW_ORDER_ASSIGNED",
-                timestamp: new Date().toISOString()
-            }
-        }).catch(() => {});
+        let itemsCount = 1;
+        if (Array.isArray(order.items)) {
+            itemsCount = order.items.length;
+        } else if (typeof order.items === 'string') {
+            try {
+                const parsed = JSON.parse(order.items);
+                if (Array.isArray(parsed)) itemsCount = parsed.length;
+            } catch (_) {}
+        }
+
+        const customerArea = order.landmark || order.city || order.area || 'Valasaravakkam, Chennai';
+        const pickupHub = 'Valasaravakkam Hub, Chennai';
+        const deliveryAddress = order.address || order.city || 'Chennai';
+        const deliveryInstructions = order.delivery_instructions || 'Deliver safely to customer doorstep';
 
         const offerPayload = {
             offer_id: `OFFER-${Date.now()}`,
@@ -172,17 +169,53 @@ async function offerOrderToPartner(order, partner) {
             partner_id: partnerId,
             customer_name: order.customer_name || 'Customer',
             customer_phone: order.customer_phone || order.phone || '',
-            address: order.address || 'Chennai',
+            customer_area: customerArea,
+            pickup_hub: pickupHub,
+            address: deliveryAddress,
+            delivery_address: deliveryAddress,
             city: order.city || 'Chennai',
             pincode: order.pincode || '',
             latitude: order.latitude ? Number(order.latitude) : null,
             longitude: order.longitude ? Number(order.longitude) : null,
             landmark: order.landmark || '',
-            delivery_instructions: order.delivery_instructions || '',
+            items_count: itemsCount,
+            delivery_instructions: deliveryInstructions,
             total: order.total || 0,
+            assigned_at: new Date().toISOString(),
             expires_at: expiresAt.toISOString(),
+            timeout_seconds: OFFER_TIMEOUT_SECONDS,
+            remaining_seconds: OFFER_TIMEOUT_SECONDS,
             status: 'pending'
         };
+
+        // Send FCM High-Priority Emergency Alert to Delivery Partner
+        sendNotification({
+            userId: partnerId,
+            title: `🚨 New Thulirva Order #${order.order_number || orderId}`,
+            message: `New delivery order (₹${order.total || 0}, ${itemsCount} items) at ${customerArea}. Tap to accept within 3 minutes!`,
+            type: "NEW_ORDER_ASSIGNED",
+            targetId: orderId.toString(),
+            channelId: "thulirva_incoming_orders",
+            data: {
+                order_id: String(orderId),
+                order_number: String(order.order_number || `ORD${orderId}`),
+                customer_name: order.customer_name || 'Customer',
+                customer_area: customerArea,
+                pickup_hub: pickupHub,
+                delivery_address: deliveryAddress,
+                items_count: String(itemsCount),
+                delivery_instructions: deliveryInstructions,
+                order_amount: String(order.total || 0),
+                total: String(order.total || 0),
+                assigned_at: offerPayload.assigned_at,
+                expires_at: expiresAt.toISOString(),
+                timeout_seconds: String(OFFER_TIMEOUT_SECONDS),
+                assignment_id: `ASG-${orderId}-${partnerId}`,
+                type: "NEW_ORDER_ASSIGNED",
+                actions: "accept_order,reject_order",
+                timestamp: new Date().toISOString()
+            }
+        }).catch(() => {});
 
         // Set in-memory active offer for partner polling
         inMemoryOffers.set(partnerId, offerPayload);
@@ -242,9 +275,15 @@ async function handleOfferTimeout(orderId, partnerId) {
         // Mark offer expired
         await pool.query(`
             UPDATE dispatch_offers 
-            SET status = 'expired', response_time = NOW(), rejection_reason = 'Timed out (no response in 20s)'
+            SET status = 'expired', response_time = NOW(), rejection_reason = 'Timed out (no response in 3 minutes)'
             WHERE order_id = $1 AND partner_id = $2 AND status = 'pending'
         `, [orderId, partnerId]);
+
+        // Emit real-time expiry to partner so UI immediately dismisses alert and cancels notification sound
+        emitToPartner(partnerId, "dispatch:expired", {
+            order_id: String(orderId),
+            message: "Assignment timed out after 3 minutes. Order reassigned."
+        });
 
         // Fetch order details
         let order = null;
@@ -299,6 +338,7 @@ async function handleOfferReject(orderId, partnerId, reason = 'Not Available') {
         clearTimeout(activeTimers.get(orderId));
         activeTimers.delete(orderId);
     }
+    inMemoryOffers.delete(partnerId);
 
     try {
         await pool.query(`
@@ -306,6 +346,11 @@ async function handleOfferReject(orderId, partnerId, reason = 'Not Available') {
             SET status = 'rejected', response_time = NOW(), rejection_reason = $1
             WHERE order_id = $2 AND partner_id = $3 AND status = 'pending'
         `, [reason, orderId, partnerId]);
+
+        emitToPartner(partnerId, "dispatch:rejected", {
+            order_id: String(orderId),
+            reason
+        });
 
         const oRes = await pool.query("SELECT * FROM orders WHERE id = $1", [orderId]);
         if (oRes.rows.length === 0) return { success: false, message: "Order not found" };
@@ -342,10 +387,11 @@ async function handleOfferAccept(orderId, partnerId) {
     try {
         await client.query("BEGIN");
 
-        // 1. Check if offer is still pending
+        // 1. Check if offer is still pending and has NOT expired
         const offerCheck = await client.query(`
             SELECT * FROM dispatch_offers 
             WHERE order_id = $1 AND partner_id = $2 AND status = 'pending'
+              AND (expires_at IS NULL OR expires_at > NOW())
             FOR UPDATE
         `, [orderId, partnerId]);
 
@@ -408,6 +454,9 @@ async function handleOfferAccept(orderId, partnerId) {
         `, [partnerId, orderId]);
 
         await client.query("COMMIT");
+        inMemoryOffers.delete(partnerId);
+        emitToPartner(partnerId, "dispatch:accepted", { order_id: String(orderId) });
+        emitToAdmin("order:assigned", { order_id: String(orderId), partner_id: partnerId });
         console.log(`✓ [DISPATCH SUCCESS] Order #${orderId} accepted and assigned to ${partnerId}.`);
         return { success: true, message: `Order #${orderId} successfully assigned! Proceed to pickup.` };
     } catch (err) {

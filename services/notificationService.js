@@ -73,6 +73,7 @@ async function sendNotification({
     forAdmin = false,
     token = null,
     tokens: directTokens = null,
+    channelId = null,
     data = null
 }) {
     const payload = {
@@ -167,25 +168,28 @@ async function sendNotification({
         const isReady = (typeof isFirebaseInitialized === "function" ? isFirebaseInitialized() : (admin && admin.apps && admin.apps.length > 0)) || (messaging !== null);
 
         if (tokens.length > 0 && messaging && isReady) {
-            let targetChannelId;
+            let targetChannelId = channelId;
             const isPartnerTarget = (userId && (userId.toString().startsWith("THU-DP") || userId.toString().startsWith("DP-") || userId.toString().startsWith("partner"))) ||
-                type.includes("delivery") || type.includes("offer") || type.includes("assignment");
+                type.includes("delivery") || type.includes("offer") || type.includes("assignment") || type.includes("NEW_ORDER");
 
-            if (forAdmin) {
-                if (type.includes("order") || type.includes("pickup")) targetChannelId = "thulirva_admin_orders_channel_v2";
-                else if (type.includes("sub")) targetChannelId = "thulirva_admin_subscriptions_channel_v2";
-                else if (type.includes("pay")) targetChannelId = "thulirva_admin_payments_channel_v2";
-                else targetChannelId = "thulirva_admin_channel_v2";
-            } else if (isPartnerTarget) {
-                if (type.includes("sub")) targetChannelId = "subscription_deliveries";
-                else if (type.includes("pay") || type.includes("earn") || type.includes("settle")) targetChannelId = "payment_updates";
-                else if (type.includes("emergency") || type.includes("alert")) targetChannelId = "emergency_alerts";
-                else targetChannelId = "delivery_assignments";
-            } else {
-                if (type.includes("order")) targetChannelId = "thulirva_orders_channel_v2";
-                else if (type.includes("sub")) targetChannelId = "thulirva_subscriptions_channel_v2";
-                else if (type.includes("pay")) targetChannelId = "thulirva_payments_channel_v2";
-                else targetChannelId = "thulirva_general_channel_v2";
+            if (!targetChannelId) {
+                if (forAdmin) {
+                    if (type.includes("order") || type.includes("pickup")) targetChannelId = "thulirva_admin_orders_channel_v2";
+                    else if (type.includes("sub")) targetChannelId = "thulirva_admin_subscriptions_channel_v2";
+                    else if (type.includes("pay")) targetChannelId = "thulirva_admin_payments_channel_v2";
+                    else targetChannelId = "thulirva_admin_channel_v2";
+                } else if (isPartnerTarget) {
+                    if (type.includes("NEW_ORDER") || type.includes("offer")) targetChannelId = "thulirva_incoming_orders";
+                    else if (type.includes("sub")) targetChannelId = "subscription_deliveries";
+                    else if (type.includes("pay") || type.includes("earn") || type.includes("settle")) targetChannelId = "payment_updates";
+                    else if (type.includes("emergency") || type.includes("alert")) targetChannelId = "emergency_alerts";
+                    else targetChannelId = "thulirva_incoming_orders";
+                } else {
+                    if (type.includes("order")) targetChannelId = "thulirva_orders_channel_v2";
+                    else if (type.includes("sub")) targetChannelId = "thulirva_subscriptions_channel_v2";
+                    else if (type.includes("pay")) targetChannelId = "thulirva_payments_channel_v2";
+                    else targetChannelId = "thulirva_general_channel_v2";
+                }
             }
             console.log(`[FCM DISPATCH] Sending to ${tokens.length} devices [${forAdmin ? 'ADMIN' : 'USER'}] via channel "${targetChannelId}": "${title}" - "${message}"`);
 
@@ -197,10 +201,18 @@ async function sendNotification({
                 data: {
                     target_id: targetId ? targetId.toString() : "",
                     order_id: (data?.order_id || targetId || "").toString(),
-                    assignment_id: (data?.assignment_id || "").toString(),
+                    order_number: (data?.order_number || "").toString(),
                     customer_name: (data?.customer_name || "").toString(),
-                    delivery_location: (data?.delivery_location || "").toString(),
-                    order_amount: (data?.order_amount || "").toString(),
+                    customer_area: (data?.customer_area || "").toString(),
+                    pickup_hub: (data?.pickup_hub || "").toString(),
+                    delivery_address: (data?.delivery_address || data?.delivery_location || "").toString(),
+                    items_count: (data?.items_count || "1").toString(),
+                    delivery_instructions: (data?.delivery_instructions || "").toString(),
+                    order_amount: (data?.order_amount || data?.total || "").toString(),
+                    total: (data?.total || data?.order_amount || "").toString(),
+                    expires_at: (data?.expires_at || "").toString(),
+                    timeout_seconds: (data?.timeout_seconds || "180").toString(),
+                    actions: "accept_order,reject_order",
                     type: type || "order",
                     title: title,
                     body: message,
@@ -212,7 +224,7 @@ async function sendNotification({
                     priority: "high",
                     notification: {
                         channelId: targetChannelId,
-                        sound: "default",
+                        sound: (targetChannelId === "thulirva_incoming_orders" ? "thulirva_order_alert" : "default"),
                         priority: "max",
                         defaultVibrateTimings: true,
                         defaultSound: true,

@@ -2387,9 +2387,9 @@ const getActiveOffersHandler = async (req, res) => {
 
         // Check DB for pending offers
         const offers = await pool.query(`
-            SELECT do.*, o.customer_name, o.address, o.total, o.city
+            SELECT do.*, o.order_number, o.customer_name, o.address, o.city, o.total, o.items, o.delivery_instructions, o.landmark, o.pincode
             FROM dispatch_offers do
-            LEFT JOIN orders o ON do.order_id = o.id
+            LEFT JOIN orders o ON (do.order_id = o.id::text OR do.order_id = o.order_number)
             WHERE do.partner_id = $1 AND do.status = 'pending' AND do.expires_at > NOW()
             ORDER BY do.offer_time DESC LIMIT 1
         `, [partnerId]).catch(() => ({ rows: [] }));
@@ -2397,12 +2397,29 @@ const getActiveOffersHandler = async (req, res) => {
         if (offers.rows.length > 0) {
             const offer = offers.rows[0];
             const remainingSecs = Math.max(0, Math.floor((new Date(offer.expires_at) - new Date()) / 1000));
+            let itemsCount = 1;
+            if (Array.isArray(offer.items)) {
+                itemsCount = offer.items.length;
+            } else if (typeof offer.items === 'string') {
+                try {
+                    const parsed = JSON.parse(offer.items);
+                    if (Array.isArray(parsed)) itemsCount = parsed.length;
+                } catch (_) {}
+            }
             return res.json({
                 success: true,
                 has_active_offer: true,
                 offer: {
                     ...offer,
-                    remaining_seconds: remainingSecs
+                    order_id: String(offer.order_id),
+                    order_number: offer.order_number || `ORD${offer.order_id}`,
+                    customer_area: offer.landmark || offer.city || 'Valasaravakkam, Chennai',
+                    pickup_hub: 'Valasaravakkam Hub, Chennai',
+                    delivery_address: offer.address || offer.city || 'Chennai',
+                    items_count: itemsCount,
+                    delivery_instructions: offer.delivery_instructions || 'Deliver to doorstep',
+                    remaining_seconds: remainingSecs,
+                    timeout_seconds: 180
                 }
             });
         }
