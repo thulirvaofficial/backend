@@ -15,7 +15,7 @@ const { emitToAdmin, emitToCustomer, emitToPartner, emitToOrder, getIO } = requi
 function normalizeStatus(raw) {
     if (!raw) return "placed";
     const s = raw.toString().trim().toLowerCase().replace(/[\s\-]/g, "_");
-    if (s === "placed") return "placed";
+    if (s === "placed" || s === "pending") return "placed";
     if (s === "confirmed" || s === "order_confirmed") return "confirmed";
     if (s === "preparing" || s === "processing") return "preparing";
     if (s === "assigned" || s === "rider_assigned" || s === "partner_assigned") return "assigned";
@@ -85,9 +85,9 @@ function validateTransition(currentStatusRaw, targetStatusRaw, { partnerId, orde
         if (current === "placed" || current === "confirmed" || current === "preparing") return { valid: true, current, target };
     }
 
-    // PICKED_UP: From assigned, preparing, or confirmed
+    // PICKED_UP: From assigned, preparing, confirmed, or placed/pending
     if (target === "picked_up") {
-        if (current === "assigned" || current === "preparing" || current === "confirmed") {
+        if (current === "assigned" || current === "preparing" || current === "confirmed" || current === "placed") {
             return { valid: true, current, target };
         }
         return {
@@ -98,9 +98,9 @@ function validateTransition(currentStatusRaw, targetStatusRaw, { partnerId, orde
         };
     }
 
-    // OUT_FOR_DELIVERY: From picked_up (or assigned)
+    // OUT_FOR_DELIVERY: From picked_up, assigned, preparing, or placed
     if (target === "out_for_delivery") {
-        if (current === "picked_up" || current === "assigned") {
+        if (current === "picked_up" || current === "assigned" || current === "preparing" || current === "placed") {
             return { valid: true, current, target };
         }
         return {
