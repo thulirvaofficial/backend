@@ -5,7 +5,7 @@
     "phone": "7904880944",
     "email": "kamsh@thulirva.com",
     "profile_photo": "/api/uploads/partners/profile_THU-DP-0001_1794686372852.png",
-    "is_online": false,
+    "is_online": true,
     "is_active": true,
     "registration_status": "approved",
     "kyc_status": "APPROVED",

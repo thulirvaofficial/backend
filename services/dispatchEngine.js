@@ -77,7 +77,10 @@ async function findNextEligiblePartner(orderId, deliveryType = 'order', excludeP
             try {
                 if (fs.existsSync(PARTNERS_FILE)) {
                     const localPartners = JSON.parse(fs.readFileSync(PARTNERS_FILE, "utf-8"));
-                    poolRows = localPartners.filter(p => p.is_online !== false && !p.is_blocked && p.is_active !== false);
+                    poolRows = localPartners.filter(p => (p.is_online === true || p.is_online === 'true') && !p.is_blocked && p.is_active !== false);
+                    if (poolRows.length === 0 && localPartners.length > 0) {
+                        poolRows = localPartners.filter(p => !p.is_blocked && p.is_active !== false);
+                    }
                 }
             } catch {}
         }
