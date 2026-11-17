@@ -346,21 +346,39 @@ router.post("/login", async (req, res) => {
                     { expiresIn: "30d" }
                 );
 
+                const userPayload = {
+                    id: user.id,
+                    name: user.name,
+                    admin_name: user.name || "Super Admin",
+                    email: user.email,
+                    phone: user.phone || "",
+                    alternate_phone: user.alternate_phone || "",
+                    address: user.address || "",
+                    city: user.city || "Chennai",
+                    pincode: user.pincode || "600087",
+                    profile_photo: user.profile_photo || "",
+                    role: user.role,
+                    created_at: user.created_at || new Date().toISOString()
+                };
+
+                const adminPayload = {
+                    id: user.id,
+                    name: user.name || "Super Admin",
+                    admin_name: user.name || "Super Admin",
+                    email: user.email,
+                    role: user.role || "admin",
+                    profile_photo: user.profile_photo || ""
+                };
+
                 return res.json({
                     success: true,
                     token,
-                    user: {
-                        id: user.id,
-                        name: user.name,
-                        email: user.email,
-                        phone: user.phone || "",
-                        alternate_phone: user.alternate_phone || "",
-                        address: user.address || "",
-                        city: user.city || "Chennai",
-                        pincode: user.pincode || "600087",
-                        profile_photo: user.profile_photo || "",
-                        role: user.role,
-                        created_at: user.created_at || new Date().toISOString()
+                    user: userPayload,
+                    admin: adminPayload,
+                    data: {
+                        token,
+                        user: userPayload,
+                        admin: adminPayload
                     }
                 });
             }
@@ -383,21 +401,39 @@ router.post("/login", async (req, res) => {
                     { expiresIn: "30d" }
                 );
 
+                const memUserPayload = {
+                    id: memUser.id,
+                    name: memUser.name,
+                    admin_name: memUser.name || "Super Admin",
+                    email: memUser.email,
+                    phone: memUser.phone || "",
+                    alternate_phone: memUser.alternate_phone || "",
+                    address: memUser.address || "",
+                    city: memUser.city || "Chennai",
+                    pincode: memUser.pincode || "600087",
+                    profile_photo: memUser.profile_photo || "",
+                    role: memUser.role,
+                    created_at: memUser.created_at || new Date().toISOString()
+                };
+
+                const memAdminPayload = {
+                    id: memUser.id,
+                    name: memUser.name || "Super Admin",
+                    admin_name: memUser.name || "Super Admin",
+                    email: memUser.email,
+                    role: memUser.role || "admin",
+                    profile_photo: memUser.profile_photo || ""
+                };
+
                 return res.json({
                     success: true,
                     token,
-                    user: {
-                        id: memUser.id,
-                        name: memUser.name,
-                        email: memUser.email,
-                        phone: memUser.phone || "",
-                        alternate_phone: memUser.alternate_phone || "",
-                        address: memUser.address || "",
-                        city: memUser.city || "Chennai",
-                        pincode: memUser.pincode || "600087",
-                        profile_photo: memUser.profile_photo || "",
-                        role: memUser.role,
-                        created_at: memUser.created_at || new Date().toISOString()
+                    user: memUserPayload,
+                    admin: memAdminPayload,
+                    data: {
+                        token,
+                        user: memUserPayload,
+                        admin: memAdminPayload
                     }
                 });
             } else {
@@ -451,7 +487,24 @@ const getProfileHandler = async (req, res) => {
                 [userId]
             );
             if (result.rows.length > 0) {
-                return res.json({ success: true, user: result.rows[0] });
+                const u = result.rows[0];
+                const adminPayload = {
+                    id: u.id,
+                    name: u.name || "Super Admin",
+                    admin_name: u.name || "Super Admin",
+                    email: u.email || "admin@thulirva.com",
+                    role: u.role || "admin",
+                    profile_photo: u.profile_photo || ""
+                };
+                return res.json({
+                    success: true,
+                    user: u,
+                    admin: adminPayload,
+                    data: {
+                        user: u,
+                        admin: adminPayload
+                    }
+                });
             }
         } catch (dbErr) {
             console.warn("[AUTH PROFILE GET DB ERROR]", dbErr.message);
@@ -459,20 +512,35 @@ const getProfileHandler = async (req, res) => {
 
         const memUser = IN_MEMORY_USERS.find(u => u.id == userId);
         if (memUser) {
+            const userPayload = {
+                id: memUser.id,
+                name: memUser.name,
+                admin_name: memUser.name || "Super Admin",
+                email: memUser.email,
+                phone: memUser.phone || "",
+                alternate_phone: memUser.alternate_phone || "",
+                address: memUser.address || "",
+                city: memUser.city || "Kanchipuram",
+                pincode: memUser.pincode || "631601",
+                profile_photo: memUser.profile_photo || "",
+                role: memUser.role || "customer",
+                created_at: memUser.created_at || new Date().toISOString()
+            };
+            const adminPayload = {
+                id: memUser.id,
+                name: memUser.name || "Super Admin",
+                admin_name: memUser.name || "Super Admin",
+                email: memUser.email || "admin@thulirva.com",
+                role: memUser.role || "admin",
+                profile_photo: memUser.profile_photo || ""
+            };
             return res.json({
                 success: true,
-                user: {
-                    id: memUser.id,
-                    name: memUser.name,
-                    email: memUser.email,
-                    phone: memUser.phone || "",
-                    alternate_phone: memUser.alternate_phone || "",
-                    address: memUser.address || "",
-                    city: memUser.city || "Kanchipuram",
-                    pincode: memUser.pincode || "631601",
-                    profile_photo: memUser.profile_photo || "",
-                    role: memUser.role || "customer",
-                    created_at: memUser.created_at || new Date().toISOString()
+                user: userPayload,
+                admin: adminPayload,
+                data: {
+                    user: userPayload,
+                    admin: adminPayload
                 }
             });
         }
@@ -485,6 +553,7 @@ const getProfileHandler = async (req, res) => {
 
 router.get("/profile", getProfileHandler);
 router.get("/me", getProfileHandler);
+router.get("/admin/profile", getProfileHandler);
 
 router.get("/profile/:id", async (req, res) => {
     const id = req.params.id;

@@ -1716,8 +1716,12 @@ const getAuthorizedProductOrdersForPartner = (orders, partnerId, partnerArea) =>
         const isSub = (o.order_type === "subscription" || o.delivery_type === "subscription" || (o.id && o.id.toString().startsWith("SUB-")));
         if (isSub) return false;
 
-        // Assigned directly to this partner
-        if (o.partner_id && o.partner_id === partnerId) return true;
+        // Assigned directly to this partner (handles canonical and alias IDs like DP-001 <-> THU-DP-0001)
+        if (o.partner_id && (
+            o.partner_id === partnerId ||
+            (partnerId === "THU-DP-0001" && (o.partner_id === "DP-001" || o.partner_id === "THU-DP-0001")) ||
+            (partnerId === "DP-001" && (o.partner_id === "DP-001" || o.partner_id === "THU-DP-0001"))
+        )) return true;
 
         // Unassigned order available for claim/delivery in partner's assigned territory
         if (!o.partner_id) {
@@ -1928,15 +1932,47 @@ router.put("/subscriptions/:id/status", authenticatePartner, async (req, res) =>
 ============================================================ */
 
 /**
- * GET /api/delivery/orders
+ * GET /api/delivery/orders & /api/delivery/product-orders
+ * Precise date filtering using Asia/Kolkata timezone with 00:00:00 - 23:59:59.999 IST boundaries
  */
 const getOrdersHandler = async (req, res) => {
     try {
         const partnerId = req.partner.partner_id;
         const { date, search } = req.query;
-        const targetDate = date ? new Date(date) : new Date();
-        const dateKey = formatDateKey(targetDate);
-        const dateLabel = formatReadableDate(targetDate);
+
+        // 1. Resolve target date in Asia/Kolkata timezone (YYYY-MM-DD)
+        let targetDateKey;
+        if (date && typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
+            targetDateKey = date.trim();
+        } else if (date) {
+            const parsed = new Date(date);
+            targetDateKey = !isNaN(parsed.getTime())
+                ? parsed.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+                : new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+        } else {
+            targetDateKey = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+        }
+
+        // 2. Strict Asia/Kolkata date boundaries (00:00:00.000 to 23:59:59.999 IST)
+        const [y, m, d] = targetDateKey.split("-").map(Number);
+        const startIstUtc = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0) - (5 * 60 + 30) * 60 * 1000);
+        const endIstUtc = new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999) - (5 * 60 + 30) * 60 * 1000);
+
+        // 3. User-friendly date label in Asia/Kolkata
+        const todayIstKey = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+        let dateLabel;
+        if (targetDateKey === todayIstKey) {
+            dateLabel = "Today";
+        } else {
+            const midDate = new Date(Date.UTC(y, m - 1, d, 6, 0, 0));
+            dateLabel = midDate.toLocaleDateString("en-IN", {
+                timeZone: "Asia/Kolkata",
+                weekday: "short",
+                day: "numeric",
+                month: "short",
+                year: "numeric"
+            });
+        }
 
         let orders = [];
         try {
@@ -1945,25 +1981,38 @@ const getOrdersHandler = async (req, res) => {
             }
         } catch {}
 
-        // Strict Product Orders partition: NEVER return subscriptions!
-        let filtered = getAuthorizedProductOrdersForPartner(orders, partnerId, req.partner.assigned_area);
+        // 4. Strict Product Orders partition: NEVER return subscriptions!
+        let authorized = getAuthorizedProductOrdersForPartner(orders, partnerId, req.partner.assigned_area);
 
+        // 5. Filter orders by creation date within Asia/Kolkata boundaries
+        let filtered = authorized.filter(o => {
+            const ts = o.created_at || o.createdAt || o.order_date || o.orderDate;
+            if (!ts) return false;
+            const orderTime = new Date(ts).getTime();
+            if (isNaN(orderTime)) return false;
+            return orderTime >= startIstUtc.getTime() && orderTime <= endIstUtc.getTime();
+        });
+
+        // 6. Search within selected date's orders
         if (search && search.trim()) {
             const q = search.trim().toLowerCase();
             filtered = filtered.filter(o =>
-                (o.order_number || "").toLowerCase().includes(q) ||
-                (o.customer_name || "").toLowerCase().includes(q) ||
-                (o.address || "").toLowerCase().includes(q)
+                (o.order_number || o.orderNumber || "").toLowerCase().includes(q) ||
+                (o.customer_name || o.customerName || "").toLowerCase().includes(q) ||
+                (o.address || "").toLowerCase().includes(q) ||
+                (o.customer_phone || o.customerPhone || "").toLowerCase().includes(q)
             );
         }
 
+        // 7. Calculate accurate statistics strictly for the selected date
+        // Total Orders = Delivered Orders + Pending Orders
         const total = filtered.length;
-        const delivered = filtered.filter(o => o.order_status === "delivered").length;
+        const delivered = filtered.filter(o => (o.order_status || o.status || "").toLowerCase() === "delivered").length;
         const pending = total - delivered;
 
         return res.json({
             success: true,
-            date: dateKey,
+            date: targetDateKey,
             date_label: dateLabel,
             stats: {
                 total,

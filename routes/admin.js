@@ -1,4 +1,5 @@
  const express = require("express");
+const jwt = require("jsonwebtoken");
 const { pool } = require("../config/database");
 const { authenticateToken, adminOnly } = require("../middleware/auth");
 const ordersRoute = require("./orders");
@@ -274,6 +275,62 @@ router.put("/customers/:id/reset-password", async (req, res) => {
     } catch {}
 
     res.json({ success: true, message: `Password for user #${id} reset successfully` });
+});
+
+/* ============================================================
+   ADMIN PROFILE ENDPOINT (SAFE ADMIN_NAME RESOLUTION)
+============================================================ */
+router.get("/profile", async (req, res) => {
+    try {
+        let adminUser = {
+            id: 1,
+            name: "Super Admin",
+            admin_name: "Super Admin",
+            email: "admin@thulirva.com",
+            role: "Super Admin",
+            profile_photo: ""
+        };
+
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+            const token = authHeader.split(" ")[1];
+            try {
+                const decoded = jwt.verify(token, process.env.JWT_SECRET || "thulirva_secret_key_2026");
+                if (decoded && decoded.id) {
+                    try {
+                        const dbRes = await pool.query(
+                            "SELECT id, name, email, role, profile_photo FROM users WHERE id = $1",
+                            [decoded.id]
+                        );
+                        if (dbRes.rows.length > 0) {
+                            const u = dbRes.rows[0];
+                            adminUser = {
+                                id: u.id,
+                                name: u.name || "Super Admin",
+                                admin_name: u.name || "Super Admin",
+                                email: u.email || "admin@thulirva.com",
+                                role: u.role || "Super Admin",
+                                profile_photo: u.profile_photo || ""
+                            };
+                        }
+                    } catch (_) {}
+                }
+            } catch (_) {}
+        }
+
+        return res.json({
+            success: true,
+            admin: adminUser,
+            user: adminUser,
+            data: adminUser
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.get("/me", async (req, res) => {
+    return router.handle(req, res);
 });
 
 module.exports = router;
