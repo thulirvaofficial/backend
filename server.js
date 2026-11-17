@@ -106,8 +106,32 @@ app.use(
 
 
 /* ============================================================
-   API ROUTES
+   API ROUTES & STRICT RBAC AUTHORIZATION GATES
 ============================================================ */
+
+const { authenticateToken, adminOnly } = require("./middleware/auth");
+
+// Strict Global RBAC Authorization Gate for All /api/admin Routes
+app.use("/api/admin", (req, res, next) => {
+    const p = req.path.toLowerCase();
+    if (p === "/login" || p === "/auth/login") {
+        return next();
+    }
+    return authenticateToken(req, res, () => {
+        return adminOnly(req, res, next);
+    });
+});
+
+// Strict Global RBAC Gate for /api/v1/admin
+app.use("/api/v1/admin", (req, res, next) => {
+    const p = req.path.toLowerCase();
+    if (p === "/login" || p === "/auth/login") {
+        return next();
+    }
+    return authenticateToken(req, res, () => {
+        return adminOnly(req, res, next);
+    });
+});
 
 app.use(
     "/api/auth",

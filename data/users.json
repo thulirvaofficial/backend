@@ -1,24 +1,24 @@
 [
   {
     "id": 1,
-    "name": "THULIRVA Admin",
+    "name": "THULIRVA Super Admin",
     "email": "admin@thulirva.com",
-    "password": "$2b$10$jdoFNr5VV50OZmMy2o/H6OLsxMmsWdK3BsfKSoW.eisGeUnvABZnO",
+    "password": "$2b$10$BjfjUUcHYWQnaW9UMCsOi.SiUxqUuEKuDRciXl8w1nBwkbxWnpHoi",
     "phone": "7904880944",
     "alternate_phone": "",
     "address": "Arcot Road, Valasaravakkam, Chennai",
     "city": "Chennai",
     "pincode": "600087",
     "profile_photo": "/uploads/profiles/profile_1_1794686372800.png",
-    "role": "admin",
+    "role": "super_admin",
     "created_at": "2026-01-01T00:00:00.000Z",
-    "updated_at": "2026-11-14T19:59:32.806Z"
+    "updated_at": "2026-11-17T09:15:00.000Z"
   },
   {
     "id": 2,
     "name": "kamsh",
     "email": "kamsh@thulirva.com",
-    "password": "$2b$10$jdoFNr5VV50OZmMy2o/H6OLsxMmsWdK3BsfKSoW.eisGeUnvABZnO",
+    "password": "$2b$10$BjfjUUcHYWQnaW9UMCsOi.SiUxqUuEKuDRciXl8w1nBwkbxWnpHoi",
     "phone": "7904880944",
     "alternate_phone": "9840123456",
     "address": "4/12, Kamarajar Street, Thiruverkadu, Chennai",

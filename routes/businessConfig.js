@@ -2,6 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const { authenticateToken, adminOnly } = require("../middleware/auth");
 const {
     getDeliveryConfig,
     updateDeliveryConfig,
@@ -113,7 +114,7 @@ router.get(["/payment-qr", "/qr"], async (req, res) => {
 ========================================================================= */
 
 // 6. PUT or POST /api/admin/config/delivery - Update delivery & business configuration
-router.all(["/admin/delivery", "/delivery/update", "/delivery", "/update"], async (req, res) => {
+router.all(["/admin/delivery", "/delivery/update", "/delivery", "/update"], authenticateToken, adminOnly, async (req, res) => {
     if (req.method !== "POST" && req.method !== "PUT") {
         return res.status(405).json({ success: false, message: "Method Not Allowed" });
     }
@@ -132,7 +133,7 @@ router.all(["/admin/delivery", "/delivery/update", "/delivery", "/update"], asyn
 });
 
 // 7. POST /api/admin/payment-qr/verify-password - Verify Dedicated Security Password
-router.post(["/payment-qr/verify-password", "/verify-password", "/payment-qr/verify-security-password", "/verify-security-password"], async (req, res) => {
+router.post(["/payment-qr/verify-password", "/verify-password", "/payment-qr/verify-security-password", "/verify-security-password"], authenticateToken, adminOnly, async (req, res) => {
     try {
         const { password } = req.body || {};
         const result = await verifyQrSecurityPassword(password);
@@ -152,7 +153,7 @@ router.post(["/payment-qr/verify-password", "/verify-password", "/payment-qr/ver
 });
 
 // 8. POST /api/admin/payment-qr/set-password - Update/Reset Dedicated Security Password
-router.post(["/payment-qr/set-password", "/set-password"], async (req, res) => {
+router.post(["/payment-qr/set-password", "/set-password"], authenticateToken, adminOnly, async (req, res) => {
     try {
         const { current_password, new_password, admin_name = "Super Admin" } = req.body || {};
 
@@ -176,7 +177,7 @@ router.post(["/payment-qr/set-password", "/set-password"], async (req, res) => {
 });
 
 // 9. GET /api/admin/payment-qr/history - View QR Version History & Audit Trail
-router.get(["/payment-qr/history", "/history"], async (req, res) => {
+router.get(["/payment-qr/history", "/history"], authenticateToken, adminOnly, async (req, res) => {
     try {
         const history = await getPaymentQrHistory();
         res.json({
@@ -189,7 +190,7 @@ router.get(["/payment-qr/history", "/history"], async (req, res) => {
 });
 
 // 10. POST /api/admin/payment-qr/upload - Upload, Replace & Publish New Payment QR
-router.post(["/payment-qr/upload", "/upload"], upload.single("qr_image"), async (req, res) => {
+router.post(["/payment-qr/upload", "/upload"], authenticateToken, adminOnly, upload.single("qr_image"), async (req, res) => {
     try {
         const { security_password, upi_id, merchant_name, notes, admin_name = "Super Admin", qr_image_base64 } = req.body || {};
 
@@ -237,7 +238,7 @@ router.post(["/payment-qr/upload", "/upload"], upload.single("qr_image"), async 
 });
 
 // 11. POST /api/admin/payment-qr/status - Activate or Deactivate QR Code
-router.post(["/payment-qr/status", "/status"], async (req, res) => {
+router.post(["/payment-qr/status", "/status"], authenticateToken, adminOnly, async (req, res) => {
     try {
         const { security_password, is_active, admin_name = "Super Admin" } = req.body || {};
 

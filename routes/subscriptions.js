@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const jwt = require("jsonwebtoken");
 const { pool } = require("../config/database");
+const { authenticateToken, adminOnly } = require("../middleware/auth");
 const { notifySubscriptionActivated, notifySubscriptionRenewed, notifyAdminNewOrder, sendSubscriptionNotification, sendNotification, sendPaymentNotification } = require("../services/notificationService");
 
 const router = express.Router();
@@ -201,7 +202,7 @@ router.get("/plans/:id", async (req, res) => {
 });
 
 /* CREATE PLAN (Admin) */
-router.post("/plans", async (req, res) => {
+router.post("/plans", authenticateToken, adminOnly, async (req, res) => {
     try {
         const {
             product_id,
@@ -273,7 +274,7 @@ router.post("/plans", async (req, res) => {
 });
 
 /* UPDATE PLAN (Admin) */
-router.put("/plans/:id", async (req, res) => {
+router.put("/plans/:id", authenticateToken, adminOnly, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         const {
@@ -359,7 +360,7 @@ router.put("/plans/:id", async (req, res) => {
 });
 
 /* DELETE PLAN (Admin) */
-router.delete("/plans/:id", async (req, res) => {
+router.delete("/plans/:id", authenticateToken, adminOnly, async (req, res) => {
     const id = parseInt(req.params.id);
     try {
         await pool.query("DELETE FROM subscription_plans WHERE id=$1", [id]);
@@ -392,12 +393,12 @@ const getAllSubscriptionsHandler = async (req, res) => {
     }
 };
 
-router.get("/admin/all", getAllSubscriptionsHandler);
-router.get("/all", getAllSubscriptionsHandler);
-router.get("/", getAllSubscriptionsHandler);
+router.get("/admin/all", authenticateToken, adminOnly, getAllSubscriptionsHandler);
+router.get("/all", authenticateToken, adminOnly, getAllSubscriptionsHandler);
+router.get("/", authenticateToken, adminOnly, getAllSubscriptionsHandler);
 
 /* ADMIN CREATE / ONBOARD SUBSCRIBER */
-router.post("/admin/create", async (req, res) => {
+router.post("/admin/create", authenticateToken, adminOnly, async (req, res) => {
     try {
         const {
             customer_name,
@@ -956,11 +957,11 @@ router.post("/:id/resume", resumeSubHandler);
 router.delete("/:id", deleteSubHandler);
 router.put("/:id/cancel", cancelSubHandler);
 router.post("/:id/cancel", cancelSubHandler);
-router.post("/:id/verify-payment", verifyPaymentHandler);
-router.put("/:id/verify-payment", verifyPaymentHandler);
-router.post("/:id/approve-payment", verifyPaymentHandler);
-router.post("/:id/reject-payment", rejectPaymentHandler);
-router.put("/:id/reject-payment", rejectPaymentHandler);
+router.post("/:id/verify-payment", authenticateToken, adminOnly, verifyPaymentHandler);
+router.put("/:id/verify-payment", authenticateToken, adminOnly, verifyPaymentHandler);
+router.post("/:id/approve-payment", authenticateToken, adminOnly, verifyPaymentHandler);
+router.post("/:id/reject-payment", authenticateToken, adminOnly, rejectPaymentHandler);
+router.put("/:id/reject-payment", authenticateToken, adminOnly, rejectPaymentHandler);
 router.patch("/:id/status", updateSubStatusHandler);
 router.put("/:id/status", updateSubStatusHandler);
 
@@ -1211,7 +1212,7 @@ async function getSubscriptionDeliveriesHandler(req, res) {
     }
 }
 
-router.get(["/deliveries", "/daily-manifest", "/admin/daily-manifest"], getSubscriptionDeliveriesHandler);
+router.get(["/deliveries", "/daily-manifest", "/admin/daily-manifest"], authenticateToken, adminOnly, getSubscriptionDeliveriesHandler);
 
 router.put(["/deliveries/:id/status", "/daily-manifest/:id/status"], async (req, res) => {
     try {

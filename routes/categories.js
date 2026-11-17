@@ -196,7 +196,7 @@ router.get("/:id", async (req, res) => {
 });
 
 /* CREATE CATEGORY (Admin Only) */
-router.post("/", async (req, res) => {
+router.post("/", authenticateToken, adminOnly, async (req, res) => {
     try {
         const { name, displayName, description, image, website_image, mobile_image, appImage, emoji, is_active, display_order } = req.body;
         if (!name) {
@@ -253,7 +253,7 @@ router.post("/", async (req, res) => {
 });
 
 /* UPDATE CATEGORY (Admin Only) */
-router.put("/:id", async (req, res) => {
+router.put("/:id", authenticateToken, adminOnly, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         const { name, displayName, description, image, website_image, mobile_image, appImage, emoji, is_active, display_order } = req.body;
@@ -338,7 +338,7 @@ router.put("/:id", async (req, res) => {
 });
 
 /* DELETE CATEGORY (Admin Only) */
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", authenticateToken, adminOnly, async (req, res) => {
     const id = parseInt(req.params.id);
     try {
         await pool.query("DELETE FROM categories WHERE id=$1", [id]);

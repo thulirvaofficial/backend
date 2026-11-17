@@ -305,16 +305,26 @@ router.post("/login", async (req, res) => {
         if ((cleanIdentifier === "admin@thulirva.com" || cleanIdentifier === "admin") && password === "admin123") {
             clearLoginAttempts(cleanIdentifier);
             const token = jwt.sign(
-                { id: 1, email: "admin@thulirva.com", role: "admin" },
+                { id: 1, email: "admin@thulirva.com", role: "super_admin" },
                 process.env.JWT_SECRET || "thulirva_secret_key_2026",
                 { expiresIn: "30d" }
             );
+            const superAdminUser = {
+                id: 1,
+                name: "THULIRVA Super Admin",
+                admin_name: "THULIRVA Super Admin",
+                email: "admin@thulirva.com",
+                role: "super_admin"
+            };
             return res.json({
                 success: true,
                 token,
-                user: { id: 1, name: "THULIRVA Admin", email: "admin@thulirva.com", role: "admin" }
+                user: superAdminUser,
+                admin: superAdminUser
             });
         }
+
+        const isAdminLogin = req.body.admin_login === true || req.body.is_admin_portal === true;
 
         // 1. Try PostgreSQL database first
         try {
@@ -339,6 +349,14 @@ router.post("/login", async (req, res) => {
                     });
                 }
 
+                const userRole = String(user.role || "customer").toLowerCase().trim();
+                if (isAdminLogin && userRole !== "admin" && userRole !== "super_admin") {
+                    return res.status(403).json({
+                        success: false,
+                        message: "Access Denied: Customer accounts are not authorized to sign in to the Administrative Console."
+                    });
+                }
+
                 clearLoginAttempts(cleanIdentifier);
                 const token = jwt.sign(
                     { id: user.id, email: user.email, role: user.role },
@@ -349,7 +367,7 @@ router.post("/login", async (req, res) => {
                 const userPayload = {
                     id: user.id,
                     name: user.name,
-                    admin_name: user.name || "Super Admin",
+                    admin_name: user.name,
                     email: user.email,
                     phone: user.phone || "",
                     alternate_phone: user.alternate_phone || "",
@@ -361,39 +379,53 @@ router.post("/login", async (req, res) => {
                     created_at: user.created_at || new Date().toISOString()
                 };
 
-                const adminPayload = {
-                    id: user.id,
-                    name: user.name || "Super Admin",
-                    admin_name: user.name || "Super Admin",
-                    email: user.email,
-                    role: user.role || "admin",
-                    profile_photo: user.profile_photo || ""
-                };
-
-                return res.json({
+                const resData = {
                     success: true,
                     token,
                     user: userPayload,
-                    admin: adminPayload,
                     data: {
                         token,
-                        user: userPayload,
-                        admin: adminPayload
+                        user: userPayload
                     }
-                });
+                };
+
+                if (userRole === "admin" || userRole === "super_admin") {
+                    const adminPayload = {
+                        id: user.id,
+                        name: user.name || "Super Admin",
+                        admin_name: user.name || "Super Admin",
+                        email: user.email,
+                        role: userRole === "super_admin" ? "Super Admin" : "Operations Admin",
+                        raw_role: userRole,
+                        profile_photo: user.profile_photo || ""
+                    };
+                    resData.admin = adminPayload;
+                    resData.data.admin = adminPayload;
+                }
+
+                return res.json(resData);
             }
         } catch (dbErr) {
             console.warn("[AUTH] Database query error on login, checking fallback store:", dbErr.message);
         }
 
         // 2. Check in-memory store
-        const memUser = IN_MEMORY_USERS.find(u => 
+        const currentUsers = loadUsersFromDisk();
+        const memUser = currentUsers.find(u => 
             (u.email && u.email.toLowerCase() === cleanIdentifier) ||
             (u.phone && (u.phone === cleanIdentifier || (phoneDigits.length === 10 && u.phone.replace(/\D/g, "") === phoneDigits)))
         );
         if (memUser) {
             const valid = await bcrypt.compare(password, memUser.password);
             if (valid) {
+                const memRole = String(memUser.role || "customer").toLowerCase().trim();
+                if (isAdminLogin && memRole !== "admin" && memRole !== "super_admin") {
+                    return res.status(403).json({
+                        success: false,
+                        message: "Access Denied: Customer accounts are not authorized to sign in to the Administrative Console."
+                    });
+                }
+
                 clearLoginAttempts(cleanIdentifier);
                 const token = jwt.sign(
                     { id: memUser.id, email: memUser.email, role: memUser.role },
@@ -404,7 +436,7 @@ router.post("/login", async (req, res) => {
                 const memUserPayload = {
                     id: memUser.id,
                     name: memUser.name,
-                    admin_name: memUser.name || "Super Admin",
+                    admin_name: memUser.name,
                     email: memUser.email,
                     phone: memUser.phone || "",
                     alternate_phone: memUser.alternate_phone || "",
@@ -416,26 +448,31 @@ router.post("/login", async (req, res) => {
                     created_at: memUser.created_at || new Date().toISOString()
                 };
 
-                const memAdminPayload = {
-                    id: memUser.id,
-                    name: memUser.name || "Super Admin",
-                    admin_name: memUser.name || "Super Admin",
-                    email: memUser.email,
-                    role: memUser.role || "admin",
-                    profile_photo: memUser.profile_photo || ""
-                };
-
-                return res.json({
+                const memResData = {
                     success: true,
                     token,
                     user: memUserPayload,
-                    admin: memAdminPayload,
                     data: {
                         token,
-                        user: memUserPayload,
-                        admin: memAdminPayload
+                        user: memUserPayload
                     }
-                });
+                };
+
+                if (memRole === "admin" || memRole === "super_admin") {
+                    const memAdminPayload = {
+                        id: memUser.id,
+                        name: memUser.name || "Super Admin",
+                        admin_name: memUser.name || "Super Admin",
+                        email: memUser.email,
+                        role: memRole === "super_admin" ? "Super Admin" : "Operations Admin",
+                        raw_role: memRole,
+                        profile_photo: memUser.profile_photo || ""
+                    };
+                    memResData.admin = memAdminPayload;
+                    memResData.data.admin = memAdminPayload;
+                }
+
+                return res.json(memResData);
             } else {
                 recordFailedLogin(cleanIdentifier);
                 return res.status(401).json({
@@ -488,23 +525,30 @@ const getProfileHandler = async (req, res) => {
             );
             if (result.rows.length > 0) {
                 const u = result.rows[0];
-                const adminPayload = {
-                    id: u.id,
-                    name: u.name || "Super Admin",
-                    admin_name: u.name || "Super Admin",
-                    email: u.email || "admin@thulirva.com",
-                    role: u.role || "admin",
-                    profile_photo: u.profile_photo || ""
-                };
-                return res.json({
+                const userRole = String(u.role || "customer").toLowerCase().trim();
+                const isAdmin = userRole === "admin" || userRole === "super_admin";
+
+                const responseData = {
                     success: true,
                     user: u,
-                    admin: adminPayload,
-                    data: {
-                        user: u,
-                        admin: adminPayload
-                    }
-                });
+                    data: { user: u }
+                };
+
+                if (isAdmin) {
+                    const adminPayload = {
+                        id: u.id,
+                        name: u.name || "Super Admin",
+                        admin_name: u.name || "Super Admin",
+                        email: u.email || "admin@thulirva.com",
+                        role: userRole === "super_admin" ? "Super Admin" : "Operations Admin",
+                        raw_role: userRole,
+                        profile_photo: u.profile_photo || ""
+                    };
+                    responseData.admin = adminPayload;
+                    responseData.data.admin = adminPayload;
+                }
+
+                return res.json(responseData);
             }
         } catch (dbErr) {
             console.warn("[AUTH PROFILE GET DB ERROR]", dbErr.message);
@@ -512,48 +556,81 @@ const getProfileHandler = async (req, res) => {
 
         const memUser = IN_MEMORY_USERS.find(u => u.id == userId);
         if (memUser) {
+            const userRole = String(memUser.role || "customer").toLowerCase().trim();
+            const isAdmin = userRole === "admin" || userRole === "super_admin";
+
             const userPayload = {
                 id: memUser.id,
                 name: memUser.name,
-                admin_name: memUser.name || "Super Admin",
+                admin_name: memUser.name || "Customer",
                 email: memUser.email,
                 phone: memUser.phone || "",
                 alternate_phone: memUser.alternate_phone || "",
                 address: memUser.address || "",
-                city: memUser.city || "Kanchipuram",
-                pincode: memUser.pincode || "631601",
+                city: memUser.city || "Chennai",
+                pincode: memUser.pincode || "600087",
                 profile_photo: memUser.profile_photo || "",
-                role: memUser.role || "customer",
+                role: userRole,
                 created_at: memUser.created_at || new Date().toISOString()
             };
-            const adminPayload = {
-                id: memUser.id,
-                name: memUser.name || "Super Admin",
-                admin_name: memUser.name || "Super Admin",
-                email: memUser.email || "admin@thulirva.com",
-                role: memUser.role || "admin",
-                profile_photo: memUser.profile_photo || ""
-            };
-            return res.json({
+
+            const responseData = {
                 success: true,
                 user: userPayload,
-                admin: adminPayload,
-                data: {
-                    user: userPayload,
-                    admin: adminPayload
-                }
-            });
+                data: { user: userPayload }
+            };
+
+            if (isAdmin) {
+                const adminPayload = {
+                    id: memUser.id,
+                    name: memUser.name || "Super Admin",
+                    admin_name: memUser.name || "Super Admin",
+                    email: memUser.email || "admin@thulirva.com",
+                    role: userRole === "super_admin" ? "Super Admin" : "Operations Admin",
+                    raw_role: userRole,
+                    profile_photo: memUser.profile_photo || ""
+                };
+                responseData.admin = adminPayload;
+                responseData.data.admin = adminPayload;
+            }
+
+            return res.json(responseData);
         }
 
-        res.status(404).json({ success: false, message: "Customer profile not found" });
+        res.status(404).json({ success: false, message: "User profile not found" });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
 };
 
+const { authenticateToken, adminOnly } = require("../middleware/auth");
+
 router.get("/profile", getProfileHandler);
 router.get("/me", getProfileHandler);
-router.get("/admin/profile", getProfileHandler);
+
+// Dedicated Secure Admin Profile Endpoint (Admin & Super Admin ONLY)
+router.get("/admin/profile", authenticateToken, adminOnly, async (req, res) => {
+    try {
+        const u = req.user;
+        const userRole = String(u.role || "").toLowerCase().trim();
+        const adminPayload = {
+            id: u.id,
+            name: u.name || "Super Admin",
+            admin_name: u.name || "Super Admin",
+            email: u.email || "admin@thulirva.com",
+            role: userRole === "super_admin" ? "Super Admin" : "Operations Admin",
+            raw_role: userRole,
+            profile_photo: u.profile_photo || ""
+        };
+        return res.json({
+            success: true,
+            admin: adminPayload,
+            user: adminPayload
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
 
 router.get("/profile/:id", async (req, res) => {
     const id = req.params.id;

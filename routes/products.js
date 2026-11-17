@@ -255,7 +255,7 @@ router.get("/:id/variants", async (req, res) => {
     res.json({ success: true, variants });
 });
 
-router.post("/:id/variants", async (req, res) => {
+router.post("/:id/variants", authenticateToken, adminOnly, async (req, res) => {
     const productId = parseInt(req.params.id);
     const { name, weight_value, unit, price, compare_price, stock, is_default, is_active } = req.body;
 
@@ -290,7 +290,7 @@ router.post("/:id/variants", async (req, res) => {
     }
 });
 
-router.put("/variants/:variantId", async (req, res) => {
+router.put("/variants/:variantId", authenticateToken, adminOnly, async (req, res) => {
     const variantId = parseInt(req.params.variantId);
     const { name, weight_value, unit, price, compare_price, stock, is_default, is_active } = req.body;
 
@@ -323,7 +323,7 @@ router.put("/variants/:variantId", async (req, res) => {
     res.json({ success: true, message: "Variant updated" });
 });
 
-router.delete("/variants/:variantId", async (req, res) => {
+router.delete("/variants/:variantId", authenticateToken, adminOnly, async (req, res) => {
     const variantId = parseInt(req.params.variantId);
     try {
         await pool.query("DELETE FROM product_variants WHERE id = $1", [variantId]);
@@ -337,7 +337,7 @@ router.delete("/variants/:variantId", async (req, res) => {
 });
 
 /* CREATE PRODUCT */
-router.post("/", async (req, res) => {
+router.post("/", authenticateToken, adminOnly, async (req, res) => {
     try {
         const { name, description, category, category_id, price, compare_price, sku, stock, weight, image, badge, status } = req.body;
         const savedImage = saveBase64Image(image);
@@ -394,7 +394,7 @@ router.post("/", async (req, res) => {
 });
 
 /* UPDATE PRODUCT */
-router.put("/:id", async (req, res) => {
+router.put("/:id", authenticateToken, adminOnly, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         const { name, description, category, category_id, price, compare_price, sku, stock, weight, image, status, badge } = req.body;
@@ -450,7 +450,7 @@ router.put("/:id", async (req, res) => {
 });
 
 /* DELETE PRODUCT */
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", authenticateToken, adminOnly, async (req, res) => {
     const id = parseInt(req.params.id);
     try {
         try {

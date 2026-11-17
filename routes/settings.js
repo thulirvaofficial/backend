@@ -1,5 +1,6 @@
 const express = require("express");
 const { pool } = require("../config/database");
+const { authenticateToken, adminOnly } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -46,8 +47,8 @@ router.get("/store", async (req, res) => {
     res.json({ success: true, settings: STORE_SETTINGS });
 });
 
-/* UPDATE STORE SETTINGS (PICKUP MODE TOGGLE) */
-router.post("/store", async (req, res) => {
+/* UPDATE STORE SETTINGS (PICKUP MODE TOGGLE - ADMIN ONLY) */
+router.post("/store", authenticateToken, adminOnly, async (req, res) => {
     try {
         const { pickup_mode, store_address, store_timings } = req.body;
 

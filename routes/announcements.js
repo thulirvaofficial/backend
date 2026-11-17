@@ -2,6 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const { authenticateToken, adminOnly } = require("../middleware/auth");
 const {
     getAllAnnouncements,
     getActiveAnnouncements,
@@ -77,7 +78,7 @@ router.get("/banner", async (req, res) => {
 });
 
 // 2. GET /api/admin/announcements or GET /api/announcements/all - List all announcements for admin panel
-router.get(["/all", "/admin/all"], async (req, res) => {
+router.get(["/all", "/admin/all"], authenticateToken, adminOnly, async (req, res) => {
     try {
         const announcements = await getAllAnnouncements();
         res.json({
@@ -95,11 +96,15 @@ router.get("/", async (req, res) => {
     try {
         const isAdmin = req.baseUrl.includes("/admin");
         if (isAdmin) {
-            const announcements = await getAllAnnouncements();
-            return res.json({
-                success: true,
-                count: announcements.length,
-                announcements
+            return authenticateToken(req, res, () => {
+                return adminOnly(req, res, async () => {
+                    const announcements = await getAllAnnouncements();
+                    return res.json({
+                        success: true,
+                        count: announcements.length,
+                        announcements
+                    });
+                });
             });
         }
 
@@ -122,7 +127,7 @@ function extractAdminName(req) {
 }
 
 // 3. POST - Create announcement (with optional banner image)
-router.post(["/", "/create", "/admin/create", "/admin"], upload.single("banner_image"), async (req, res) => {
+router.post(["/", "/create", "/admin/create", "/admin"], authenticateToken, adminOnly, upload.single("banner_image"), async (req, res) => {
     try {
         const adminName = extractAdminName(req);
         const b = req.body || {};
@@ -152,7 +157,7 @@ router.post(["/", "/create", "/admin/create", "/admin"], upload.single("banner_i
 });
 
 // 4. POST - Upload banner image only
-router.post(["/upload-banner", "/admin/upload-banner"], upload.single("banner"), (req, res) => {
+router.post(["/upload-banner", "/admin/upload-banner"], authenticateToken, adminOnly, upload.single("banner"), (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ success: false, message: "No image file provided." });
@@ -169,7 +174,7 @@ router.post(["/upload-banner", "/admin/upload-banner"], upload.single("banner"),
 });
 
 // 5. PUT /:id - Update announcement
-router.all(["/:id", "/admin/:id"], upload.single("banner_image"), async (req, res) => {
+router.all(["/:id", "/admin/:id"], authenticateToken, adminOnly, upload.single("banner_image"), async (req, res) => {
     if (req.method !== "PUT" && req.method !== "POST" && req.method !== "DELETE") {
         return res.status(405).json({ success: false, message: "Method Not Allowed" });
     }
@@ -215,7 +220,7 @@ router.all(["/:id", "/admin/:id"], upload.single("banner_image"), async (req, re
 });
 
 // 6. DELETE /:id - Delete announcement
-router.all(["/:id/delete", "/admin/:id/delete"], async (req, res) => {
+router.all(["/:id/delete", "/admin/:id/delete"], authenticateToken, adminOnly, async (req, res) => {
     try {
         const adminName = extractAdminName(req);
         await deleteAnnouncement(req.params.id, adminName);
@@ -229,7 +234,7 @@ router.all(["/:id/delete", "/admin/:id/delete"], async (req, res) => {
 });
 
 // 7. PATCH or POST /:id/toggle - Toggle active status
-router.all(["/:id/toggle", "/admin/:id/toggle"], async (req, res) => {
+router.all(["/:id/toggle", "/admin/:id/toggle"], authenticateToken, adminOnly, async (req, res) => {
     try {
         const adminName = extractAdminName(req);
         const b = req.body || {};
@@ -249,7 +254,7 @@ router.all(["/:id/toggle", "/admin/:id/toggle"], async (req, res) => {
 });
 
 // 8. PATCH or POST /:id/publish - Publish/unpublish announcement
-router.all(["/:id/publish", "/admin/:id/publish"], async (req, res) => {
+router.all(["/:id/publish", "/admin/:id/publish"], authenticateToken, adminOnly, async (req, res) => {
     try {
         const adminName = extractAdminName(req);
         const b = req.body || {};

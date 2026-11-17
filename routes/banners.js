@@ -1,5 +1,6 @@
 const express = require("express");
 const { pool } = require("../config/database");
+const { authenticateToken, adminOnly } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -28,7 +29,7 @@ router.get("/", async (req, res) => {
 });
 
 /* ADMIN: CREATE BANNER */
-router.post("/", async (req, res) => {
+router.post("/", authenticateToken, adminOnly, async (req, res) => {
     try {
         const { title, description, image, button_label, destination, is_active, sort_order } = req.body;
         const result = await pool.query(
@@ -43,7 +44,7 @@ router.post("/", async (req, res) => {
 });
 
 /* ADMIN: UPDATE BANNER */
-router.put("/:id", async (req, res) => {
+router.put("/:id", authenticateToken, adminOnly, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         const { title, description, image, button_label, destination, is_active, sort_order } = req.body;
@@ -66,7 +67,7 @@ router.put("/:id", async (req, res) => {
 });
 
 /* ADMIN: DELETE BANNER */
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", authenticateToken, adminOnly, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         await pool.query("DELETE FROM banners WHERE id = $1", [id]);

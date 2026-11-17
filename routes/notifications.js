@@ -1,5 +1,6 @@
 const express = require("express");
 const { pool } = require("../config/database");
+const { authenticateToken, adminOnly } = require("../middleware/auth");
 const { IN_APP_NOTIFICATIONS, sendNotification } = require("../services/notificationService");
 const { DEVICE_TOKENS, addDeviceToken, getDeviceTokens } = require("../services/tokenStore");
 
@@ -161,7 +162,7 @@ router.post("/update-preference", async (req, res) => {
 ============================================================ */
 
 /* GET ALL ANNOUNCEMENTS & BROADCASTS (ADMIN) */
-router.get("/admin/all", async (req, res) => {
+router.get("/admin/all", authenticateToken, adminOnly, async (req, res) => {
     try {
         const result = await pool.query("SELECT * FROM announcements ORDER BY created_at DESC");
         if (result.rows.length) {
@@ -173,7 +174,7 @@ router.get("/admin/all", async (req, res) => {
 });
 
 /* PUBLISH NEW ANNOUNCEMENT / BROADCAST PUSH NOTIFICATION */
-router.post("/admin/broadcast", async (req, res) => {
+router.post("/admin/broadcast", authenticateToken, adminOnly, async (req, res) => {
     const { title, message, badge, target_role, send_push } = req.body;
     if (!title || !message) {
         return res.status(400).json({ success: false, message: "Title and message are required" });
@@ -238,7 +239,7 @@ router.post("/admin/broadcast", async (req, res) => {
 });
 
 /* EDIT ANNOUNCEMENT */
-router.put("/admin/:id", async (req, res) => {
+router.put("/admin/:id", authenticateToken, adminOnly, async (req, res) => {
     const id = parseInt(req.params.id);
     const { title, message, badge, is_published } = req.body;
 
@@ -269,7 +270,7 @@ router.put("/admin/:id", async (req, res) => {
 });
 
 /* DELETE ANNOUNCEMENT */
-router.delete("/admin/:id", async (req, res) => {
+router.delete("/admin/:id", authenticateToken, adminOnly, async (req, res) => {
     const id = parseInt(req.params.id);
     try {
         await pool.query("DELETE FROM announcements WHERE id = $1", [id]);
@@ -371,7 +372,7 @@ router.post("/deactivate-token", async (req, res) => {
 });
 
 /* NOTIFICATION DIAGNOSTIC ENDPOINT (REQUIREMENT 9) */
-router.get("/diagnostic", async (req, res) => {
+router.get("/diagnostic", authenticateToken, adminOnly, async (req, res) => {
     const fs = require("fs");
     const path = require("path");
     const defaultPath = path.join(__dirname, "..", "config", "firebase-service-account.json");
@@ -462,18 +463,10 @@ router.get("/diagnostic", async (req, res) => {
 });
 
 /* INSTALL / UPDATE FIREBASE SERVICE ACCOUNT KEY ENDPOINT */
-router.post("/install-key", async (req, res) => {
+router.post("/install-key", authenticateToken, adminOnly, async (req, res) => {
     const fs = require("fs");
     const path = require("path");
     const { initFirebaseAdmin, isFirebaseInitialized } = require("../services/firebaseAdmin");
-
-    const authHeader = req.headers.authorization;
-    const adminKey = req.headers["x-admin-key"] || req.body.adminSecret;
-    const isAuthorizedSecret = adminKey === (process.env.JWT_SECRET || "THULIRVA_CHANGE_THIS_SECRET_KEY") || adminKey === "admin123";
-
-    if (!isAuthorizedSecret && !authHeader) {
-        return res.status(401).json({ success: false, error: "Unauthorized access to credentials installer" });
-    }
 
     try {
         let saObject = null;
@@ -513,7 +506,7 @@ router.post("/install-key", async (req, res) => {
 });
 
 /* GET FCM DELIVERY LOGS (ADMIN ONLY) */
-router.get("/admin/logs", async (req, res) => {
+router.get("/admin/logs", authenticateToken, adminOnly, async (req, res) => {
     let logs = [];
     try {
         const result = await pool.query("SELECT * FROM notification_logs ORDER BY created_at DESC LIMIT 50");

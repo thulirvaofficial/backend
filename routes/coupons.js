@@ -1,5 +1,6 @@
 const express = require("express");
 const { pool } = require("../config/database");
+const { authenticateToken, adminOnly } = require("../middleware/auth");
 const { sendNotification } = require("../services/notificationService");
 
 const router = express.Router();
@@ -110,7 +111,7 @@ router.get("/", async (req, res) => {
 });
 
 /* GET ALL COUPONS (Admin view) */
-router.get("/admin", async (req, res) => {
+router.get("/admin", authenticateToken, adminOnly, async (req, res) => {
     try {
         const result = await pool.query("SELECT * FROM coupons ORDER BY id ASC");
         if (result.rows.length) {
@@ -229,7 +230,7 @@ router.post("/validate", async (req, res) => {
 });
 
 /* CREATE NEW COUPON */
-router.post("/", async (req, res) => {
+router.post("/", authenticateToken, adminOnly, async (req, res) => {
     const { code, discount_type, discount_value, min_order, max_discount, description, headline, expiry_date, usage_limit } = req.body;
     if (!code || discount_value === undefined) {
         return res.status(400).json({ success: false, message: "Coupon code and discount value are required" });
@@ -292,7 +293,7 @@ router.post("/", async (req, res) => {
 });
 
 /* UPDATE / EDIT COUPON */
-router.put("/:id", async (req, res) => {
+router.put("/:id", authenticateToken, adminOnly, async (req, res) => {
     const id = parseInt(req.params.id);
     const { code, discount_type, discount_value, min_order, max_discount, description, headline, expiry_date, usage_limit, status } = req.body;
     
@@ -348,7 +349,7 @@ router.put("/:id", async (req, res) => {
 });
 
 /* TOGGLE COUPON STATUS */
-router.patch("/:id/toggle", async (req, res) => {
+router.patch("/:id/toggle", authenticateToken, adminOnly, async (req, res) => {
     const id = parseInt(req.params.id);
     try {
         const row = await pool.query("SELECT status FROM coupons WHERE id = $1", [id]);
@@ -369,7 +370,7 @@ router.patch("/:id/toggle", async (req, res) => {
 });
 
 /* DELETE COUPON */
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", authenticateToken, adminOnly, async (req, res) => {
     const id = parseInt(req.params.id);
     try {
         await pool.query("DELETE FROM coupons WHERE id = $1", [id]);

@@ -1,5 +1,6 @@
 const express = require("express");
 const { pool } = require("../config/database");
+const { authenticateToken, adminOnly } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -65,7 +66,7 @@ router.get("/settings", async (req, res) => {
     res.json({ success: true, settings: IN_MEMORY_PICKUP_SETTINGS });
 });
 
-router.post("/settings", async (req, res) => {
+router.post("/settings", authenticateToken, adminOnly, async (req, res) => {
     const { pickup_enabled, instructions } = req.body;
     const isEnabled = Boolean(pickup_enabled !== undefined ? pickup_enabled : true);
 
@@ -112,7 +113,7 @@ router.get("/stores", async (req, res) => {
     res.json({ success: true, stores: IN_MEMORY_STORES });
 });
 
-router.post("/stores", async (req, res) => {
+router.post("/stores", authenticateToken, adminOnly, async (req, res) => {
     try {
         const { name, address, city, pincode, phone, timings, instructions, status } = req.body;
         if (!name || !address) {
@@ -147,7 +148,7 @@ router.post("/stores", async (req, res) => {
     }
 });
 
-router.put("/stores/:id", async (req, res) => {
+router.put("/stores/:id", authenticateToken, adminOnly, async (req, res) => {
     const id = parseInt(req.params.id);
     const { name, address, city, pincode, phone, timings, instructions, status } = req.body;
 
@@ -177,7 +178,7 @@ router.put("/stores/:id", async (req, res) => {
     res.json({ success: true, message: "Store updated" });
 });
 
-router.delete("/stores/:id", async (req, res) => {
+router.delete("/stores/:id", authenticateToken, adminOnly, async (req, res) => {
     const id = parseInt(req.params.id);
     try {
         await pool.query("DELETE FROM pickup_locations WHERE id = $1", [id]);
@@ -186,7 +187,7 @@ router.delete("/stores/:id", async (req, res) => {
     res.json({ success: true, message: "Store removed" });
 });
 
-router.put("/stores/:id/toggle", async (req, res) => {
+router.put("/stores/:id/toggle", authenticateToken, adminOnly, async (req, res) => {
     const id = parseInt(req.params.id);
     try {
         const current = await pool.query("SELECT status FROM pickup_locations WHERE id = $1", [id]);

@@ -9,6 +9,9 @@ const deletedCustomerIds = new Set();
 
 const router = express.Router();
 
+// Strict RBAC: All endpoints in this administrative router require Super Admin or Admin role
+router.use(authenticateToken, adminOnly);
+
 router.get("/dashboard", async (req, res) => {
     try {
         const products = await pool.query("SELECT COUNT(*) FROM products");

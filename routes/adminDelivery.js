@@ -23,6 +23,8 @@ const {
 } = require("../services/deliveryPartnerService");
 
 const router = express.Router();
+const { authenticateToken, adminOnly } = require("../middleware/auth");
+router.use(authenticateToken, adminOnly);
 const DATA_DIR = path.resolve(__dirname, "..", "data");
 const ORDERS_FILE = path.join(DATA_DIR, "orders.json");
 

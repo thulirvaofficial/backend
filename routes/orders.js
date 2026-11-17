@@ -698,8 +698,8 @@ function computeOrderStats(ordersList) {
     return { total, delivered, pending, cancelled, revenue };
 }
 
-/* GET ALL ORDERS */
-router.get("/", async (req, res) => {
+/* GET ALL ORDERS (Admin Only) */
+router.get("/", authenticateToken, adminOnly, async (req, res) => {
     try {
         const includeSubs = req.query.include_subscriptions === "true" || req.query.type === "all";
         const dateFilter = req.query.date ? req.query.date.trim() : null;
@@ -751,7 +751,7 @@ router.get("/", async (req, res) => {
 });
 
 /* ADMIN ALL ORDERS */
-router.get("/admin/all", async (req, res) => {
+router.get("/admin/all", authenticateToken, adminOnly, async (req, res) => {
     try {
         const includeSubs = req.query.include_subscriptions === "true" || req.query.type === "all";
         const dateFilter = req.query.date ? req.query.date.trim() : null;
@@ -843,7 +843,7 @@ router.get("/admin/all", async (req, res) => {
 });
 
 /* GET ALL PAYMENT VERIFICATIONS & PAYMENT RECORDS (ADMIN) */
-router.get("/admin/verifications", async (req, res) => {
+router.get("/admin/verifications", authenticateToken, adminOnly, async (req, res) => {
     try {
         const orders = await getOrdersWithItems();
         const dbIds = new Set(orders.map(o => o.id.toString()));
@@ -864,7 +864,7 @@ router.get("/admin/verifications", async (req, res) => {
 });
 
 /* GET ALL PICKUP ORDERS */
-router.get("/admin/pickup", async (req, res) => {
+router.get("/admin/pickup", authenticateToken, adminOnly, async (req, res) => {
     try {
         const orders = await getOrdersWithItems("WHERE LOWER(COALESCE(delivery_type, '')) = 'pickup'");
         const dbIds = new Set(orders.map(o => o.id.toString()));
@@ -1211,8 +1211,8 @@ const verifyPaymentHandler = async (req, res) => {
 
     res.json({ success: true, message: "Payment verified successfully", order });
 };
-router.put("/:id/verify-payment", verifyPaymentHandler);
-router.post("/:id/verify-payment", verifyPaymentHandler);
+router.put("/:id/verify-payment", authenticateToken, adminOnly, verifyPaymentHandler);
+router.post("/:id/verify-payment", authenticateToken, adminOnly, verifyPaymentHandler);
 
 /* REJECT PAYMENT (ADMIN / PAYMENT STAFF) */
 const rejectPaymentHandler = async (req, res) => {
@@ -1270,8 +1270,8 @@ const rejectPaymentHandler = async (req, res) => {
 
     res.json({ success: true, message: "Payment rejected", reason, order });
 };
-router.put("/:id/reject-payment", rejectPaymentHandler);
-router.post("/:id/reject-payment", rejectPaymentHandler);
+router.put("/:id/reject-payment", authenticateToken, adminOnly, rejectPaymentHandler);
+router.post("/:id/reject-payment", authenticateToken, adminOnly, rejectPaymentHandler);
 
 /* CANCEL ORDER (ADMIN & CUSTOMER with Automatic Stock Restoration) */
 const cancelOrderHandler = async (req, res) => {
@@ -1338,7 +1338,7 @@ router.put("/:id/cancel", cancelOrderHandler);
 router.post("/:id/cancel", cancelOrderHandler);
 
 /* MARK PICKUP READY */
-router.put("/:id/ready-pickup", async (req, res) => {
+router.put("/:id/ready-pickup", authenticateToken, adminOnly, async (req, res) => {
     const id = parseInt(req.params.id);
     try {
         await pool.query(`UPDATE orders SET order_status = 'ready_for_pickup', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]);
@@ -1360,7 +1360,7 @@ router.put("/:id/ready-pickup", async (req, res) => {
 });
 
 /* MARK PICKUP COLLECTED */
-router.put("/:id/collect-pickup", async (req, res) => {
+router.put("/:id/collect-pickup", authenticateToken, adminOnly, async (req, res) => {
     const id = parseInt(req.params.id);
     const collectedBy = req.body.collected_by || req.body.staff_name || "Farm Store Staff";
 
@@ -1508,9 +1508,9 @@ router.post("/:id/rate", async (req, res) => {
     }
 });
 
-router.put("/:id/status", updateOrderStatusHandler);
-router.patch("/:id/status", updateOrderStatusHandler);
-router.post("/:id/status", updateOrderStatusHandler);
+router.put("/:id/status", authenticateToken, adminOnly, updateOrderStatusHandler);
+router.patch("/:id/status", authenticateToken, adminOnly, updateOrderStatusHandler);
+router.post("/:id/status", authenticateToken, adminOnly, updateOrderStatusHandler);
 
 /* ============================================================
    DELIVERY PROOF & COMPLETION ENDPOINTS
