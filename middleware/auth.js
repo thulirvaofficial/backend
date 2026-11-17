@@ -1,7 +1,7 @@
 const jwt = require("jsonwebtoken");
 const path = require("path");
 const fs = require("fs");
-const { pool } = require("../config/database");
+const { pool, isDbOnline } = require("../config/database");
 
 const USERS_FILE = path.resolve(__dirname, "..", "data", "users.json");
 
@@ -10,7 +10,7 @@ function getUserFromDisk(userId) {
         if (fs.existsSync(USERS_FILE)) {
             const raw = fs.readFileSync(USERS_FILE, "utf-8");
             const users = JSON.parse(raw);
-            return users.find(u => u.id == userId) || null;
+            return users.find(u => u.id == userId || (u.email && String(userId).toLowerCase() === u.email.toLowerCase())) || null;
         }
     } catch (_) {}
     return null;
@@ -18,8 +18,12 @@ function getUserFromDisk(userId) {
 
 async function fetchLiveUser(userId) {
     if (!userId) return null;
+    const diskUser = getUserFromDisk(userId);
+    if (diskUser) {
+        return diskUser;
+    }
     try {
-        if (pool) {
+        if (pool && typeof isDbOnline === "function" && isDbOnline()) {
             const res = await pool.query(
                 "SELECT id, name, email, phone, role FROM users WHERE id = $1 LIMIT 1",
                 [userId]
@@ -29,7 +33,7 @@ async function fetchLiveUser(userId) {
             }
         }
     } catch (_) {}
-    return getUserFromDisk(userId);
+    return null;
 }
 
 /**
@@ -37,6 +41,11 @@ async function fetchLiveUser(userId) {
  * Enforces verified user identity against database / persistent records.
  */
 async function authenticateToken(req, res, next) {
+    // If request has already been authenticated upstream by global gate, skip re-evaluating
+    if (req.user && (req.user.role === "super_admin" || req.user.role === "admin")) {
+        return next();
+    }
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return res.status(401).json({

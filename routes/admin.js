@@ -285,41 +285,24 @@ router.put("/customers/:id/reset-password", async (req, res) => {
 ============================================================ */
 router.get("/profile", async (req, res) => {
     try {
-        let adminUser = {
+        const u = req.user || {
             id: 1,
             name: "Super Admin",
             admin_name: "Super Admin",
             email: "admin@thulirva.com",
-            role: "Super Admin",
+            role: "super_admin",
             profile_photo: ""
         };
 
-        const authHeader = req.headers.authorization;
-        if (authHeader && authHeader.startsWith("Bearer ")) {
-            const token = authHeader.split(" ")[1];
-            try {
-                const decoded = jwt.verify(token, process.env.JWT_SECRET || "thulirva_secret_key_2026");
-                if (decoded && decoded.id) {
-                    try {
-                        const dbRes = await pool.query(
-                            "SELECT id, name, email, role, profile_photo FROM users WHERE id = $1",
-                            [decoded.id]
-                        );
-                        if (dbRes.rows.length > 0) {
-                            const u = dbRes.rows[0];
-                            adminUser = {
-                                id: u.id,
-                                name: u.name || "Super Admin",
-                                admin_name: u.name || "Super Admin",
-                                email: u.email || "admin@thulirva.com",
-                                role: u.role || "Super Admin",
-                                profile_photo: u.profile_photo || ""
-                            };
-                        }
-                    } catch (_) {}
-                }
-            } catch (_) {}
-        }
+        const roleName = (u.role === "super_admin" || u.role === "super admin") ? "Super Admin" : (u.role === "admin" ? "Admin" : u.role);
+        const adminUser = {
+            id: u.id || 1,
+            name: u.name || u.admin_name || "Super Admin",
+            admin_name: u.admin_name || u.name || "Super Admin",
+            email: u.email || "admin@thulirva.com",
+            role: roleName,
+            profile_photo: u.profile_photo || ""
+        };
 
         return res.json({
             success: true,

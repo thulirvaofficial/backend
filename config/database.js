@@ -10,13 +10,17 @@ const pool = new Pool({
     connectionTimeoutMillis: 1500
 });
 
+let isDatabaseConnected = false;
+
 pool.on("error", (err) => {
-    console.error("PostgreSQL error:", err);
+    isDatabaseConnected = false;
+    console.error("PostgreSQL error:", err.message);
 });
 
 async function initializeDatabase() {
     try {
         await pool.query("SELECT 1;");
+        isDatabaseConnected = true;
 
         await pool.query(`
             CREATE TABLE IF NOT EXISTS users (
@@ -1194,11 +1198,17 @@ async function initializeDatabase() {
         // Ensure delivery_partners table exists without injecting fake mock data
         console.log("[+] Database tables ready");
     } catch (error) {
+        isDatabaseConnected = false;
         console.error("[DATABASE ERROR]", error.message);
     }
 }
 
+function isDbOnline() {
+    return isDatabaseConnected;
+}
+
 module.exports = {
     pool,
-    initializeDatabase
+    initializeDatabase,
+    isDbOnline
 };
