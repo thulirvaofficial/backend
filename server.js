@@ -334,6 +334,16 @@ app.use(
     announcementRoutes
 );
 
+app.use(
+    "/api/ratings",
+    require("./routes/ratings")
+);
+
+app.use(
+    "/ratings",
+    require("./routes/ratings")
+);
+
 /* ============================================================
    CENTRALIZED V1 API & HEALTH MONITORING
 ============================================================ */

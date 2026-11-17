@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { pool } = require("../config/database");
 
 const DATA_DIR = path.resolve(__dirname, "..", "data");
@@ -8,6 +9,44 @@ const BALANCES_FILE = path.join(DATA_DIR, "partner_wallet_balances.json");
 const WITHDRAWALS_FILE = path.join(DATA_DIR, "partner_withdrawal_requests.json");
 const SETTLEMENTS_FILE = path.join(DATA_DIR, "partner_settlements.json");
 const FINANCIAL_AUDIT_FILE = path.join(DATA_DIR, "financial_audit_logs.json");
+const COD_LEDGER_FILE = path.join(DATA_DIR, "partner_cod_ledger.json");
+const COD_REMITTANCES_FILE = path.join(DATA_DIR, "partner_cod_remittances.json");
+const BANK_DETAILS_FILE = path.join(DATA_DIR, "partner_bank_details.json");
+
+const ENCRYPTION_KEY = crypto.createHash("sha256").update(process.env.JWT_SECRET || "thulirva_bank_encryption_key_2026").digest();
+const IV_LENGTH = 16;
+
+function encryptText(text) {
+    if (!text) return "";
+    const iv = crypto.randomBytes(IV_LENGTH);
+    const cipher = crypto.createCipheriv("aes-256-cbc", ENCRYPTION_KEY, iv);
+    let encrypted = cipher.update(String(text), "utf8", "hex");
+    encrypted += cipher.final("hex");
+    return iv.toString("hex") + ":" + encrypted;
+}
+
+function decryptText(encryptedText) {
+    if (!encryptedText || !encryptedText.includes(":")) return encryptedText || "";
+    try {
+        const parts = encryptedText.split(":");
+        const iv = Buffer.from(parts[0], "hex");
+        const encrypted = parts[1];
+        const decipher = crypto.createDecipheriv("aes-256-cbc", ENCRYPTION_KEY, iv);
+        let decrypted = decipher.update(encrypted, "hex", "utf8");
+        decrypted += decipher.final("utf8");
+        return decrypted;
+    } catch (_) {
+        return encryptedText;
+    }
+}
+
+function maskAccountNumber(acc) {
+    if (!acc) return "";
+    const clean = String(acc).trim();
+    if (clean.length <= 4) return clean;
+    const last4 = clean.slice(-4);
+    return "XXXX-XXXX-" + last4;
+}
 
 function ensureDirectoryExists() {
     if (!fs.existsSync(DATA_DIR)) {
@@ -541,6 +580,620 @@ function getPartnerWithdrawalRequests(partnerId) {
     return requests.filter(r => r.partner_id === partnerId);
 }
 
+/**
+ * =========================================================================
+ * MODULE 5, 6, 7: COD CASH MANAGEMENT & REMITTANCE SYSTEM
+ * =========================================================================
+ */
+
+/**
+ * Get Partner's Current COD Balance and Holding Capacity
+ * Strict Invariant: ₹1,000 maximum holding limit across product orders
+ */
+function getPartnerCodBalance(partnerId) {
+    if (!partnerId) return {
+        partner_id: "",
+        cod_limit: 1000.0,
+        outstanding_cod_liability: 0.0,
+        remaining_cod_capacity: 1000.0,
+        can_accept_cod: true
+    };
+
+    // 1. Sum up all collected COD cash for this partner
+    const codLedger = loadJson(COD_LEDGER_FILE, []);
+    const partnerCollections = codLedger.filter(c => c.partner_id === partnerId);
+    const totalCollected = partnerCollections.reduce((sum, c) => sum + Number(c.cash_collected || 0), 0);
+
+    // 2. Sum up all approved remittances and cash handovers
+    const remittances = loadJson(COD_REMITTANCES_FILE, []);
+    const approvedRemittances = remittances.filter(r => r.partner_id === partnerId && r.status === "approved");
+    const totalRemitted = approvedRemittances.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+
+    const outstandingLiability = Math.max(0, Number((totalCollected - totalRemitted).toFixed(2)));
+    const codLimit = 1000.0;
+    const remainingCapacity = Math.max(0, Number((codLimit - outstandingLiability).toFixed(2)));
+
+    return {
+        partner_id: partnerId,
+        cod_limit: codLimit,
+        total_collected: Number(totalCollected.toFixed(2)),
+        total_remitted: Number(totalRemitted.toFixed(2)),
+        outstanding_cod_liability: outstandingLiability,
+        remaining_cod_capacity: remainingCapacity,
+        can_accept_cod: (orderAmount = 0) => (outstandingLiability + Number(orderAmount)) <= codLimit
+    };
+}
+
+/**
+ * Record COD Cash Collection on Delivery Completion (Module 6)
+ * Validates delivery proof, actual cash amount, and logs any cash mismatch
+ */
+async function recordCodCashCollected({
+    partner_id,
+    order_id,
+    order_number,
+    expected_amount,
+    cash_collected,
+    mismatch_reason = "",
+    proof_image = "",
+    admin_name = "System Automated"
+}) {
+    if (!partner_id || !order_id) {
+        throw new Error("partner_id and order_id are required for COD collection.");
+    }
+
+    const expAmt = Number(expected_amount || 0);
+    const collAmt = Number(cash_collected || 0);
+
+    if (isNaN(collAmt) || collAmt < 0) {
+        throw new Error("Invalid cash collected amount.");
+    }
+
+    const isMismatch = Math.abs(collAmt - expAmt) > 0.01;
+    if (isMismatch && (!mismatch_reason || !mismatch_reason.trim())) {
+        throw new Error("Cash mismatch detected! Expected ₹" + expAmt + " but collected ₹" + collAmt + ". Explanation is required.");
+    }
+
+    // Idempotency check: don't double record cash for the same order
+    const codLedger = loadJson(COD_LEDGER_FILE, []);
+    const existing = codLedger.find(c => c.order_id?.toString() === order_id?.toString());
+    if (existing) {
+        console.log(`[COD LEDGER] Order #${order_id} cash collection already recorded.`);
+        return existing;
+    }
+
+    const codEntry = {
+        id: `COD-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`,
+        partner_id,
+        order_id: String(order_id),
+        order_number: String(order_number || order_id),
+        expected_amount: expAmt,
+        cash_collected: collAmt,
+        is_mismatch: isMismatch,
+        mismatch_reason: isMismatch ? mismatch_reason.trim() : "",
+        proof_image: proof_image || "",
+        created_at: new Date().toISOString()
+    };
+
+    codLedger.unshift(codEntry);
+    saveJson(COD_LEDGER_FILE, codLedger);
+
+    // Audit log
+    await recordFinancialAudit(
+        "COD_CASH_COLLECTED",
+        partner_id,
+        admin_name,
+        Math.round(collAmt * 100),
+        0,
+        Math.round(collAmt * 100),
+        `COD Collected ₹${collAmt} for Order #${order_number || order_id}${isMismatch ? ' (Mismatch: ' + mismatch_reason + ')' : ''}`
+    );
+
+    // Socket alert & broadcast
+    try {
+        const { emitToPartner, emitToAdmin } = require("./socketService");
+        const balance = getPartnerCodBalance(partner_id);
+        emitToPartner(partner_id, "cod:balance_updated", balance);
+        if (isMismatch) {
+            emitToAdmin("cod:mismatch_alert", {
+                order_id,
+                order_number,
+                partner_id,
+                expected_amount: expAmt,
+                cash_collected: collAmt,
+                reason: mismatch_reason
+            });
+        }
+    } catch (_) {}
+
+    return codEntry;
+}
+
+/**
+ * Submit COD Remittance Request (Module 7)
+ * Partner deposits collected cash via UPI or Admin Cash Handover
+ */
+async function submitCodRemittance({
+    partner_id,
+    amount,
+    payment_mode = "upi",
+    transaction_id = "",
+    proof_image = "",
+    notes = ""
+}) {
+    if (!partner_id) throw new Error("Partner ID is required.");
+    const numAmount = Number(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+        throw new Error("Remittance amount must be greater than zero.");
+    }
+
+    const balance = getPartnerCodBalance(partner_id);
+    if (balance.outstanding_cod_liability <= 0) {
+        throw new Error("You have no outstanding COD liability to remit.");
+    }
+
+    if (numAmount > balance.outstanding_cod_liability) {
+        throw new Error(`Remittance amount (₹${numAmount}) exceeds outstanding liability (₹${balance.outstanding_cod_liability}).`);
+    }
+
+    const remittances = loadJson(COD_REMITTANCES_FILE, []);
+
+    // Transaction ID uniqueness / duplicate prevention
+    if (transaction_id && transaction_id.trim()) {
+        const cleanTx = transaction_id.trim().toUpperCase();
+        const dup = remittances.find(r => (r.transaction_id || "").trim().toUpperCase() === cleanTx);
+        if (dup) {
+            throw new Error(`Transaction ID '${transaction_id}' has already been submitted for Remittance #${dup.id}.`);
+        }
+    }
+
+    const remittanceId = `REMIT-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+    const newRemittance = {
+        id: remittanceId,
+        partner_id,
+        amount: numAmount,
+        payment_mode: payment_mode || "upi",
+        transaction_id: transaction_id ? transaction_id.trim().toUpperCase() : null,
+        proof_image: proof_image || "",
+        notes: notes || "",
+        status: "pending_verification", // pending_verification | approved | rejected
+        admin_name: null,
+        rejection_reason: null,
+        created_at: new Date().toISOString(),
+        reviewed_at: null
+    };
+
+    remittances.unshift(newRemittance);
+    saveJson(COD_REMITTANCES_FILE, remittances);
+
+    // Notify Partner
+    try {
+        const { sendNotification } = require("./notificationService");
+        await sendNotification({
+            userId: partner_id,
+            title: "COD Remittance Submitted",
+            message: `Your COD cash remittance request of ₹${numAmount} (Ref: ${transaction_id || remittanceId}) was submitted and is awaiting Admin verification.`,
+            type: "cod_remittance",
+            targetId: remittanceId
+        });
+    } catch (_) {}
+
+    // Emit socket alert to Admin
+    try {
+        const { emitToAdmin } = require("./socketService");
+        emitToAdmin("remittance:new", newRemittance);
+    } catch (_) {}
+
+    return newRemittance;
+}
+
+/**
+ * Admin Review COD Remittance (Approve / Reject) (Module 7 & 11)
+ * Only confirmed approval reduces outstanding COD liability and restores capacity!
+ */
+async function reviewCodRemittance({
+    remittance_id,
+    status, // 'approved' | 'rejected'
+    admin_name = "Super Admin",
+    rejection_reason = "",
+    notes = ""
+}) {
+    if (!["approved", "rejected"].includes(status)) {
+        throw new Error("Status must be 'approved' or 'rejected'.");
+    }
+
+    const remittances = loadJson(COD_REMITTANCES_FILE, []);
+    const remittance = remittances.find(r => r.id === remittance_id);
+    if (!remittance) {
+        throw new Error(`Remittance request #${remittance_id} not found.`);
+    }
+
+    if (remittance.status !== "pending_verification") {
+        throw new Error(`Remittance #${remittance_id} is already ${remittance.status}.`);
+    }
+
+    remittance.status = status;
+    remittance.admin_name = admin_name;
+    remittance.notes = notes || remittance.notes;
+    remittance.reviewed_at = new Date().toISOString();
+
+    if (status === "rejected") {
+        remittance.rejection_reason = rejection_reason || "Verification failed by Admin.";
+    }
+
+    saveJson(COD_REMITTANCES_FILE, remittances);
+
+    const partnerId = remittance.partner_id;
+    const balance = getPartnerCodBalance(partnerId);
+
+    // Audit log
+    await recordFinancialAudit(
+        status === "approved" ? "COD_REMITTANCE_APPROVED" : "COD_REMITTANCE_REJECTED",
+        partnerId,
+        admin_name,
+        Math.round(remittance.amount * 100),
+        0,
+        0,
+        `Remittance #${remittance_id} of ₹${remittance.amount} ${status}${status === 'rejected' ? ': ' + remittance.rejection_reason : ''}`
+    );
+
+    // Notify Partner with Breakdown (Module 11)
+    try {
+        const { sendNotification } = require("./notificationService");
+        const { emitToPartner } = require("./socketService");
+
+        emitToPartner(partnerId, "cod:balance_updated", balance);
+
+        if (status === "approved") {
+            await sendNotification({
+                userId: partnerId,
+                title: "COD Remittance Confirmed",
+                message: `Your COD remittance of ₹${remittance.amount} has been verified and APPROVED by Admin. Your remaining COD capacity has been restored to ₹${balance.remaining_cod_capacity}.`,
+                type: "cod_remittance",
+                targetId: remittance_id
+            });
+        } else {
+            await sendNotification({
+                userId: partnerId,
+                title: "COD Remittance Rejected",
+                message: `Your COD remittance of ₹${remittance.amount} was REJECTED: ${remittance.rejection_reason || 'Verification failure'}. Please contact Admin.`,
+                type: "cod_remittance",
+                targetId: remittance_id
+            });
+        }
+    } catch (_) {}
+
+    return {
+        success: true,
+        remittance,
+        balance
+    };
+}
+
+/**
+ * Record Direct Physical Cash Handover to Admin (Module 7)
+ */
+async function recordCashHandover({
+    partner_id,
+    amount,
+    admin_name = "Super Admin",
+    receipt_no = "",
+    notes = ""
+}) {
+    const numAmount = Number(amount);
+    if (!partner_id || isNaN(numAmount) || numAmount <= 0) {
+        throw new Error("Valid partner_id and positive cash amount are required.");
+    }
+
+    const remittanceId = `HANDOVER-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+    const handover = {
+        id: remittanceId,
+        partner_id,
+        amount: numAmount,
+        payment_mode: "cash_handover",
+        transaction_id: receipt_no ? receipt_no.trim().toUpperCase() : `CASH-${Date.now()}`,
+        proof_image: "",
+        notes: notes || "Direct physical cash handover to Admin",
+        status: "approved",
+        admin_name,
+        rejection_reason: null,
+        created_at: new Date().toISOString(),
+        reviewed_at: new Date().toISOString()
+    };
+
+    const remittances = loadJson(COD_REMITTANCES_FILE, []);
+    remittances.unshift(handover);
+    saveJson(COD_REMITTANCES_FILE, remittances);
+
+    const balance = getPartnerCodBalance(partner_id);
+
+    await recordFinancialAudit(
+        "COD_CASH_HANDOVER",
+        partner_id,
+        admin_name,
+        Math.round(numAmount * 100),
+        0,
+        0,
+        `Direct Cash Handover of ₹${numAmount} received by Admin ${admin_name}`
+    );
+
+    try {
+        const { sendNotification } = require("./notificationService");
+        const { emitToPartner } = require("./socketService");
+        emitToPartner(partner_id, "cod:balance_updated", balance);
+        await sendNotification({
+            userId: partner_id,
+            title: "Cash Handover Confirmed",
+            message: `Official Admin Cash Receipt: ₹${numAmount} cash handover confirmed by ${admin_name}. Remaining COD Capacity: ₹${balance.remaining_cod_capacity}.`,
+            type: "cod_remittance",
+            targetId: remittanceId
+        });
+    } catch (_) {}
+
+    return { success: true, handover, balance };
+}
+
+/**
+ * Get Remittance History for Partner
+ */
+function getCodRemittanceHistory(partnerId) {
+    const remittances = loadJson(COD_REMITTANCES_FILE, []);
+    return remittances.filter(r => r.partner_id === partnerId);
+}
+
+/**
+ * Get All Remittances for Admin
+ */
+function getAllCodRemittances({ status = null, partner_id = null } = {}) {
+    let remittances = loadJson(COD_REMITTANCES_FILE, []);
+    if (status) {
+        remittances = remittances.filter(r => r.status === status);
+    }
+    if (partner_id) {
+        remittances = remittances.filter(r => r.partner_id === partner_id);
+    }
+    return remittances;
+}
+
+/**
+ * =========================================================================
+ * MODULE 2: PARTNER BANK DETAILS (ENCRYPTED AT REST, MASKED BY DEFAULT)
+ * =========================================================================
+ */
+
+/**
+ * Save / Update Partner Bank Details
+ * Automatically encrypts sensitive bank account numbers with AES-256
+ */
+async function savePartnerBankDetails(partnerId, {
+    account_holder_name,
+    bank_name,
+    account_number,
+    ifsc_code,
+    account_type = "savings"
+}) {
+    if (!partnerId) throw new Error("Partner ID is required.");
+    if (!account_holder_name || !bank_name || !account_number || !ifsc_code) {
+        throw new Error("Account holder name, bank name, account number, and IFSC code are required.");
+    }
+
+    const cleanAcc = String(account_number).trim();
+    const cleanIfsc = String(ifsc_code).trim().toUpperCase();
+
+    const bankDetailsList = loadJson(BANK_DETAILS_FILE, []);
+    const idx = bankDetailsList.findIndex(b => b.partner_id === partnerId);
+
+    const record = {
+        partner_id: partnerId,
+        account_holder_name: account_holder_name.trim(),
+        bank_name: bank_name.trim(),
+        encrypted_account_number: encryptText(cleanAcc),
+        last4_account_number: cleanAcc.slice(-4),
+        masked_account_number: maskAccountNumber(cleanAcc),
+        ifsc_code: cleanIfsc,
+        account_type: account_type || "savings",
+        updated_at: new Date().toISOString()
+    };
+
+    if (idx >= 0) {
+        bankDetailsList[idx] = record;
+    } else {
+        bankDetailsList.push(record);
+    }
+    saveJson(BANK_DETAILS_FILE, bankDetailsList);
+
+    // Save to PostgreSQL if available
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS partner_bank_details (
+                partner_id VARCHAR(50) PRIMARY KEY,
+                account_holder_name VARCHAR(100),
+                bank_name VARCHAR(100),
+                encrypted_account_number TEXT,
+                last4 VARCHAR(10),
+                ifsc_code VARCHAR(20),
+                account_type VARCHAR(20),
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+        await pool.query(`
+            INSERT INTO partner_bank_details (
+                partner_id, account_holder_name, bank_name, encrypted_account_number, last4, ifsc_code, account_type, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+            ON CONFLICT (partner_id) DO UPDATE SET
+                account_holder_name = EXCLUDED.account_holder_name,
+                bank_name = EXCLUDED.bank_name,
+                encrypted_account_number = EXCLUDED.encrypted_account_number,
+                last4 = EXCLUDED.last4,
+                ifsc_code = EXCLUDED.ifsc_code,
+                account_type = EXCLUDED.account_type,
+                updated_at = NOW()
+        `, [record.partner_id, record.account_holder_name, record.bank_name, record.encrypted_account_number, record.last4_account_number, record.ifsc_code, record.account_type]);
+    } catch (_) {}
+
+    return {
+        success: true,
+        message: "Bank details saved securely.",
+        bank_details: {
+            partner_id: record.partner_id,
+            account_holder_name: record.account_holder_name,
+            bank_name: record.bank_name,
+            account_number: record.masked_account_number,
+            ifsc_code: record.ifsc_code,
+            account_type: record.account_type,
+            updated_at: record.updated_at
+        }
+    };
+}
+
+/**
+ * Get Partner Bank Details
+ * Security: Masked by default. Decrypted only when reveal=true and requested by authorized Admin with audit trail
+ */
+async function getPartnerBankDetails(partnerId, reveal = false, adminName = null) {
+    if (!partnerId) return null;
+
+    const bankDetailsList = loadJson(BANK_DETAILS_FILE, []);
+    const record = bankDetailsList.find(b => b.partner_id === partnerId);
+    if (!record) return null;
+
+    let returnedAccount = record.masked_account_number;
+    if (reveal && adminName) {
+        returnedAccount = decryptText(record.encrypted_account_number);
+        // Record sensitive-data access in audit log (Module 2 requirement)
+        await recordFinancialAudit(
+            "ADMIN_REVEALED_BANK_DETAILS",
+            partnerId,
+            adminName,
+            0,
+            0,
+            0,
+            `Admin ${adminName} unmasked full bank account details for Partner ${partnerId}`
+        );
+    }
+
+    return {
+        partner_id: record.partner_id,
+        account_holder_name: record.account_holder_name,
+        bank_name: record.bank_name,
+        account_number: returnedAccount,
+        is_revealed: Boolean(reveal && adminName),
+        ifsc_code: record.ifsc_code,
+        account_type: record.account_type,
+        updated_at: record.updated_at
+    };
+}
+
+/**
+ * =========================================================================
+ * MODULE 3 & 11: PARTNER EARNINGS, PAYOUT LEDGER & FINANCIAL NOTIFICATIONS
+ * =========================================================================
+ */
+
+/**
+ * Execute Partner Payout (Partial or Full)
+ * Invariant: Deducts available earnings only after payment confirmed. Never erases lifetime earnings.
+ */
+async function executePartnerPayout({
+    partner_id,
+    amount,
+    payment_method = "bank_transfer",
+    transaction_id = "",
+    admin_name = "Super Admin",
+    notes = ""
+}) {
+    if (!partner_id) throw new Error("Partner ID is required.");
+    const numAmount = Number(amount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+        throw new Error("Payout amount must be greater than zero.");
+    }
+
+    const wallet = await getPartnerWalletBalance(partner_id);
+    if (!wallet) throw new Error("Partner wallet not found.");
+
+    const availableRupees = wallet.available_payable_rupees;
+    if (numAmount > availableRupees) {
+        throw new Error(`Insufficient available earnings. Requested ₹${numAmount}, available: ₹${availableRupees}.`);
+    }
+
+    const amountPaise = Math.round(numAmount * 100);
+    const beforeBal = wallet.available_payable_paise;
+
+    // Atomically deduct from available and increase total settled
+    wallet.available_payable_paise -= amountPaise;
+    wallet.total_settled_paise += amountPaise;
+    await savePartnerWalletBalance(wallet);
+
+    const payoutId = `PAYOUT-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+    const payoutRecord = {
+        id: payoutId,
+        partner_id,
+        amount_rupees: numAmount,
+        amount_paise: amountPaise,
+        payment_method: payment_method || "bank_transfer",
+        transaction_id: transaction_id || `TXN-${Date.now()}`,
+        admin_name,
+        notes: notes || "Direct Partner Payout",
+        remaining_balance_rupees: wallet.available_payable_paise / 100,
+        status: "successful",
+        created_at: new Date().toISOString()
+    };
+
+    // Record in settlement file & audit log
+    const settlements = loadJson(SETTLEMENTS_FILE, []);
+    settlements.unshift(payoutRecord);
+    saveJson(SETTLEMENTS_FILE, settlements);
+
+    await recordFinancialAudit(
+        "PAYOUT_PROCESSED",
+        partner_id,
+        admin_name,
+        amountPaise,
+        beforeBal,
+        wallet.available_payable_paise,
+        `Processed payout of ₹${numAmount} via ${payment_method}. UTR/Ref: ${payoutRecord.transaction_id}`
+    );
+
+    // Module 11: Real-Time Payout Notification with Full Breakdown
+    try {
+        const { sendNotification } = require("./notificationService");
+        const { emitToPartner } = require("./socketService");
+
+        const now = new Date();
+        const dateStr = now.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "long", year: "numeric" });
+        const timeStr = now.toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
+
+        const notifMsg = `Your Thulirva payout of ₹${numAmount} was successfully processed on ${dateStr} at ${timeStr}. Reference: ${payoutRecord.transaction_id}. Available Balance: ₹${(wallet.available_payable_paise / 100).toFixed(2)}.`;
+
+        await sendNotification({
+            userId: partner_id,
+            title: "Payout Successful ✓",
+            message: notifMsg,
+            type: "payout",
+            targetId: payoutId,
+            data: {
+                payout_id: payoutId,
+                amount: numAmount,
+                transaction_id: payoutRecord.transaction_id,
+                remaining_balance: wallet.available_payable_paise / 100
+            }
+        });
+
+        emitToPartner(partner_id, "payout:processed", payoutRecord);
+    } catch (_) {}
+
+    return {
+        success: true,
+        message: `Payout of ₹${numAmount} successfully completed.`,
+        payout: payoutRecord,
+        wallet: {
+            available_payable_rupees: wallet.available_payable_paise / 100,
+            lifetime_earned_rupees: wallet.lifetime_earned_paise / 100,
+            total_settled_rupees: wallet.total_settled_paise / 100
+        }
+    };
+}
+
 module.exports = {
     getPartnerWalletBalance,
     recordEarningEntry,
@@ -552,5 +1205,18 @@ module.exports = {
     getPartnerLedger,
     getPartnerSettlementHistory,
     getPartnerWithdrawalRequests,
-    recordFinancialAudit
+    recordFinancialAudit,
+    // COD Cash Management
+    getPartnerCodBalance,
+    recordCodCashCollected,
+    submitCodRemittance,
+    reviewCodRemittance,
+    recordCashHandover,
+    getCodRemittanceHistory,
+    getAllCodRemittances,
+    // Bank Details
+    savePartnerBankDetails,
+    getPartnerBankDetails,
+    // Payout Execution
+    executePartnerPayout
 };

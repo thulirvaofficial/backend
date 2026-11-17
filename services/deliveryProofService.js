@@ -136,7 +136,7 @@ function saveProofImageToDisk(imageData, identifier = "delivery") {
 /**
  * Save delivery proof for a Product Order or Subscription Delivery and mark as completed
  */
-async function saveDeliveryProof({ orderId, subId, partnerId, imageBase64, file, remarks, latitude, longitude, markDelivered = true }) {
+async function saveDeliveryProof({ orderId, subId, partnerId, imageBase64, file, remarks, latitude, longitude, markDelivered = true, cash_collected, cash_mismatch_reason }) {
     const isSub = Boolean(subId) || (orderId && orderId.toString().startsWith("SUB-"));
     const cleanId = isSub ? (subId || orderId.toString().replace("SUB-", "")).toString() : orderId.toString();
 
@@ -348,6 +348,26 @@ async function saveDeliveryProof({ orderId, subId, partnerId, imageBase64, file,
                     [actualPartnerId]
                 ).catch(() => {});
             } catch (_) {}
+
+            // Module 6: Record COD Cash Collection if COD order
+            const isCod = (targetOrder.payment_method && targetOrder.payment_method.toLowerCase() === "cod") ||
+                          (targetOrder.payment_mode && targetOrder.payment_mode.toLowerCase() === "cod") ||
+                          targetOrder.is_cod === true;
+            if (isCod) {
+                try {
+                    const { recordCodCashCollected } = require("./financialService");
+                    await recordCodCashCollected({
+                        order_id: cleanId,
+                        partner_id: actualPartnerId,
+                        expected_amount: Number(targetOrder.total_amount || targetOrder.total || 0),
+                        collected_amount: cash_collected !== undefined ? Number(cash_collected) : Number(targetOrder.total_amount || targetOrder.total || 0),
+                        proof_url: proofUrl,
+                        notes: cash_mismatch_reason || remarks || "Collected upon delivery"
+                    });
+                } catch (codErr) {
+                    console.error(`[COD COLLECTION ERROR] Order #${cleanId}:`, codErr.message);
+                }
+            }
         }
 
         emitToAdmin("delivery:proof:uploaded", {

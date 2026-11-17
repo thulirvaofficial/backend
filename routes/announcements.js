@@ -77,6 +77,54 @@ router.get("/banner", async (req, res) => {
     }
 });
 
+// 1c. GET /api/announcements/partners - Retrieve announcements for delivery partners (Module 12)
+router.get("/partners", async (req, res) => {
+    try {
+        const all = await getActiveAnnouncements();
+        const partnerAnnouncements = all.filter(a => {
+            const aud = (a.target_audience || a.audience || "all").toLowerCase();
+            return aud === "all" || aud === "delivery_partners" || aud === "partners";
+        });
+        res.json({
+            success: true,
+            count: partnerAnnouncements.length,
+            announcements: partnerAnnouncements
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// 1d. POST /api/admin/announcements/partner-alert - Dispatch urgent alert to delivery partners
+router.post(["/partner-alert", "/admin/partner-alert"], authenticateToken, adminOnly, async (req, res) => {
+    try {
+        const { title, message, priority = "urgent", target_partner_id = null } = req.body || {};
+        if (!title || !message) {
+            return res.status(400).json({ success: false, message: "Title and message are required." });
+        }
+        const adminName = req.headers["x-admin-name"] || req.user?.admin_name || req.user?.name || "Super Admin";
+
+        const created = await createAnnouncement({
+            title,
+            description: message,
+            position: "bottom_banner",
+            target_audience: target_partner_id ? target_partner_id : "delivery_partners",
+            priority: priority === "urgent" ? 1 : 2,
+            is_active: true,
+            is_published: true,
+            send_notification: true
+        }, adminName);
+
+        res.status(201).json({
+            success: true,
+            message: `Partner announcement broadcast dispatched successfully.`,
+            announcement: created
+        });
+    } catch (err) {
+        res.status(400).json({ success: false, message: err.message });
+    }
+});
+
 // 2. GET /api/admin/announcements or GET /api/announcements/all - List all announcements for admin panel
 router.get(["/all", "/admin/all"], authenticateToken, adminOnly, async (req, res) => {
     try {

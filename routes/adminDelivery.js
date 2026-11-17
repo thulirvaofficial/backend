@@ -601,77 +601,9 @@ router.post("/dispatch/manual-assign", async (req, res) => {
             return res.status(400).json({ success: false, message: "order_id and partner_id are required" });
         }
 
-        // Update orders file / DB
-        let orders = [];
-        try {
-            if (fs.existsSync(ORDERS_FILE)) {
-                orders = JSON.parse(fs.readFileSync(ORDERS_FILE, "utf-8"));
-            }
-        } catch {}
-
-        const order = orders.find(o => o.id?.toString() === order_id?.toString() || o.order_number === order_id);
-        if (order) {
-            order.partner_id = partner_id;
-            order.order_status = "assigned";
-            order.status = "assigned";
-            if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-            fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2), "utf-8");
-        }
-
-        try {
-            await pool.query("UPDATE orders SET partner_id = $1, order_status = 'assigned', updated_at = NOW() WHERE id::text = $2 OR order_number = $2", [partner_id, order_id]);
-            await pool.query(`
-                INSERT INTO delivery_assignments (assignment_id, order_id, partner_id, assigned_by, status)
-                VALUES ($1, $2, $3, 'admin_manual', 'assigned')
-                ON CONFLICT (assignment_id) DO UPDATE SET partner_id = $3, status = 'assigned'
-            `, [`ASG-MANUAL-${order_id}`, isNaN(Number(order_id)) ? null : Number(order_id), partner_id]);
-        } catch {}
-
-        await recordAudit("Operations Admin", "MANUAL_DISPATCH_OVERRIDE", `Manually assigned Order #${order_id} to ${partner_id}`);
-
-        // Immediate high-priority push notification and socket alerts
-        const { sendNotification } = require("../services/notificationService");
-        const { emitToPartner, emitToCustomer, emitToAdmin } = require("../services/socketService");
-
-        sendNotification({
-            userId: partner_id,
-            title: "New Thulirva Order!",
-            message: "You have received a new delivery order. Check the order details and accept the assignment.",
-            type: "NEW_ORDER_ASSIGNED",
-            targetId: order_id.toString(),
-            data: {
-                order_id: String(order_id),
-                customer_name: order?.customer_name || 'Customer',
-                delivery_location: order?.address || order?.city || 'Chennai',
-                order_amount: String(order?.total || 0),
-                assignment_id: `ASG-MANUAL-${order_id}`,
-                type: "NEW_ORDER_ASSIGNED",
-                timestamp: new Date().toISOString()
-            }
-        }).catch(() => {});
-
-        try {
-            emitToPartner(partner_id, "order:assigned", {
-                order_id: order_id,
-                order_number: order?.order_number || `ORD${order_id}`,
-                customer_name: order?.customer_name || 'Customer',
-                customer_phone: order?.customer_phone || '',
-                address: order?.address || '',
-                total: order?.total || 0
-            });
-            if (order?.user_id) {
-                emitToCustomer(order.user_id, "order:partner_assigned", {
-                    order_id: order_id,
-                    partner_id: partner_id
-                });
-            }
-            emitToAdmin("order:assigned", { order_id, partner_id });
-        } catch (_) {}
-
-        return res.json({
-            success: true,
-            message: `Order #${order_id} manually assigned to Partner ${partner_id}`
-        });
+        const { assignOrderManually } = require("../services/dispatchEngine");
+        const result = await assignOrderManually(order_id, partner_id);
+        return res.json(result);
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }
@@ -802,6 +734,129 @@ router.put("/settings/area-allocation", async (req, res) => {
         });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/* ============================================================
+   ADMIN FINANCE, BANK DETAILS & COD REMITTANCES (MODULES 2, 3, 5, 7)
+============================================================ */
+const {
+    getPartnerBankDetails,
+    executePartnerPayout,
+    getAllCodRemittances,
+    reviewCodRemittance,
+    recordCashHandover,
+    getPartnerCodBalance,
+    getPartnerWalletBalance
+} = require("../services/financialService");
+
+// GET /api/admin/delivery/partners/:id/bank-details (supports ?reveal=true with audit trail)
+router.get("/partners/:id/bank-details", async (req, res) => {
+    try {
+        const partnerId = req.params.id;
+        const reveal = req.query.reveal === "true" || req.query.reveal === true;
+        const adminName = req.headers["x-admin-name"] || req.user?.admin_name || req.user?.name || "Super Admin";
+
+        const bankDetails = await getPartnerBankDetails(partnerId, reveal, adminName);
+        if (!bankDetails) {
+            return res.status(404).json({ success: false, message: `Bank details not registered for partner #${partnerId}.` });
+        }
+        return res.json({ success: true, bank_details: bankDetails });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// GET /api/admin/delivery/partners/:id/cod (returns COD liability & holding capacity)
+router.get("/partners/:id/cod", async (req, res) => {
+    try {
+        const partnerId = req.params.id;
+        const balance = getPartnerCodBalance(partnerId);
+        return res.json({ success: true, cod_balance: balance });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// GET /api/admin/delivery/partners/:id/wallet
+router.get("/partners/:id/wallet", async (req, res) => {
+    try {
+        const partnerId = req.params.id;
+        const wallet = await getPartnerWalletBalance(partnerId);
+        const codBalance = getPartnerCodBalance(partnerId);
+        return res.json({ success: true, wallet, cod_balance: codBalance });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// POST /api/admin/delivery/payouts (Partial or Full Payout)
+router.post("/payouts", async (req, res) => {
+    try {
+        const { partner_id, amount, payment_method, transaction_id, notes } = req.body || {};
+        const adminName = req.headers["x-admin-name"] || req.user?.admin_name || req.user?.name || "Super Admin";
+
+        const result = await executePartnerPayout({
+            partner_id,
+            amount,
+            payment_method,
+            transaction_id,
+            admin_name: adminName,
+            notes
+        });
+        return res.json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+});
+
+// GET /api/admin/delivery/remittances (List submitted remittances)
+router.get("/remittances", async (req, res) => {
+    try {
+        const { status, partner_id } = req.query;
+        const remittances = getAllCodRemittances({ status, partner_id });
+        return res.json({ success: true, count: remittances.length, remittances });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// POST /api/admin/delivery/remittances/:id/review (Approve or Reject Remittance)
+router.post("/remittances/:id/review", async (req, res) => {
+    try {
+        const remittanceId = req.params.id;
+        const { status, rejection_reason, notes } = req.body || {};
+        const adminName = req.headers["x-admin-name"] || req.user?.admin_name || req.user?.name || "Super Admin";
+
+        const result = await reviewCodRemittance({
+            remittance_id: remittanceId,
+            status,
+            admin_name: adminName,
+            rejection_reason,
+            notes
+        });
+        return res.json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+});
+
+// POST /api/admin/delivery/cash-handover (Direct Physical Cash Remittance)
+router.post("/cash-handover", async (req, res) => {
+    try {
+        const { partner_id, amount, receipt_no, notes } = req.body || {};
+        const adminName = req.headers["x-admin-name"] || req.user?.admin_name || req.user?.name || "Super Admin";
+
+        const result = await recordCashHandover({
+            partner_id,
+            amount,
+            admin_name: adminName,
+            receipt_no,
+            notes
+        });
+        return res.json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
     }
 });
 

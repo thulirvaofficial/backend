@@ -182,6 +182,20 @@ router.post("/", async (req, res) => {
         // Otherwise proceed with ONLY normal product items
         items = normalOrderItems;
 
+        // Strict Master Switch Check: Cash on Delivery (COD) Validation (Module 4)
+        const isCodOrder = String(payment_method || "").toLowerCase().includes("cod") || 
+                           String(payment_method || "").toLowerCase().includes("cash on delivery");
+        if (isCodOrder) {
+            const { getDeliveryConfig } = require("../services/businessConfigService");
+            const bConfig = await getDeliveryConfig();
+            if (bConfig.cod_enabled === false) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Cash on Delivery (COD) is currently disabled by Admin. Please choose UPI QR or Online Payment."
+                });
+            }
+        }
+
         // Order Idempotency Guard (Prevents double order submission for same payment reference)
         if (transaction_id && transaction_id.trim().length > 3) {
             const cleanTx = transaction_id.trim().toLowerCase();

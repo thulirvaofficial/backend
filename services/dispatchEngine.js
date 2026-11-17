@@ -88,8 +88,36 @@ async function findNextEligiblePartner(orderId, deliveryType = 'order', excludeP
         if (!poolRows || poolRows.length === 0) return null;
 
         // Filter out already attempted partners in this cycle
-        const candidates = poolRows.filter(p => !alreadyOfferedIds.has(p.partner_id));
+        let candidates = poolRows.filter(p => !alreadyOfferedIds.has(p.partner_id));
         if (candidates.length === 0) return null;
+
+        // Module 5 & 8: Check ₹1,000 COD Holding Limit for COD Product Orders
+        try {
+            let targetOrder = null;
+            if (fs.existsSync(ORDERS_FILE)) {
+                const oList = JSON.parse(fs.readFileSync(ORDERS_FILE, "utf-8"));
+                targetOrder = oList.find(o => o.id?.toString() === orderId?.toString() || o.order_number === orderId);
+            }
+            if (targetOrder) {
+                const isCod = String(targetOrder.payment_method || "").toLowerCase().includes("cod") || 
+                              String(targetOrder.payment_method || "").toLowerCase().includes("cash on delivery");
+                const isSub = (targetOrder.order_type === "subscription" || targetOrder.delivery_type === "subscription" || String(targetOrder.id).startsWith("SUB-"));
+                
+                // Subscriptions NEVER have COD liability
+                if (isCod && !isSub) {
+                    const { getPartnerCodBalance } = require("./financialService");
+                    const ordTotal = Number(targetOrder.total || targetOrder.total_price || 0);
+                    candidates = candidates.filter(p => {
+                        const bal = getPartnerCodBalance(p.partner_id);
+                        return bal.can_accept_cod(ordTotal);
+                    });
+                    if (candidates.length === 0) {
+                        console.warn(`[DISPATCH] All candidate partners exceeded ₹1,000 COD capacity for Order #${orderId}`);
+                        return null;
+                    }
+                }
+            }
+        } catch (_) {}
 
         // Default Farm Store Pickup Coordinates (Kanchipuram Main Hub)
         const pickupLat = 12.8342;
@@ -133,6 +161,23 @@ async function offerOrderToPartner(order, partner) {
         activeTimers.delete(orderId);
     }
 
+    let itemsCount = 1;
+    if (Array.isArray(order.items)) {
+        itemsCount = order.items.length;
+    } else if (typeof order.items === 'string') {
+        try {
+            const parsed = JSON.parse(order.items);
+            if (Array.isArray(parsed)) itemsCount = parsed.length;
+        } catch (_) {}
+    }
+
+    const customerArea = order.landmark || order.city || order.area || 'Padur, Chennai';
+    const pickupHub = 'Thulirva Padur Hub, OMR, Chennai';
+    const deliveryAddress = order.address || order.city || 'Padur, Chennai';
+    const deliveryInstructions = order.delivery_instructions || 'Deliver safely to customer doorstep';
+    const customerPhone = order.customer_phone || order.phone || '+91 98401 23456';
+    const deliveryEarnings = Number(order.delivery_charge || 35.0);
+
     try {
         // Record dispatch offer in DB
         await pool.query(`
@@ -147,24 +192,7 @@ async function offerOrderToPartner(order, partner) {
             WHERE id = $1 AND order_status IN ('pending', 'processing', 'preparing')
         `, [orderId]).catch(() => {});
 
-        console.log(`[DISPATCH] Sent offer for Order #${orderId} to Partner ${partner.name} (${partnerId}). Expires in ${OFFER_TIMEOUT_SECONDS}s.`);
-
-        let itemsCount = 1;
-        if (Array.isArray(order.items)) {
-            itemsCount = order.items.length;
-        } else if (typeof order.items === 'string') {
-            try {
-                const parsed = JSON.parse(order.items);
-                if (Array.isArray(parsed)) itemsCount = parsed.length;
-            } catch (_) {}
-        }
-
-        const customerArea = order.landmark || order.city || order.area || 'Valasaravakkam, Chennai';
-        const pickupHub = 'Valasaravakkam Hub, Chennai';
-        const deliveryAddress = order.address || order.city || 'Chennai';
-        const deliveryInstructions = order.delivery_instructions || 'Deliver safely to customer doorstep';
-        const customerPhone = order.customer_phone || order.phone || '+91 98401 23456';
-        const deliveryEarnings = Number(order.delivery_charge || 35.0);
+        console.log(`[DISPATCH] Sent offer for Order #${orderId} to Partner ${partner.name || partnerId} (${partnerId}). Expires in ${OFFER_TIMEOUT_SECONDS}s.`);
 
         const offerPayload = {
             offer_id: `OFFER-${Date.now()}`,
@@ -180,8 +208,8 @@ async function offerOrderToPartner(order, partner) {
             delivery_address: deliveryAddress,
             city: order.city || 'Chennai',
             pincode: order.pincode || '',
-            latitude: order.latitude ? Number(order.latitude) : null,
-            longitude: order.longitude ? Number(order.longitude) : null,
+            latitude: order.latitude ? Number(order.latitude) : 12.8228,
+            longitude: order.longitude ? Number(order.longitude) : 80.2291,
             landmark: order.landmark || '',
             items: order.items || [],
             items_count: itemsCount,
@@ -220,6 +248,8 @@ async function offerOrderToPartner(order, partner) {
                 payment_method: order.payment_method || 'UPI (Prepaid)',
                 delivery_earnings: String(deliveryEarnings),
                 delivery_charge: String(deliveryEarnings),
+                latitude: String(order.latitude || '12.8228'),
+                longitude: String(order.longitude || '80.2291'),
                 assigned_at: offerPayload.assigned_at,
                 expires_at: expiresAt.toISOString(),
                 timeout_seconds: String(OFFER_TIMEOUT_SECONDS),
@@ -237,7 +267,7 @@ async function offerOrderToPartner(order, partner) {
         emitToPartner(partnerId, "dispatch:offer", offerPayload);
         emitToPartner(partnerId, "order:assigned", offerPayload);
 
-        // Set timeout handler for 20 seconds
+        // Set timeout handler for 180 seconds
         const timer = setTimeout(async () => {
             inMemoryOffers.delete(partnerId);
             await handleOfferTimeout(orderId, partnerId);
@@ -247,20 +277,6 @@ async function offerOrderToPartner(order, partner) {
         return { success: true, partner, expiresAt };
     } catch (err) {
         console.warn("[DISPATCH DB INSERT FAILED, USING IN-MEMORY RESILIENT OFFER]:", err.message);
-        let itemsCount = 1;
-        if (Array.isArray(order.items)) {
-            itemsCount = order.items.length;
-        } else if (typeof order.items === 'string') {
-            try {
-                const parsed = JSON.parse(order.items);
-                if (Array.isArray(parsed)) itemsCount = parsed.length;
-            } catch (_) {}
-        }
-
-        const customerArea = order.landmark || order.city || order.area || 'Valasaravakkam, Chennai';
-        const pickupHub = 'Valasaravakkam Hub, Chennai';
-        const deliveryAddress = order.address || order.city || 'Chennai';
-        const deliveryInstructions = order.delivery_instructions || 'Deliver safely to customer doorstep';
 
         const fallbackPayload = {
             offer_id: `OFFER-${Date.now()}`,
@@ -269,19 +285,23 @@ async function offerOrderToPartner(order, partner) {
             delivery_type: order.delivery_type || 'order',
             partner_id: partnerId,
             customer_name: order.customer_name || 'Customer',
-            customer_phone: order.customer_phone || order.phone || '',
+            customer_phone: customerPhone,
             customer_area: customerArea,
             pickup_hub: pickupHub,
             address: deliveryAddress,
             delivery_address: deliveryAddress,
             city: order.city || 'Chennai',
             pincode: order.pincode || '',
-            latitude: order.latitude ? Number(order.latitude) : null,
-            longitude: order.longitude ? Number(order.longitude) : null,
+            latitude: order.latitude ? Number(order.latitude) : 12.8228,
+            longitude: order.longitude ? Number(order.longitude) : 80.2291,
             landmark: order.landmark || '',
+            items: order.items || [],
             items_count: itemsCount,
             delivery_instructions: deliveryInstructions,
             total: order.total || 0,
+            payment_method: order.payment_method || 'UPI (Prepaid)',
+            delivery_charge: deliveryEarnings,
+            delivery_earnings: deliveryEarnings,
             assigned_at: new Date().toISOString(),
             expires_at: expiresAt.toISOString(),
             timeout_seconds: OFFER_TIMEOUT_SECONDS,
@@ -319,6 +339,8 @@ async function offerOrderToPartner(order, partner) {
                 payment_method: order.payment_method || 'UPI (Prepaid)',
                 delivery_earnings: String(deliveryEarnings),
                 delivery_charge: String(deliveryEarnings),
+                latitude: String(order.latitude || '12.8228'),
+                longitude: String(order.longitude || '80.2291'),
                 assigned_at: fallbackPayload.assigned_at,
                 expires_at: expiresAt.toISOString(),
                 timeout_seconds: String(OFFER_TIMEOUT_SECONDS),
@@ -625,9 +647,80 @@ async function initiateSmartDispatch(orderId) {
     }
 }
 
+/**
+ * Manually assign an order to a specific partner using the 3-minute acceptance workflow
+ */
+async function assignOrderManually(orderId, partnerId) {
+    try {
+        let order = null;
+        try {
+            const res = await pool.query("SELECT * FROM orders WHERE id::text = $1 OR order_number = $1", [orderId]);
+            if (res.rows.length > 0) order = res.rows[0];
+        } catch (_) {}
+
+        if (!order && fs.existsSync(ORDERS_FILE)) {
+            const orders = JSON.parse(fs.readFileSync(ORDERS_FILE, "utf-8"));
+            order = orders.find(o => o.id?.toString() === orderId.toString() || o.order_number === orderId);
+        }
+
+        if (!order) {
+            return { success: false, message: `Order #${orderId} not found` };
+        }
+
+        // Find or build partner object
+        let partner = null;
+        try {
+            const pRes = await pool.query("SELECT * FROM delivery_partners WHERE partner_id = $1 OR id::text = $1", [partnerId]);
+            if (pRes.rows.length > 0) partner = pRes.rows[0];
+        } catch (_) {}
+
+        if (!partner && fs.existsSync(PARTNERS_FILE)) {
+            const partners = JSON.parse(fs.readFileSync(PARTNERS_FILE, "utf-8"));
+            partner = partners.find(p => p.partner_id === partnerId || p.id?.toString() === partnerId.toString());
+        }
+
+        if (!partner) {
+            partner = {
+                partner_id: partnerId,
+                name: "Delivery Partner",
+                phone: ""
+            };
+        }
+
+        // Module 5 & 8: Check ₹1,000 COD Holding Limit for Manual Assignment
+        const isCod = String(order.payment_method || "").toLowerCase().includes("cod") || 
+                      String(order.payment_method || "").toLowerCase().includes("cash on delivery");
+        const isSub = (order.order_type === "subscription" || order.delivery_type === "subscription" || String(order.id).startsWith("SUB-"));
+        if (isCod && !isSub) {
+            const { getPartnerCodBalance } = require("./financialService");
+            const codBal = getPartnerCodBalance(partnerId);
+            const ordTotal = Number(order.total || order.total_price || 0);
+            if (!codBal.can_accept_cod(ordTotal)) {
+                return {
+                    success: false,
+                    code: "COD_LIMIT_EXCEEDED",
+                    message: `Partner ${partner.name || partnerId} cannot accept COD Order #${orderId} of ₹${ordTotal}. Outstanding COD liability is ₹${codBal.outstanding_cod_liability}, remaining capacity is ₹${codBal.remaining_cod_capacity} (Limit: ₹1,000).`
+                };
+            }
+        }
+
+        // Offer order to partner with full 3-minute acceptance countdown and rich push notifications
+        const result = await offerOrderToPartner(order, partner);
+        return {
+            success: true,
+            message: `Order #${orderId} offered to Partner ${partner.name || partnerId} with 3-minute acceptance window`,
+            ...result
+        };
+    } catch (err) {
+        console.error("[ASSIGN ORDER MANUALLY ERROR]", err.message);
+        return { success: false, message: err.message };
+    }
+}
+
 module.exports = {
     findNextEligiblePartner,
     initiateSmartDispatch,
+    assignOrderManually,
     offerOrderToPartner,
     handleOfferAccept,
     handleOfferReject,

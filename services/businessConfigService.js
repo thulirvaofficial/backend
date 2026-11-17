@@ -18,6 +18,8 @@ function ensureDirectoryExists() {
 // Default initial delivery & business configuration
 const DEFAULT_CONFIG = {
     id: "main",
+    cod_enabled: true,
+    cod_holding_limit: 1000.0,
     delivery_charges_enabled: true,
     fixed_delivery_charge: 30.0,
     free_delivery_threshold: 299.0,

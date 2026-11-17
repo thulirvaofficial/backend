@@ -109,6 +109,40 @@ router.get(["/payment-qr", "/qr"], async (req, res) => {
     }
 });
 
+// 5b. GET /api/config/cod - Public COD Status for Customer Apps & Checkout
+router.get(["/cod", "/cod-status"], async (req, res) => {
+    try {
+        const config = await getDeliveryConfig();
+        res.json({
+            success: true,
+            cod_enabled: Boolean(config.cod_enabled !== false),
+            cod_holding_limit: Number(config.cod_holding_limit || 1000)
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// 5c. POST /api/admin/config/cod - Admin Toggle for Master COD Control
+router.post(["/admin/cod", "/cod/toggle"], authenticateToken, adminOnly, async (req, res) => {
+    try {
+        const { cod_enabled, cod_holding_limit } = req.body || {};
+        const adminName = req.body.admin_name || req.headers["x-admin-name"] || req.user?.admin_name || req.user?.name || "Super Admin";
+        const updates = {};
+        if (cod_enabled !== undefined) updates.cod_enabled = Boolean(cod_enabled);
+        if (cod_holding_limit !== undefined) updates.cod_holding_limit = Number(cod_holding_limit);
+        const updated = await updateDeliveryConfig(updates, adminName);
+        res.json({
+            success: true,
+            message: `COD Master Switch is now ${updated.cod_enabled ? "ENABLED" : "DISABLED"} (Holding Limit: ₹${updated.cod_holding_limit || 1000})`,
+            cod_enabled: updated.cod_enabled,
+            cod_holding_limit: updated.cod_holding_limit
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 /* =========================================================================
    ADMIN CONFIGURATION ENDPOINTS
 ========================================================================= */

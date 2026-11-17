@@ -1716,12 +1716,8 @@ const getAuthorizedProductOrdersForPartner = (orders, partnerId, partnerArea) =>
         const isSub = (o.order_type === "subscription" || o.delivery_type === "subscription" || (o.id && o.id.toString().startsWith("SUB-")));
         if (isSub) return false;
 
-        // Assigned directly to this partner (handles canonical and alias IDs like DP-001 <-> THU-DP-0001)
-        if (o.partner_id && (
-            o.partner_id === partnerId ||
-            (partnerId === "THU-DP-0001" && (o.partner_id === "DP-001" || o.partner_id === "THU-DP-0001")) ||
-            (partnerId === "DP-001" && (o.partner_id === "DP-001" || o.partner_id === "THU-DP-0001"))
-        )) return true;
+        // Assigned directly to this partner
+        if (o.partner_id && o.partner_id === partnerId) return true;
 
         // Unassigned order available for claim/delivery in partner's assigned territory
         if (!o.partner_id) {
@@ -1734,8 +1730,43 @@ const getAuthorizedProductOrdersForPartner = (orders, partnerId, partnerArea) =>
 };
 
 /**
+ * Shared Asia/Kolkata Date Boundary Helper
+ * Used consistently for Home Dashboard today counts and Orders list
+ */
+const getIstDateBoundaries = (dateKey) => {
+    let targetKey;
+    if (dateKey && typeof dateKey === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateKey.trim())) {
+        targetKey = dateKey.trim();
+    } else if (dateKey) {
+        const parsed = new Date(dateKey);
+        targetKey = !isNaN(parsed.getTime())
+            ? parsed.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })
+            : new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    } else {
+        targetKey = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    }
+    const [y, m, d] = targetKey.split("-").map(Number);
+    const startIstUtc = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0) - (5 * 60 + 30) * 60 * 1000);
+    const endIstUtc = new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999) - (5 * 60 + 30) * 60 * 1000);
+    return { targetKey, startIstUtc, endIstUtc };
+};
+
+const filterProductOrdersByDate = (orders, dateKey) => {
+    const { startIstUtc, endIstUtc } = getIstDateBoundaries(dateKey);
+    return (orders || []).filter(o => {
+        const isSub = (o.order_type === "subscription" || o.delivery_type === "subscription" || (o.id && o.id.toString().startsWith("SUB-")));
+        if (isSub) return false;
+        const ts = o.created_at || o.createdAt || o.order_date || o.orderDate;
+        if (!ts) return false;
+        const orderTime = new Date(ts).getTime();
+        if (isNaN(orderTime)) return false;
+        return orderTime >= startIstUtc.getTime() && orderTime <= endIstUtc.getTime();
+    });
+};
+
+/**
  * GET /api/delivery/dashboard
- * Real-time dynamic live counts calculated from database & disk
+ * Real-time dynamic live counts calculated from database & disk strictly for Today (Asia/Kolkata)
  */
 router.get("/dashboard", authenticatePartner, async (req, res) => {
     try {
@@ -1754,10 +1785,12 @@ router.get("/dashboard", authenticatePartner, async (req, res) => {
             }
         } catch {}
 
+        // Strict Date & Partner Filtering for Today Orders in Asia/Kolkata timezone
         const partnerOrders = getAuthorizedProductOrdersForPartner(orders, partnerId, req.partner.assigned_area);
+        const todayPartnerOrders = filterProductOrdersByDate(partnerOrders);
 
-        const ordersTotal = partnerOrders.length;
-        const ordersDelivered = partnerOrders.filter(o => o.order_status === "delivered").length;
+        const ordersTotal = todayPartnerOrders.length;
+        const ordersDelivered = todayPartnerOrders.filter(o => (o.order_status || o.status || "").toLowerCase() === "delivered").length;
         const ordersPending = ordersTotal - ordersDelivered;
 
         const subTotal = subsData.total;
@@ -1984,14 +2017,8 @@ const getOrdersHandler = async (req, res) => {
         // 4. Strict Product Orders partition: NEVER return subscriptions!
         let authorized = getAuthorizedProductOrdersForPartner(orders, partnerId, req.partner.assigned_area);
 
-        // 5. Filter orders by creation date within Asia/Kolkata boundaries
-        let filtered = authorized.filter(o => {
-            const ts = o.created_at || o.createdAt || o.order_date || o.orderDate;
-            if (!ts) return false;
-            const orderTime = new Date(ts).getTime();
-            if (isNaN(orderTime)) return false;
-            return orderTime >= startIstUtc.getTime() && orderTime <= endIstUtc.getTime();
-        });
+        // 5. Filter orders by creation date within Asia/Kolkata boundaries using shared helper
+        let filtered = filterProductOrdersByDate(authorized, targetDateKey);
 
         // 6. Search within selected date's orders
         if (search && search.trim()) {
@@ -2234,8 +2261,8 @@ router.post("/orders/:id/status", authenticatePartner, updatePartnerOrderStatusH
 router.post("/orders/:id/delivery-proof", authenticatePartner, uploadDeliveryProof, async (req, res) => {
     try {
         const id = req.params.id;
-        const partnerId = req.partner.partner_id;
-        const { remarks, latitude, longitude, image, photo, proof } = req.body || {};
+        const partnerId = req.partner.partner_id || req.partner.id;
+        const { remarks, latitude, longitude, image, photo, proof, cash_collected, cash_mismatch_reason } = req.body || {};
 
         const result = await saveDeliveryProof({
             orderId: id,
@@ -2245,7 +2272,9 @@ router.post("/orders/:id/delivery-proof", authenticatePartner, uploadDeliveryPro
             remarks,
             latitude,
             longitude,
-            markDelivered: true
+            markDelivered: true,
+            cash_collected,
+            cash_mismatch_reason
         });
 
         return res.json(result);
@@ -2535,6 +2564,20 @@ const rejectOfferHandler = async (req, res) => {
 
 router.post("/offers/:id/reject", authenticatePartner, rejectOfferHandler);
 router.post("/assignments/:id/reject", authenticatePartner, rejectOfferHandler);
+
+/**
+ * POST /api/delivery/offers/:id/timeout
+ */
+const timeoutOfferHandler = async (req, res) => {
+    const orderId = req.params.id;
+    const partnerId = req.partner.partner_id;
+    const { handleOfferTimeout } = require("../services/dispatchEngine");
+    const result = await handleOfferTimeout(orderId, partnerId);
+    return res.json(result || { success: true, message: "Offer marked timed out" });
+};
+
+router.post("/offers/:id/timeout", authenticatePartner, timeoutOfferHandler);
+router.post("/assignments/:id/timeout", authenticatePartner, timeoutOfferHandler);
 
 /* ============================================================
    7. EARNINGS (DYNAMIC SERVER-CALCULATED)
@@ -2856,8 +2899,8 @@ router.post("/deliveries/:id/in-transit", authenticatePartner, async (req, res) 
 router.post("/deliveries/:id/complete", authenticatePartner, uploadDeliveryProof, async (req, res) => {
     try {
         const id = req.params.id;
-        const partnerId = req.partner.partner_id;
-        const { notes, remarks, latitude, longitude, image, photo, proof } = req.body || {};
+        const partnerId = req.partner.partner_id || req.partner.id;
+        const { notes, remarks, latitude, longitude, image, photo, proof, cash_collected, cash_mismatch_reason } = req.body || {};
 
         const result = await completeDelivery({
             orderId: id,
@@ -2866,12 +2909,136 @@ router.post("/deliveries/:id/complete", authenticatePartner, uploadDeliveryProof
             latitude,
             longitude,
             file: req.file,
-            imageBase64: image || photo || proof
+            imageBase64: image || photo || proof,
+            cash_collected,
+            cash_mismatch_reason
         });
 
         return res.json(result);
     } catch (err) {
         return res.status(400).json({ success: false, message: err.message });
+    }
+});
+
+/* ============================================================
+   MODULE 2: BANK DETAILS ENDPOINTS (DELIVERY PARTNER)
+============================================================ */
+
+const {
+    getPartnerCodBalance,
+    recordCodCashCollected,
+    submitCodRemittance,
+    reviewCodRemittance,
+    recordCashHandover,
+    getCodRemittanceHistory,
+    getAllCodRemittances,
+    savePartnerBankDetails,
+    getPartnerBankDetails,
+    getPartnerWalletBalance,
+    getPartnerLedger,
+    executePartnerPayout
+} = require("../services/financialService");
+
+// GET /api/delivery/bank-details
+router.get("/bank-details", authenticatePartner, async (req, res) => {
+    try {
+        const partnerId = req.partner.partner_id || req.partner.id;
+        const details = await getPartnerBankDetails(partnerId, false);
+        return res.json({ success: true, bank_details: details });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// POST /api/delivery/bank-details
+router.post("/bank-details", authenticatePartner, async (req, res) => {
+    try {
+        const partnerId = req.partner.partner_id || req.partner.id;
+        const result = await savePartnerBankDetails(partnerId, req.body || {});
+        return res.json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+});
+
+/* ============================================================
+   MODULE 5, 6, 7: COD CASH MANAGEMENT & REMITTANCE (DELIVERY PARTNER)
+============================================================ */
+
+// GET /api/delivery/cod/balance
+router.get("/cod/balance", authenticatePartner, async (req, res) => {
+    try {
+        const partnerId = req.partner.partner_id || req.partner.id;
+        const balance = getPartnerCodBalance(partnerId);
+        return res.json({ success: true, ...balance });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// POST /api/delivery/cod/remittance
+router.post("/cod/remittance", authenticatePartner, async (req, res) => {
+    try {
+        const partnerId = req.partner.partner_id || req.partner.id;
+        const { amount, payment_mode, transaction_id, proof_image, notes } = req.body || {};
+        const result = await submitCodRemittance({
+            partner_id: partnerId,
+            amount,
+            payment_mode,
+            transaction_id,
+            proof_image,
+            notes
+        });
+        const balance = getPartnerCodBalance(partnerId);
+        return res.status(201).json({
+            success: true,
+            message: `COD remittance request of ₹${result.amount} submitted successfully.`,
+            remittance: result,
+            balance
+        });
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+});
+
+// GET /api/delivery/cod/remittance-history
+router.get("/cod/remittance-history", authenticatePartner, async (req, res) => {
+    try {
+        const partnerId = req.partner.partner_id || req.partner.id;
+        const history = getCodRemittanceHistory(partnerId);
+        const balance = getPartnerCodBalance(partnerId);
+        return res.json({ success: true, remittances: history, balance });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/* ============================================================
+   MODULE 3: EARNINGS & FINANCIAL LEDGER (DELIVERY PARTNER)
+============================================================ */
+
+// GET /api/delivery/earnings/ledger
+router.get("/earnings/ledger", authenticatePartner, async (req, res) => {
+    try {
+        const partnerId = req.partner.partner_id || req.partner.id;
+        const wallet = await getPartnerWalletBalance(partnerId);
+        const ledger = getPartnerLedger(partnerId, { page: req.query.page || 1, limit: req.query.limit || 50 });
+        const codBalance = getPartnerCodBalance(partnerId);
+
+        return res.json({
+            success: true,
+            wallet: {
+                available_earnings: wallet.available_payable_rupees,
+                lifetime_earnings: wallet.lifetime_earned_rupees,
+                pending_earnings: (wallet.pending_settlement_paise || 0) / 100,
+                processing_payout: wallet.reserved_withdrawal_rupees,
+                total_paid: wallet.total_settled_rupees
+            },
+            cod: codBalance,
+            ledger
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 });
 

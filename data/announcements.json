@@ -13,14 +13,14 @@
     "accent_color": "#E5C97A",
     "cta_text": "Shop Farm Fresh",
     "cta_url": "/pages/shop.html",
-    "is_active": true,
+    "is_active": false,
     "is_published": true,
     "send_notification": true,
     "priority": 1,
     "created_at": "2026-11-17T07:16:40.829Z",
-    "updated_at": "2026-11-17T09:08:34.538Z",
+    "updated_at": "2026-11-17T12:58:15.697Z",
     "created_by": "Super Admin",
-    "updated_by": "Super Admin"
+    "updated_by": "THULIRVA Super Admin"
   },
   {
     "id": "ann-2026-002",
@@ -41,7 +41,7 @@
     "send_notification": false,
     "priority": 2,
     "created_at": "2026-11-17T07:16:40.829Z",
-    "updated_at": "2026-11-17T09:08:34.551Z",
+    "updated_at": "2026-11-17T10:30:38.200Z",
     "created_by": "Super Admin",
     "updated_by": "Super Admin"
   }

@@ -227,7 +227,7 @@ async function sendNotification({
                         sound: (targetChannelId === "thulirva_incoming_orders" ? "thulirva_order_alert" : "default"),
                         priority: "max",
                         defaultVibrateTimings: true,
-                        defaultSound: true,
+                        defaultSound: targetChannelId !== "thulirva_incoming_orders",
                         visibility: "public"
                     }
                 },

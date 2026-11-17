@@ -95,7 +95,7 @@ function broadcastSocket(event, payload) {
 /**
  * Dispatch customer notification for published announcement
  */
-function dispatchAnnouncementNotification(announcement) {
+async function dispatchAnnouncementNotification(announcement) {
     try {
         ensureDirectoryExists();
         let notifs = [];
@@ -112,14 +112,16 @@ function dispatchAnnouncementNotification(announcement) {
             return;
         }
 
+        const targetAudience = announcement.target_audience || announcement.audience || "all";
         const newNotif = {
             id: `notif-ann-${Date.now()}`,
             announcement_id: announcement.id,
             title: announcement.title,
             message: announcement.description || announcement.title,
             type: "announcement",
-            audience: "all_customers",
+            audience: targetAudience,
             image_url: announcement.image_url || null,
+            priority: announcement.priority || "normal",
             created_at: new Date().toISOString(),
             read: false
         };
@@ -127,6 +129,20 @@ function dispatchAnnouncementNotification(announcement) {
         notifs.unshift(newNotif);
         fs.writeFileSync(NOTIFICATIONS_FILE, JSON.stringify(notifs.slice(0, 500), null, 2), "utf8");
         broadcastSocket("notification:new", newNotif);
+
+        // Module 12: Dispatch push & in-app notifications to Delivery Partners when audience includes partners
+        try {
+            const { sendNotification } = require("./notificationService");
+            if (targetAudience === "delivery_partners" || targetAudience === "all" || targetAudience === "partners") {
+                await sendNotification({
+                    userId: announcement.target_partner_id || "delivery_partners",
+                    title: `📢 ${announcement.title}`,
+                    message: announcement.description || announcement.title,
+                    type: "admin_announcement",
+                    targetId: announcement.id
+                });
+            }
+        } catch (_) {}
     } catch (err) {
         console.error("[AnnouncementService] Error dispatching notification:", err.message);
     }
