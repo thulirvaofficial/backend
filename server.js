@@ -80,6 +80,9 @@ const recipeRoutes =
 const businessConfigRoutes =
     require("./routes/businessConfig");
 
+const announcementRoutes =
+    require("./routes/announcements");
+
 const app = express();
 
 const PORT =
@@ -297,6 +300,16 @@ app.use(
     businessConfigRoutes
 );
 
+app.use(
+    "/api/announcements",
+    announcementRoutes
+);
+
+app.use(
+    "/api/admin/announcements",
+    announcementRoutes
+);
+
 /* ============================================================
    CENTRALIZED V1 API & HEALTH MONITORING
 ============================================================ */
@@ -329,6 +342,7 @@ const backendAssetsUploadsPath = path.resolve(__dirname, "assets", "images", "up
     path.join(backendPublicUploadsPath, "attendance"),
     path.join(backendPublicUploadsPath, "profiles"),
     path.join(backendPublicUploadsPath, "payments"),
+    path.join(backendPublicUploadsPath, "announcements"),
     backendAssetsUploadsPath,
     path.join(backendAssetsUploadsPath, "profiles"),
     websiteUploadsPath,

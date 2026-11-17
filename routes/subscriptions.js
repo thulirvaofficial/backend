@@ -383,11 +383,12 @@ const getAllSubscriptionsHandler = async (req, res) => {
         );
         const dbRows = result.rows || [];
         const dbIds = new Set(dbRows.map(r => r.id.toString()));
-        const memRows = (MOCK_SUBSCRIPTIONS || []).filter(m => !dbIds.has(m.id.toString()));
+        const diskSubs = loadSubscriptionsFromDisk();
+        const memRows = diskSubs.filter(m => !dbIds.has(m.id.toString()));
         return res.json({ success: true, subscriptions: [...dbRows, ...memRows] });
     } catch (err) {
         console.warn("[SUBSCRIPTIONS ADMIN] DB query fallback:", err.message);
-        return res.json({ success: true, subscriptions: MOCK_SUBSCRIPTIONS || [] });
+        return res.json({ success: true, subscriptions: loadSubscriptionsFromDisk() });
     }
 };
 
@@ -1046,6 +1047,196 @@ router.put("/:id/status", async (req, res) => {
         message: `Subscription updated successfully`,
         subscription: sub
     });
+});
+
+/* ============================================================
+   DAILY SUBSCRIPTION MANIFEST & SCHEDULED DELIVERIES
+============================================================ */
+const SUB_DELIVERIES_FILE = path.join(DATA_DIR, "subscription_deliveries.json");
+
+function loadSubDeliveriesFromDisk() {
+    try {
+        if (fs.existsSync(SUB_DELIVERIES_FILE)) {
+            return JSON.parse(fs.readFileSync(SUB_DELIVERIES_FILE, "utf-8"));
+        }
+    } catch (_) {}
+    return [];
+}
+
+function saveSubDeliveriesToDisk(records) {
+    try {
+        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+        fs.writeFileSync(SUB_DELIVERIES_FILE, JSON.stringify(records, null, 2), "utf-8");
+    } catch (_) {}
+}
+
+function isSubscriptionScheduledForDate(sub, targetDateStr) {
+    if (!sub) return false;
+    const status = (sub.status || "").toLowerCase();
+    if (status === "cancelled" || status === "paused" || status === "rejected") return false;
+
+    // Start date check
+    const startStr = sub.start_date ? sub.start_date.split("T")[0] : null;
+    if (startStr && startStr > targetDateStr) return false;
+
+    // End date check if available
+    let endStr = sub.end_date ? sub.end_date.split("T")[0] : null;
+    if (!endStr && startStr) {
+        const days = Number(sub.duration_days || (sub.time_period && sub.time_period.includes("30") ? 30 : 60)) || 30;
+        const d = new Date(startStr);
+        d.setDate(d.getDate() + days);
+        endStr = d.toISOString().split("T")[0];
+    }
+    if (endStr && endStr < targetDateStr) return false;
+
+    // Frequency check
+    const freq = (sub.frequency || "daily").toLowerCase();
+    if (freq === "daily") return true;
+
+    const targetDate = new Date(targetDateStr);
+    const dayOfWeek = targetDate.getDay();
+
+    if (freq.includes("weekday")) {
+        return dayOfWeek >= 1 && dayOfWeek <= 5;
+    }
+    if (freq.includes("alternate") && startStr) {
+        const diffMs = targetDate.getTime() - new Date(startStr).getTime();
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        return diffDays % 2 === 0;
+    }
+    if (freq.includes("weekly") && startStr) {
+        const startDay = new Date(startStr).getDay();
+        return dayOfWeek === startDay;
+    }
+
+    return true;
+}
+
+async function getSubscriptionDeliveriesHandler(req, res) {
+    try {
+        const targetDate = req.query.date || new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+        const existingDeliveries = loadSubDeliveriesFromDisk();
+
+        let allSubs = [];
+        try {
+            const dbRes = await pool.query("SELECT * FROM subscriptions ORDER BY created_at DESC");
+            allSubs = dbRes.rows || [];
+        } catch (_) {}
+        const dbIds = new Set(allSubs.map(s => s.id.toString()));
+        const diskSubs = loadSubscriptionsFromDisk();
+        const extraMem = diskSubs.filter(m => !dbIds.has(m.id.toString()));
+        allSubs = [...allSubs, ...extraMem];
+
+        const scheduledDeliveries = [];
+        const seenKeys = new Set();
+
+        for (const sub of allSubs) {
+            if (!isSubscriptionScheduledForDate(sub, targetDate)) continue;
+
+            const dedupeKey = `${sub.id}_${targetDate}`;
+            if (seenKeys.has(dedupeKey)) continue;
+            seenKeys.add(dedupeKey);
+
+            const expectedDailyId = `DLY-${sub.id}-${targetDate.replace(/-/g, '')}`;
+            const existing = existingDeliveries.find(
+                d => d.id === expectedDailyId || d.daily_id === expectedDailyId || ((d.subscription_id == sub.id || d.subscription_id == `SUB-${sub.id}`) && d.delivery_date === targetDate)
+            );
+
+            if (existing) {
+                scheduledDeliveries.push({
+                    id: existing.id || expectedDailyId,
+                    daily_id: existing.daily_id || expectedDailyId,
+                    subscription_id: sub.id,
+                    delivery_date: targetDate,
+                    customer_name: existing.customer_name || sub.customer_name || "Valued Subscriber",
+                    customer_phone: existing.customer_phone || sub.customer_phone || "",
+                    address: existing.address || sub.address || "",
+                    city: existing.city || sub.city || "Chennai",
+                    pincode: existing.pincode || sub.pincode || "603103",
+                    product_name: existing.product_name || sub.product_name || "Daily Farm Fresh Milk (1 Litre)",
+                    quantity: existing.quantity || sub.quantity || 1,
+                    delivery_slot: existing.delivery_slot || sub.delivery_slot || "06:00 AM - 07:30 AM",
+                    status: existing.status || "pending",
+                    partner_id: existing.partner_id || sub.assigned_partner_id || sub.partner_id || null,
+                    partner_name: existing.partner_name || sub.assigned_partner_name || sub.partner_name || null,
+                    created_at: existing.created_at || new Date().toISOString(),
+                    delivered_at: existing.delivered_at || null,
+                    notes: existing.notes || ""
+                });
+            } else {
+                scheduledDeliveries.push({
+                    id: `DLY-${sub.id}-${targetDate.replace(/-/g, '')}`,
+                    daily_id: `DLY-${sub.id}-${targetDate.replace(/-/g, '')}`,
+                    subscription_id: sub.id,
+                    delivery_date: targetDate,
+                    customer_name: sub.customer_name || "Valued Subscriber",
+                    customer_phone: sub.customer_phone || "",
+                    address: sub.address || "",
+                    city: sub.city || "Chennai",
+                    pincode: sub.pincode || "603103",
+                    product_name: sub.product_name || "Daily Farm Fresh Milk (1 Litre)",
+                    quantity: sub.quantity || 1,
+                    delivery_slot: sub.delivery_slot || "06:00 AM - 07:30 AM",
+                    status: "pending",
+                    partner_id: sub.assigned_partner_id || sub.partner_id || null,
+                    partner_name: sub.assigned_partner_name || sub.partner_name || null,
+                    created_at: new Date().toISOString()
+                });
+            }
+        }
+
+        const totalDeliveries = scheduledDeliveries.length;
+        const delivered = scheduledDeliveries.filter(d => (d.status || '').toLowerCase() === 'delivered').length;
+        const outForDelivery = scheduledDeliveries.filter(d => ['out_for_delivery', 'in_transit', 'shipped'].includes((d.status || '').toLowerCase())).length;
+        const pending = scheduledDeliveries.filter(d => !['delivered', 'cancelled'].includes((d.status || '').toLowerCase())).length;
+        const totalQuantity = scheduledDeliveries.reduce((sum, d) => sum + (Number(d.quantity) || 1), 0);
+
+        const stats = {
+            total_deliveries: totalDeliveries,
+            delivered,
+            out_for_delivery: outForDelivery,
+            pending,
+            total_quantity: totalQuantity
+        };
+
+        return res.json({
+            success: true,
+            selected_date: targetDate,
+            stats,
+            total: totalDeliveries,
+            deliveries: scheduledDeliveries
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+}
+
+router.get(["/deliveries", "/daily-manifest", "/admin/daily-manifest"], getSubscriptionDeliveriesHandler);
+
+router.put(["/deliveries/:id/status", "/daily-manifest/:id/status"], async (req, res) => {
+    try {
+        const id = req.params.id;
+        const { status, partner_id, notes } = req.body;
+        const records = loadSubDeliveriesFromDisk();
+        let record = records.find(r => r.id == id || r.daily_id == id);
+        if (!record) {
+            record = {
+                id: id,
+                daily_id: id,
+                status: status || "delivered",
+                updated_at: new Date().toISOString()
+            };
+            records.push(record);
+        }
+        record.status = status;
+        if (partner_id) record.partner_id = partner_id;
+        if (notes) record.notes = notes;
+        if (status === "delivered") record.delivered_at = new Date().toISOString();
+        saveSubDeliveriesToDisk(records);
+        return res.json({ success: true, message: `Subscription delivery #${id} updated to ${status}.`, delivery: record });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
 });
 
 /* ============================================================

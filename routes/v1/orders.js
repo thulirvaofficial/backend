@@ -74,15 +74,36 @@ router.get("/:id", async (req, res) => {
  */
 router.get("/", async (req, res) => {
     try {
-        const { status, partner_id, user_id } = req.query;
+        const { status, partner_id, user_id, date } = req.query;
         let orders = loadOrders();
 
+        if (date) {
+            orders = orders.filter(o => {
+                if (!o.created_at) return false;
+                try {
+                    return new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) === date.trim();
+                } catch (_) { return false; }
+            });
+        }
         if (status) orders = orders.filter(o => o.order_status === status);
         if (partner_id) orders = orders.filter(o => o.partner_id === partner_id);
         if (user_id) orders = orders.filter(o => o.user_id?.toString() === user_id.toString());
 
         const enrichedList = await Promise.all(orders.map(enrichOrder));
-        return res.json({ success: true, total: enrichedList.length, orders: enrichedList });
+        const stats = {
+            total: enrichedList.length,
+            delivered: enrichedList.filter(o => (o.order_status || '').toLowerCase() === 'delivered').length,
+            pending: enrichedList.filter(o => {
+                const s = (o.order_status || '').toLowerCase();
+                return s !== 'delivered' && s !== 'cancelled';
+            }).length,
+            cancelled: enrichedList.filter(o => (o.order_status || '').toLowerCase() === 'cancelled').length,
+            revenue: enrichedList.reduce((sum, o) => {
+                const s = (o.order_status || '').toLowerCase();
+                return (s === 'delivered' || s === 'completed') ? sum + (Number(o.total || o.total_price) || 0) : sum;
+            }, 0)
+        };
+        return res.json({ success: true, total: enrichedList.length, stats, selected_date: date || null, orders: enrichedList });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }

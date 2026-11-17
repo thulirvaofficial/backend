@@ -27,7 +27,7 @@ jobs:
             npm install --omit=dev
 
             # Ensure upload directories and permissions exist
-            mkdir -p public/uploads/profiles public/uploads/partners public/uploads/delivery_proofs public/uploads/attendance
+            mkdir -p public/uploads/profiles public/uploads/partners public/uploads/delivery_proofs public/uploads/attendance public/uploads/announcements
             chmod -R 775 public/uploads 2>/dev/null || true
 
             # Configure Nginx client_max_body_size 25M to fix HTTP 413

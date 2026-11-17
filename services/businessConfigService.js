@@ -21,10 +21,18 @@ const DEFAULT_CONFIG = {
     delivery_charges_enabled: true,
     fixed_delivery_charge: 30.0,
     free_delivery_threshold: 299.0,
+    min_order_value_for_delivery: 150.0,
+    partner_base_payout: 35.0,
+    partner_distance_bonus_per_km: 6.0,
     distance_charges_enabled: false,
     distance_base_km: 5.0,
     distance_rate_per_km: 10.0,
-    zone_charges: {},
+    zone_charges: {
+        "Padur": 20.0,
+        "Navalur": 30.0,
+        "Siruseri": 30.0,
+        "Kelambakkam": 40.0
+    },
     delivery_mode: "morning_evening", // morning | evening | morning_evening | always_24x7 | temporarily_disabled
     morning_start_time: "06:00 AM",
     morning_end_time: "10:00 AM",
@@ -194,6 +202,9 @@ async function updateDeliveryConfig(updates = {}, adminName = "Super Admin") {
     // Coerce numeric values
     if (merged.fixed_delivery_charge !== undefined) merged.fixed_delivery_charge = Number(merged.fixed_delivery_charge);
     if (merged.free_delivery_threshold !== undefined) merged.free_delivery_threshold = Number(merged.free_delivery_threshold);
+    if (merged.min_order_value_for_delivery !== undefined) merged.min_order_value_for_delivery = Number(merged.min_order_value_for_delivery);
+    if (merged.partner_base_payout !== undefined) merged.partner_base_payout = Number(merged.partner_base_payout);
+    if (merged.partner_distance_bonus_per_km !== undefined) merged.partner_distance_bonus_per_km = Number(merged.partner_distance_bonus_per_km);
     if (merged.distance_base_km !== undefined) merged.distance_base_km = Number(merged.distance_base_km);
     if (merged.distance_rate_per_km !== undefined) merged.distance_rate_per_km = Number(merged.distance_rate_per_km);
     if (merged.geofence_radius_meters !== undefined) merged.geofence_radius_meters = Number(merged.geofence_radius_meters);

@@ -32,5 +32,13 @@
     "delivered_at": "2026-11-14T13:05:41.602Z",
     "notes": "Delivered milk bottle to doorstep milk box in Padur",
     "partner_id": "THU-DP-0005"
+  },
+  {
+    "id": "DLY-SUB-1794667161654-20261117",
+    "daily_id": "DLY-SUB-1794667161654-20261117",
+    "status": "delivered",
+    "updated_at": "2026-11-17T07:18:15.435Z",
+    "notes": "Delivered to milk pouch outside door",
+    "delivered_at": "2026-11-17T07:18:15.435Z"
   }
 ]

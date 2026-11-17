@@ -665,10 +665,44 @@ async function getOrdersWithItems(whereClause = "", params = []) {
     }
 }
 
+function getOrderDateInKolkata(dateStr) {
+    if (!dateStr) return null;
+    try {
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return null;
+        return d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    } catch (_) {
+        return null;
+    }
+}
+
+function computeOrderStats(ordersList) {
+    const total = ordersList.length;
+    let delivered = 0;
+    let pending = 0;
+    let cancelled = 0;
+    let revenue = 0;
+
+    for (const o of ordersList) {
+        const s = (o.order_status || o.status || '').toLowerCase();
+        if (s === 'delivered') {
+            delivered++;
+            revenue += Number(o.total || o.total_price || 0);
+        } else if (s === 'cancelled') {
+            cancelled++;
+        } else {
+            pending++;
+        }
+    }
+
+    return { total, delivered, pending, cancelled, revenue };
+}
+
 /* GET ALL ORDERS */
 router.get("/", async (req, res) => {
     try {
         const includeSubs = req.query.include_subscriptions === "true" || req.query.type === "all";
+        const dateFilter = req.query.date ? req.query.date.trim() : null;
         const orders = await getOrdersWithItems();
         const dbIds = new Set(orders.map(o => o.id.toString()));
         const memOrders = (getMockOrders() || []).filter(o => !dbIds.has(o.id.toString()));
@@ -686,16 +720,31 @@ router.get("/", async (req, res) => {
             allOrders = [...allOrders, ...subsList];
         }
 
+        if (dateFilter) {
+            allOrders = allOrders.filter(o => getOrderDateInKolkata(o.created_at) === dateFilter);
+        }
+
+        const stats = computeOrderStats(allOrders);
+
         res.json({
             success: true,
             total: allOrders.length,
+            stats,
+            selected_date: dateFilter,
             orders: allOrders
         });
     } catch (err) {
-        const memOrders = (getMockOrders() || []).map(o => ({ ...o, order_type: "product" }));
+        let memOrders = (getMockOrders() || []).map(o => ({ ...o, order_type: "product" }));
+        const dateFilter = req.query.date ? req.query.date.trim() : null;
+        if (dateFilter) {
+            memOrders = memOrders.filter(o => getOrderDateInKolkata(o.created_at) === dateFilter);
+        }
+        const stats = computeOrderStats(memOrders);
         res.json({
             success: true,
             total: memOrders.length,
+            stats,
+            selected_date: dateFilter,
             orders: memOrders
         });
     }
@@ -705,6 +754,7 @@ router.get("/", async (req, res) => {
 router.get("/admin/all", async (req, res) => {
     try {
         const includeSubs = req.query.include_subscriptions === "true" || req.query.type === "all";
+        const dateFilter = req.query.date ? req.query.date.trim() : null;
         const orders = await getOrdersWithItems();
         const dbIds = new Set(orders.map(o => o.id.toString()));
         const memOrders = (getMockOrders() || []).filter(o => !dbIds.has(o.id.toString()));
@@ -765,6 +815,10 @@ router.get("/admin/all", async (req, res) => {
             } catch (_) {}
         }
 
+        if (dateFilter) {
+            allOrders = allOrders.filter(o => getOrderDateInKolkata(o.created_at) === dateFilter);
+        }
+
         allOrders.sort((a, b) => {
             const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
             const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
@@ -774,11 +828,17 @@ router.get("/admin/all", async (req, res) => {
             return idB - idA;
         });
         const enrichedAll = await enrichOrdersWithPartners(allOrders);
-        return res.json({ success: true, orders: enrichedAll });
+        const stats = computeOrderStats(enrichedAll);
+        return res.json({ success: true, total: enrichedAll.length, stats, selected_date: dateFilter, orders: enrichedAll });
     } catch (err) {
-        const prodMocks = (getMockOrders() || []).filter(o => o.order_type !== "subscription" && !String(o.id).startsWith("SUB-"));
+        let prodMocks = (getMockOrders() || []).filter(o => o.order_type !== "subscription" && !String(o.id).startsWith("SUB-"));
+        const dateFilter = req.query.date ? req.query.date.trim() : null;
+        if (dateFilter) {
+            prodMocks = prodMocks.filter(o => getOrderDateInKolkata(o.created_at) === dateFilter);
+        }
         const enrichedMocks = await enrichOrdersWithPartners(prodMocks);
-        res.json({ success: true, orders: enrichedMocks });
+        const stats = computeOrderStats(enrichedMocks);
+        res.json({ success: true, total: enrichedMocks.length, stats, selected_date: dateFilter, orders: enrichedMocks });
     }
 });
 
