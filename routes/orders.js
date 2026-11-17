@@ -256,7 +256,26 @@ router.post("/", async (req, res) => {
             }
         } catch {}
 
-        const delivery = order_type === "pickup" ? 0 : (subtotal >= 299 ? 0 : 30);
+        // 1. Delivery Availability Check (Morning, Evening, 24/7 or Temporarily Disabled)
+        const { calculateDeliveryCharge, checkDeliveryAvailability } = require("../services/businessConfigService");
+        if (order_type !== "pickup") {
+            const avail = await checkDeliveryAvailability({ zone: delivery_zone });
+            if (!avail.available && !avail.advance_ordering_enabled) {
+                return res.status(400).json({
+                    success: false,
+                    message: avail.message || "Delivery is currently unavailable. Please check our next available delivery time."
+                });
+            }
+        }
+
+        // 2. Authoritative Dynamic Delivery Fee Calculation
+        const chargeCalc = await calculateDeliveryCharge({
+            subtotal,
+            order_type,
+            zone: delivery_zone,
+            distance_km: req.body.distance_km || null
+        });
+        const delivery = chargeCalc.delivery_fee;
         const total = Math.max(0, subtotal + delivery - discount_amount);
 
         const savedProof = saveBase64Image(payment_proof);
@@ -484,6 +503,12 @@ router.post("/", async (req, res) => {
         } catch (dispatchErr) {
             console.warn("[AUTO-DISPATCH REQUIRE ERR]:", dispatchErr.message);
         }
+
+        // Reset any existing geofence state for fresh arrival tracking
+        try {
+            const { resetOrderGeofence } = require("../services/geofenceService");
+            resetOrderGeofence(finalId);
+        } catch (_) {}
 
         // Payment notifications if proof or transaction ID is present
         if (transaction_id || savedProof) {

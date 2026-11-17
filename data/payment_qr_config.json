@@ -1,0 +1,11 @@
+{
+  "id": 1,
+  "upi_id": "7904880944@superyes",
+  "merchant_name": "THULIRVA ORGANICS",
+  "qr_image_url": "/api/uploads/payments/payment_qr_v1.jpg",
+  "is_active": true,
+  "version": 1,
+  "notes": "Official Thulirva Merchant QR",
+  "created_by": "Super Admin",
+  "created_at": "2026-11-16T16:27:36.801Z"
+}

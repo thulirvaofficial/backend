@@ -1,5 +1,60 @@
 [
   {
+    "id": "NOTIF-1794843322779-40",
+    "user_id": "THU-DP-0001",
+    "title": "🚨 New Thulirva Order #THU-20261116-2084",
+    "message": "New delivery order (₹380, 2 items) at Near Valasaravakkam Water Tank. Tap to accept within 3 minutes!",
+    "type": "NEW_ORDER_ASSIGNED",
+    "target_id": "1794669999005",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-16T15:35:22.779Z"
+  },
+  {
+    "id": "NOTIF-1794843315876-674",
+    "user_id": "THU-DP-0001",
+    "title": "🚨 New Thulirva Order #THU-20261116-2084",
+    "message": "New delivery order (₹380, 2 items) at Near Valasaravakkam Water Tank. Tap to accept within 3 minutes!",
+    "type": "NEW_ORDER_ASSIGNED",
+    "target_id": "1794669999005",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-16T15:35:15.876Z"
+  },
+  {
+    "id": "NOTIF-1794843308818-248",
+    "user_id": "THU-DP-0001",
+    "title": "🚨 New Thulirva Order #THU-20261116-2084",
+    "message": "New delivery order (₹380, 2 items) at Near Valasaravakkam Water Tank. Tap to accept within 3 minutes!",
+    "type": "NEW_ORDER_ASSIGNED",
+    "target_id": "1794669999005",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-16T15:35:08.818Z"
+  },
+  {
+    "id": "NOTIF-1794842011000-416",
+    "user_id": "THU-DP-0001",
+    "title": "🚨 New Thulirva Order #THU-20261116-2084",
+    "message": "New delivery order (₹380, 2 items) at Near Valasaravakkam Water Tank. Tap to accept within 3 minutes!",
+    "type": "NEW_ORDER_ASSIGNED",
+    "target_id": "1794669999005",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-16T15:13:31.000Z"
+  },
+  {
+    "id": "NOTIF-1794841396722-569",
+    "user_id": "THU-DP-0001",
+    "title": "🚨 New Thulirva Order #THU-20261116-2084",
+    "message": "New delivery order (₹380, 2 items) at Near Valasaravakkam Water Tank. Tap to accept within 3 minutes!",
+    "type": "NEW_ORDER_ASSIGNED",
+    "target_id": "1794669999005",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-16T15:03:16.722Z"
+  },
+  {
     "id": "NOTIF-1794839603089-237",
     "user_id": "THU-DP-0001",
     "title": "🚨 New Thulirva Order #THU-20261116-2084",

@@ -77,6 +77,9 @@ const v1Routes =
 const recipeRoutes =
     require("./routes/recipes");
 
+const businessConfigRoutes =
+    require("./routes/businessConfig");
+
 const app = express();
 
 const PORT =
@@ -279,6 +282,21 @@ app.use(
     serviceabilityRoutes
 );
 
+app.use(
+    "/api/config",
+    businessConfigRoutes
+);
+
+app.use(
+    "/api/admin/config",
+    businessConfigRoutes
+);
+
+app.use(
+    "/api/admin/payment-qr",
+    businessConfigRoutes
+);
+
 /* ============================================================
    CENTRALIZED V1 API & HEALTH MONITORING
 ============================================================ */
@@ -310,6 +328,7 @@ const backendAssetsUploadsPath = path.resolve(__dirname, "assets", "images", "up
     path.join(backendPublicUploadsPath, "delivery_proofs"),
     path.join(backendPublicUploadsPath, "attendance"),
     path.join(backendPublicUploadsPath, "profiles"),
+    path.join(backendPublicUploadsPath, "payments"),
     backendAssetsUploadsPath,
     path.join(backendAssetsUploadsPath, "profiles"),
     websiteUploadsPath,

@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { sendNotification } = require("./notificationService");
 const { emitToCustomer, emitToOrder, emitToAdmin } = require("./socketService");
+const { getDeliveryConfig, recordGeofenceArrival } = require("./businessConfigService");
 
 const DATA_DIR = path.resolve(__dirname, "..", "data");
 const GEOFENCE_STATE_FILE = path.join(DATA_DIR, "geofence_events.json");
@@ -30,7 +31,7 @@ function saveGeofenceState(state) {
 }
 
 function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
-    if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+    if (lat1 === null || lon1 === null || lat2 === null || lon2 === null) return null;
     const R = 6371e3; // Earth radius in meters
     const phi1 = (lat1 * Math.PI) / 180;
     const phi2 = (lat2 * Math.PI) / 180;
@@ -48,82 +49,90 @@ function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
 /**
  * Check and trigger geofence events for delivery partner's current GPS position
  */
-async function checkGeofenceTriggers({ partner_id, latitude, longitude }) {
-    if (!partner_id || !latitude || !longitude) return;
+async function checkGeofenceTriggers({ partner_id, latitude, longitude, accuracy, timestamp }) {
+    if (!partner_id || latitude === undefined || longitude === undefined) return;
 
     const lat = Number(latitude);
     const lng = Number(longitude);
+
+    // Reject 0,0 coordinates or non-numeric
+    if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+
+    // Filter out updates with poor GPS accuracy (> 50m) to prevent false geofence triggers
+    if (accuracy !== undefined && accuracy !== null && !isNaN(Number(accuracy))) {
+        if (Number(accuracy) > 50) {
+            console.log(`[GEOFENCE SKIP] Rejecting partner ${partner_id} GPS update: Accuracy ${accuracy}m > 50m threshold`);
+            return;
+        }
+    }
+
+    const bizConfig = await getDeliveryConfig();
+    const geofenceRadius = Number(bizConfig.geofence_radius_meters) || 100;
+    const geofenceEnabled = bizConfig.geofence_notifications_enabled !== false;
+
     const state = loadGeofenceState();
     let stateChanged = false;
 
     // =========================================================================
-    // 1. PRODUCT ORDER: 100-METRE CUSTOMER ARRIVAL GEOFENCE
+    // 1. PRODUCT ORDER: 100-METRE (DYNAMIC) CUSTOMER ARRIVAL GEOFENCE
     // =========================================================================
-    try {
-        const ordersFile = path.join(DATA_DIR, "orders.json");
-        let orders = [];
-        if (fs.existsSync(ordersFile)) {
-            orders = JSON.parse(fs.readFileSync(ordersFile, "utf-8"));
-        }
+    if (geofenceEnabled) {
+        try {
+            const ordersFile = path.join(DATA_DIR, "orders.json");
+            let orders = [];
+            if (fs.existsSync(ordersFile)) {
+                orders = JSON.parse(fs.readFileSync(ordersFile, "utf-8"));
+            }
 
-        const activeOrders = orders.filter(o => {
-            if (!o) return false;
-            const pId = (o.partner_id || o.delivery_partner_id || "").toString();
-            const s = (o.order_status || o.status || "").toLowerCase().replace(/[\s\-]/g, "_");
-            return pId === partner_id.toString() && (s === "out_for_delivery" || s === "in_transit");
-        });
+            const activeOrders = orders.filter(o => {
+                if (!o) return false;
+                const pId = (o.partner_id || o.delivery_partner_id || "").toString();
+                const s = (o.order_status || o.status || "").toLowerCase().replace(/[\s\-]/g, "_");
+                return pId === partner_id.toString() && (s === "out_for_delivery" || s === "in_transit");
+            });
 
-        for (const order of activeOrders) {
-            const orderId = order.id ? order.id.toString() : (order.order_number || "");
-            if (!orderId) continue;
+            for (const order of activeOrders) {
+                const orderId = order.id ? order.id.toString() : (order.order_number || "");
+                if (!orderId) continue;
 
-            // Destination coordinates
-            const destLat = Number(order.latitude || order.delivery_latitude);
-            const destLng = Number(order.longitude || order.delivery_longitude);
+                // Destination coordinates
+                const destLat = Number(order.latitude || order.delivery_latitude);
+                const destLng = Number(order.longitude || order.delivery_longitude);
 
-            if (!destLat || !destLng || isNaN(destLat) || isNaN(destLng)) continue;
+                if (!destLat || !destLng || isNaN(destLat) || isNaN(destLng)) continue;
 
-            const distMeters = calculateDistanceMeters(lat, lng, destLat, destLng);
-            if (distMeters === null) continue;
+                const distMeters = calculateDistanceMeters(lat, lng, destLat, destLng);
+                if (distMeters === null) continue;
 
-            // 100 Metres Arrival Geofence
-            if (distMeters <= 100) {
-                if (!state.product_arrival[orderId]) {
-                    state.product_arrival[orderId] = {
-                        order_id: orderId,
-                        partner_id,
-                        user_id: order.user_id,
-                        arrived_at: new Date().toISOString(),
-                        distance_meters: Math.round(distMeters)
-                    };
-                    stateChanged = true;
+                // Dynamic Arrival Geofence (Default 100m)
+                if (distMeters <= geofenceRadius) {
+                    if (!state.product_arrival[orderId]) {
+                        state.product_arrival[orderId] = {
+                            order_id: orderId,
+                            partner_id,
+                            user_id: order.user_id,
+                            arrived_at: new Date().toISOString(),
+                            distance_meters: Math.round(distMeters)
+                        };
+                        stateChanged = true;
 
-                    const title = "Your Thulirva Delivery Partner Has Arrived!";
-                    const message = "Your delivery partner has reached your location and is within 100 metres. Please be ready to receive your order.";
+                        const title = bizConfig.geofence_alert_title || "Your Thulirva Delivery Partner Has Arrived!";
+                        const message = bizConfig.geofence_alert_message || "Your Thulirva delivery partner has arrived near your location!";
 
-                    console.log(`[GEOFENCE 100M ARRIVAL] Order #${orderId}: Partner within ${Math.round(distMeters)}m of customer`);
+                        console.log(`[GEOFENCE ${geofenceRadius}M ARRIVAL] Order #${orderId}: Partner within ${Math.round(distMeters)}m of customer`);
 
-                    // 1. Send Push & In-App Notification to this specific customer
-                    await sendNotification({
-                        userId: order.user_id,
-                        title,
-                        message,
-                        type: "order_arrived",
-                        targetId: orderId
-                    }).catch(e => console.warn("[Geofence Notif Error]", e.message));
+                        // 1. Send Push & In-App Notification to this specific customer
+                        await sendNotification({
+                            userId: order.user_id,
+                            title,
+                            message,
+                            type: "order_arrived",
+                            targetId: orderId
+                        }).catch(e => console.warn("[Geofence Notif Error]", e.message));
 
-                    // 2. Real-time Socket Event to Customer and Order Rooms
-                    emitToOrder(orderId, "order:geofence_arrival", {
-                        order_id: orderId,
-                        partner_id,
-                        distance_meters: Math.round(distMeters),
-                        title,
-                        message,
-                        timestamp: new Date().toISOString()
-                    });
-
-                    if (order.user_id) {
-                        emitToCustomer(order.user_id.toString(), "customer:geofence_arrival", {
+                        // 2. Real-time Socket Event to Customer and Order Rooms
+                        emitToOrder(orderId, "order:geofence_arrival", {
                             order_id: orderId,
                             partner_id,
                             distance_meters: Math.round(distMeters),
@@ -131,19 +140,43 @@ async function checkGeofenceTriggers({ partner_id, latitude, longitude }) {
                             message,
                             timestamp: new Date().toISOString()
                         });
-                    }
 
-                    emitToAdmin("admin:geofence_arrival", {
-                        order_id: orderId,
-                        partner_id,
-                        customer_name: order.customer_name || "Customer",
-                        distance_meters: Math.round(distMeters)
-                    });
+                        if (order.user_id) {
+                            emitToCustomer(order.user_id.toString(), "customer:geofence_arrival", {
+                                order_id: orderId,
+                                partner_id,
+                                distance_meters: Math.round(distMeters),
+                                title,
+                                message,
+                                timestamp: new Date().toISOString()
+                            });
+                        }
+
+                        emitToAdmin("admin:geofence_arrival", {
+                            order_id: orderId,
+                            partner_id,
+                            customer_name: order.customer_name || "Customer",
+                            distance_meters: Math.round(distMeters)
+                        });
+
+                        // Record arrival in database
+                        recordGeofenceArrival({
+                            order_id: orderId,
+                            delivery_type: "order",
+                            partner_id: partner_id.toString(),
+                            user_id: order.user_id ? order.user_id.toString() : null,
+                            distance_meters: Math.round(distMeters),
+                            partner_lat: lat,
+                            partner_lng: lng,
+                            customer_lat: destLat,
+                            customer_lng: destLng
+                        }).catch(e => console.warn("[Geofence DB Error]", e.message));
+                    }
                 }
             }
+        } catch (err) {
+            console.warn("[GEOFENCE PRODUCT CHECK ERROR]", err.message);
         }
-    } catch (err) {
-        console.warn("[GEOFENCE PRODUCT CHECK ERROR]", err.message);
     }
 
     // =========================================================================
@@ -221,6 +254,18 @@ async function checkGeofenceTriggers({ partner_id, latitude, longitude }) {
                         customer_name: sub.customer_name || "Subscriber",
                         distance_meters: Math.round(distMeters)
                     });
+
+                    recordGeofenceArrival({
+                        order_id: subId,
+                        delivery_type: "subscription",
+                        partner_id: partner_id.toString(),
+                        user_id: sub.user_id ? sub.user_id.toString() : null,
+                        distance_meters: Math.round(distMeters),
+                        partner_lat: lat,
+                        partner_lng: lng,
+                        customer_lat: subLat,
+                        customer_lng: subLng
+                    }).catch(e => console.warn("[Geofence DB Error]", e.message));
                 }
             }
         }
@@ -240,11 +285,17 @@ function resetOrderGeofence(orderId) {
     if (!orderId) return;
     const state = loadGeofenceState();
     const idKey = orderId.toString();
-    if (state.product_arrival[idKey]) {
+    if (state.product_arrival && state.product_arrival[idKey]) {
         delete state.product_arrival[idKey];
         saveGeofenceState(state);
     }
 }
+
+module.exports = {
+    checkGeofenceTriggers,
+    resetOrderGeofence,
+    calculateDistanceMeters
+};
 
 module.exports = {
     checkGeofenceTriggers,

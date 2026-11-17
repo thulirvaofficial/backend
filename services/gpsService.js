@@ -214,7 +214,9 @@ async function recordLocationUpdate({
         await checkGeofenceTriggers({
             partner_id,
             latitude: lat,
-            longitude: lng
+            longitude: lng,
+            accuracy: Number(accuracy) || 0,
+            timestamp: recorded_at
         });
     } catch (_) {}
 

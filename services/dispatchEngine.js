@@ -163,6 +163,8 @@ async function offerOrderToPartner(order, partner) {
         const pickupHub = 'Valasaravakkam Hub, Chennai';
         const deliveryAddress = order.address || order.city || 'Chennai';
         const deliveryInstructions = order.delivery_instructions || 'Deliver safely to customer doorstep';
+        const customerPhone = order.customer_phone || order.phone || '+91 98401 23456';
+        const deliveryEarnings = Number(order.delivery_charge || 35.0);
 
         const offerPayload = {
             offer_id: `OFFER-${Date.now()}`,
@@ -171,7 +173,7 @@ async function offerOrderToPartner(order, partner) {
             delivery_type: order.delivery_type || 'order',
             partner_id: partnerId,
             customer_name: order.customer_name || 'Customer',
-            customer_phone: order.customer_phone || order.phone || '',
+            customer_phone: customerPhone,
             customer_area: customerArea,
             pickup_hub: pickupHub,
             address: deliveryAddress,
@@ -181,9 +183,13 @@ async function offerOrderToPartner(order, partner) {
             latitude: order.latitude ? Number(order.latitude) : null,
             longitude: order.longitude ? Number(order.longitude) : null,
             landmark: order.landmark || '',
+            items: order.items || [],
             items_count: itemsCount,
             delivery_instructions: deliveryInstructions,
             total: order.total || 0,
+            payment_method: order.payment_method || 'UPI (Prepaid)',
+            delivery_charge: deliveryEarnings,
+            delivery_earnings: deliveryEarnings,
             assigned_at: new Date().toISOString(),
             expires_at: expiresAt.toISOString(),
             timeout_seconds: OFFER_TIMEOUT_SECONDS,
@@ -203,6 +209,7 @@ async function offerOrderToPartner(order, partner) {
                 order_id: String(orderId),
                 order_number: String(order.order_number || `ORD${orderId}`),
                 customer_name: order.customer_name || 'Customer',
+                customer_phone: customerPhone,
                 customer_area: customerArea,
                 pickup_hub: pickupHub,
                 delivery_address: deliveryAddress,
@@ -210,6 +217,9 @@ async function offerOrderToPartner(order, partner) {
                 delivery_instructions: deliveryInstructions,
                 order_amount: String(order.total || 0),
                 total: String(order.total || 0),
+                payment_method: order.payment_method || 'UPI (Prepaid)',
+                delivery_earnings: String(deliveryEarnings),
+                delivery_charge: String(deliveryEarnings),
                 assigned_at: offerPayload.assigned_at,
                 expires_at: expiresAt.toISOString(),
                 timeout_seconds: String(OFFER_TIMEOUT_SECONDS),
@@ -298,6 +308,7 @@ async function offerOrderToPartner(order, partner) {
                 order_id: String(orderId),
                 order_number: String(order.order_number || `ORD${orderId}`),
                 customer_name: order.customer_name || 'Customer',
+                customer_phone: customerPhone,
                 customer_area: customerArea,
                 pickup_hub: pickupHub,
                 delivery_address: deliveryAddress,
@@ -305,6 +316,9 @@ async function offerOrderToPartner(order, partner) {
                 delivery_instructions: deliveryInstructions,
                 order_amount: String(order.total || 0),
                 total: String(order.total || 0),
+                payment_method: order.payment_method || 'UPI (Prepaid)',
+                delivery_earnings: String(deliveryEarnings),
+                delivery_charge: String(deliveryEarnings),
                 assigned_at: fallbackPayload.assigned_at,
                 expires_at: expiresAt.toISOString(),
                 timeout_seconds: String(OFFER_TIMEOUT_SECONDS),

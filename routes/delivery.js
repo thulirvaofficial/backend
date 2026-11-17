@@ -2387,7 +2387,7 @@ const getActiveOffersHandler = async (req, res) => {
 
         // Check DB for pending offers
         const offers = await pool.query(`
-            SELECT do.*, o.order_number, o.customer_name, o.address, o.city, o.total, o.items, o.delivery_instructions, o.landmark, o.pincode
+            SELECT do.*, o.order_number, o.customer_name, o.customer_phone, o.phone, o.address, o.city, o.total, o.items, o.delivery_instructions, o.landmark, o.pincode, o.latitude, o.longitude, o.payment_method, o.delivery_charge
             FROM dispatch_offers do
             LEFT JOIN orders o ON (do.order_id = o.id::text OR do.order_id = o.order_number)
             WHERE do.partner_id = $1 AND do.status = 'pending' AND do.expires_at > NOW()
@@ -2398,14 +2398,20 @@ const getActiveOffersHandler = async (req, res) => {
             const offer = offers.rows[0];
             const remainingSecs = Math.max(0, Math.floor((new Date(offer.expires_at) - new Date()) / 1000));
             let itemsCount = 1;
+            let parsedItems = [];
             if (Array.isArray(offer.items)) {
                 itemsCount = offer.items.length;
+                parsedItems = offer.items;
             } else if (typeof offer.items === 'string') {
                 try {
                     const parsed = JSON.parse(offer.items);
-                    if (Array.isArray(parsed)) itemsCount = parsed.length;
+                    if (Array.isArray(parsed)) {
+                        itemsCount = parsed.length;
+                        parsedItems = parsed;
+                    }
                 } catch (_) {}
             }
+            const deliveryEarnings = Number(offer.delivery_charge || 35.0);
             return res.json({
                 success: true,
                 has_active_offer: true,
@@ -2413,11 +2419,20 @@ const getActiveOffersHandler = async (req, res) => {
                     ...offer,
                     order_id: String(offer.order_id),
                     order_number: offer.order_number || `ORD${offer.order_id}`,
+                    customer_name: offer.customer_name || 'Customer',
+                    customer_phone: offer.customer_phone || offer.phone || '+91 98401 23456',
                     customer_area: offer.landmark || offer.city || 'Valasaravakkam, Chennai',
                     pickup_hub: 'Valasaravakkam Hub, Chennai',
                     delivery_address: offer.address || offer.city || 'Chennai',
+                    items: parsedItems,
                     items_count: itemsCount,
+                    total: Number(offer.total || 0),
+                    payment_method: offer.payment_method || 'UPI (Prepaid)',
                     delivery_instructions: offer.delivery_instructions || 'Deliver to doorstep',
+                    latitude: offer.latitude ? Number(offer.latitude) : null,
+                    longitude: offer.longitude ? Number(offer.longitude) : null,
+                    delivery_charge: deliveryEarnings,
+                    delivery_earnings: deliveryEarnings,
                     remaining_seconds: remainingSecs,
                     timeout_seconds: 180
                 }

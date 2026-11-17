@@ -40,7 +40,7 @@
     "transactionId": "",
     "payment_proof": "",
     "paymentProof": "",
-    "order_status": "pending",
+    "order_status": "placed",
     "created_at": "2026-11-16T14:23:17.856Z",
     "items": [
       {

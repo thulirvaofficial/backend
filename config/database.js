@@ -1108,6 +1108,89 @@ async function initializeDatabase() {
             );
         `);
 
+        // Business Configurations Table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS business_configurations (
+                id VARCHAR(50) PRIMARY KEY DEFAULT 'main',
+                delivery_charges_enabled BOOLEAN DEFAULT true,
+                fixed_delivery_charge NUMERIC(10,2) DEFAULT 30.00,
+                free_delivery_threshold NUMERIC(10,2) DEFAULT 299.00,
+                distance_charges_enabled BOOLEAN DEFAULT false,
+                distance_base_km NUMERIC(10,2) DEFAULT 5.0,
+                distance_rate_per_km NUMERIC(10,2) DEFAULT 10.0,
+                zone_charges JSONB DEFAULT '{}'::jsonb,
+                delivery_mode VARCHAR(50) DEFAULT 'morning_evening',
+                morning_start_time VARCHAR(20) DEFAULT '06:00 AM',
+                morning_end_time VARCHAR(20) DEFAULT '10:00 AM',
+                evening_start_time VARCHAR(20) DEFAULT '04:00 PM',
+                evening_end_time VARCHAR(20) DEFAULT '08:00 PM',
+                holidays JSONB DEFAULT '[]'::jsonb,
+                closure_reason TEXT DEFAULT 'Deliveries are temporarily paused for maintenance.',
+                geofence_radius_meters INT DEFAULT 100,
+                geofence_notifications_enabled BOOLEAN DEFAULT true,
+                geofence_alert_title VARCHAR(200) DEFAULT 'Your Thulirva Delivery Partner Has Arrived!',
+                geofence_alert_message TEXT DEFAULT 'Your Thulirva delivery partner has arrived near your location!',
+                delivery_launch_date VARCHAR(50) DEFAULT '2026-11-25',
+                advance_ordering_enabled BOOLEAN DEFAULT true,
+                first_delivery_date VARCHAR(50) DEFAULT '2026-11-25',
+                zone_launch_dates JSONB DEFAULT '{}'::jsonb,
+                launch_banner_enabled BOOLEAN DEFAULT true,
+                launch_banner_headline TEXT DEFAULT 'Freshness delivered to your doorstep! Order now.',
+                launch_banner_subtitle TEXT DEFAULT 'Pure organic milk and farm-fresh essentials.',
+                launch_banner_bg_color VARCHAR(30) DEFAULT '#1B4332',
+                launch_banner_image_url TEXT DEFAULT '',
+                zone_banners JSONB DEFAULT '{}'::jsonb,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_by VARCHAR(150) DEFAULT 'Super Admin'
+            );
+        `);
+
+        // Payment QR Configurations Table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS payment_qr_configs (
+                id SERIAL PRIMARY KEY,
+                upi_id VARCHAR(150) NOT NULL DEFAULT '7904880944@superyes',
+                merchant_name VARCHAR(200) DEFAULT 'THULIRVA ORGANICS',
+                qr_image_url TEXT NOT NULL,
+                is_active BOOLEAN DEFAULT true,
+                version INT DEFAULT 1,
+                notes TEXT,
+                created_by VARCHAR(150) DEFAULT 'Super Admin',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // Admin Security Credentials Table (for Dedicated Payment QR Password)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_security_credentials (
+                id SERIAL PRIMARY KEY,
+                credential_type VARCHAR(100) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                failed_attempts INT DEFAULT 0,
+                locked_until TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_by VARCHAR(150) DEFAULT 'Super Admin'
+            );
+        `);
+
+        // Delivery Geofence Arrival Events Table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS delivery_geofence_events (
+                id SERIAL PRIMARY KEY,
+                order_id VARCHAR(100) NOT NULL,
+                delivery_type VARCHAR(50) DEFAULT 'order',
+                partner_id VARCHAR(100) NOT NULL,
+                user_id VARCHAR(100),
+                distance_meters NUMERIC(10,2) NOT NULL,
+                partner_lat NUMERIC(10,7) NOT NULL,
+                partner_lng NUMERIC(10,7) NOT NULL,
+                customer_lat NUMERIC(10,7) NOT NULL,
+                customer_lng NUMERIC(10,7) NOT NULL,
+                notified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                notification_sent BOOLEAN DEFAULT true
+            );
+        `);
+
         // Ensure delivery_partners table exists without injecting fake mock data
         console.log("[+] Database tables ready");
     } catch (error) {
