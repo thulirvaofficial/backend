@@ -604,8 +604,47 @@ function getLaunchBannerFromConfig(config, zone = null) {
 }
 
 async function getLaunchBanner(zone = null) {
-    const config = await getDeliveryConfig();
-    return getLaunchBannerFromConfig(config, zone);
+    try {
+        const { getActiveAnnouncements } = require("./announcementService");
+        const activeAnnouncements = await getActiveAnnouncements();
+        // Look for hero / launch announcements or any active announcement
+        const heroAnn = activeAnnouncements.find(a => a.position === "homepage_hero" || a.position === "all") || (activeAnnouncements.length > 0 ? activeAnnouncements[0] : null);
+
+        if (heroAnn) {
+            return {
+                enabled: true,
+                state: "active",
+                headline: heroAnn.title,
+                subtitle: heroAnn.description || "",
+                bg_color: heroAnn.bg_color || "#1B4332",
+                background_color: heroAnn.bg_color || "#1B4332",
+                text_color: heroAnn.text_color || "#FFFFFF",
+                accent_color: heroAnn.accent_color || "#E5C97A",
+                badge_text: heroAnn.badge_text || "DELIVERY LAUNCH",
+                image_url: heroAnn.image_url || "",
+                cta_text: heroAnn.cta_text || "Shop Farm Fresh",
+                cta_url: heroAnn.cta_url || "/pages/shop.html",
+                launch_date: heroAnn.start_date || null,
+                expiry_date: heroAnn.expiry_date || null,
+                id: heroAnn.id
+            };
+        } else {
+            // When all announcements are disabled or expired, banner is strictly disabled
+            return {
+                enabled: false,
+                headline: "",
+                subtitle: "",
+                background_color: "#1B4332",
+                bg_color: "#1B4332",
+                image_url: "",
+                state: "disabled"
+            };
+        }
+    } catch (e) {
+        console.warn("[BusinessConfig] Announcement check fallback:", e.message);
+        const config = await getDeliveryConfig();
+        return getLaunchBannerFromConfig(config, zone);
+    }
 }
 
 /* =========================================================================

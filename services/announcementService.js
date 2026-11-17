@@ -132,6 +132,31 @@ function dispatchAnnouncementNotification(announcement) {
     }
 }
 
+function getTodayInKolkata() {
+    try {
+        const formatter = new Intl.DateTimeFormat("en-CA", {
+            timeZone: "Asia/Kolkata",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit"
+        });
+        return formatter.format(new Date()); // Outputs "YYYY-MM-DD"
+    } catch (_) {
+        return new Date().toISOString().slice(0, 10);
+    }
+}
+
+function broadcastBannerUpdate() {
+    try {
+        const { getLaunchBanner } = require("./businessConfigService");
+        if (typeof getLaunchBanner === "function") {
+            getLaunchBanner().then(banner => {
+                broadcastSocket("config:banner_updated", banner);
+            }).catch(() => {});
+        }
+    } catch (_) {}
+}
+
 /**
  * Retrieve all announcements (admin)
  */
@@ -152,15 +177,21 @@ async function getAllAnnouncements(filter = {}) {
  */
 async function getActiveAnnouncements(position = null) {
     const all = await getAllAnnouncements();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getTodayInKolkata();
 
     return all.filter(a => {
-        if (!a.is_active || !a.is_published) return false;
-        if (a.start_date && a.start_date > today) return false;
-        if (a.expiry_date && a.expiry_date < today) return false;
+        const isActive = a.is_active === true || a.is_active === "true";
+        const isPublished = a.is_published === true || a.is_published === "true";
+        if (!isActive || !isPublished) return false;
+
+        const startDate = a.start_date ? String(a.start_date).slice(0, 10) : null;
+        const expiryDate = a.expiry_date ? String(a.expiry_date).slice(0, 10) : null;
+
+        if (startDate && startDate > today) return false;
+        if (expiryDate && expiryDate < today) return false;
         if (position && a.position && a.position !== position && a.position !== "all") return false;
         return true;
-    }).sort((a, b) => (a.priority || 1) - (b.priority || 1));
+    }).sort((a, b) => (Number(a.priority) || 1) - (Number(b.priority) || 1));
 }
 
 /**
@@ -218,6 +249,8 @@ async function createAnnouncement(data, adminName = "Super Admin") {
     }
 
     broadcastSocket("announcement:updated", announcement);
+    broadcastSocket("announcement:sync", { action: "created", announcement });
+    broadcastBannerUpdate();
     return announcement;
 }
 
@@ -229,6 +262,13 @@ async function updateAnnouncement(id, updates, adminName = "Super Admin") {
     const idx = list.findIndex(a => a.id == id);
     if (idx === -1) {
         throw new Error(`Announcement #${id} not found.`);
+    }
+
+    if (updates.is_active !== undefined) {
+        updates.is_active = updates.is_active === true || updates.is_active === "true";
+    }
+    if (updates.is_published !== undefined) {
+        updates.is_published = updates.is_published === true || updates.is_published === "true";
     }
 
     const current = list[idx];
@@ -267,6 +307,10 @@ async function updateAnnouncement(id, updates, adminName = "Super Admin") {
     }
 
     broadcastSocket("announcement:updated", updated);
+    broadcastSocket("announcement:status", { id: updated.id, is_active: updated.is_active, is_published: updated.is_published });
+    broadcastSocket("announcement:sync", { action: "updated", announcement: updated });
+    broadcastBannerUpdate();
+
     return updated;
 }
 
@@ -288,17 +332,28 @@ async function deleteAnnouncement(id, adminName = "Super Admin") {
     } catch (_) {}
 
     broadcastSocket("announcement:deleted", { id });
+    broadcastSocket("announcement:sync", { action: "deleted", id });
+    broadcastBannerUpdate();
+
     return true;
 }
 
 /**
  * Toggle active status
  */
-async function toggleAnnouncementStatus(id, adminName = "Super Admin") {
+async function toggleAnnouncementStatus(id, targetState = undefined, adminName = "Super Admin") {
     const list = readAnnouncementsFromFile();
     const item = list.find(a => a.id == id);
     if (!item) throw new Error(`Announcement #${id} not found.`);
-    return updateAnnouncement(id, { is_active: !item.is_active }, adminName);
+
+    let nextState;
+    if (targetState !== undefined && targetState !== null) {
+        nextState = targetState === true || targetState === "true";
+    } else {
+        nextState = !(item.is_active === true || item.is_active === "true");
+    }
+
+    return updateAnnouncement(id, { is_active: nextState }, adminName);
 }
 
 /**

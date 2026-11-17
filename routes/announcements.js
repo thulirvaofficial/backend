@@ -46,6 +46,7 @@ const upload = multer({
 // 1. GET /api/announcements/active - Retrieve published, non-expired announcements
 router.get(["/active", "/live"], async (req, res) => {
     try {
+        res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
         const position = req.query.position || null;
         const active = await getActiveAnnouncements(position);
         res.json({
@@ -53,6 +54,22 @@ router.get(["/active", "/live"], async (req, res) => {
             count: active.length,
             announcements: active,
             banner: active.length > 0 ? active[0] : null
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// 1b. GET /api/announcements/banner - Retrieve top active banner for mobile app or hero
+router.get("/banner", async (req, res) => {
+    try {
+        res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+        const active = await getActiveAnnouncements("homepage_hero");
+        const banner = active.length > 0 ? active[0] : null;
+        res.json({
+            success: true,
+            enabled: Boolean(banner),
+            banner
         });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
@@ -215,7 +232,12 @@ router.all(["/:id/delete", "/admin/:id/delete"], async (req, res) => {
 router.all(["/:id/toggle", "/admin/:id/toggle"], async (req, res) => {
     try {
         const adminName = extractAdminName(req);
-        const toggled = await toggleAnnouncementStatus(req.params.id, adminName);
+        const b = req.body || {};
+        let targetState = undefined;
+        if (b.is_active !== undefined) {
+            targetState = b.is_active === true || b.is_active === "true";
+        }
+        const toggled = await toggleAnnouncementStatus(req.params.id, targetState, adminName);
         res.json({
             success: true,
             message: `Announcement #${req.params.id} is now ${toggled.is_active ? 'ACTIVE' : 'INACTIVE'}.`,
