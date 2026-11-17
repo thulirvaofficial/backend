@@ -60,10 +60,11 @@ router.post("/admin/process", authenticateToken, adminOnly, async (req, res) => 
             period_end,
             payment_mode,
             utr_number,
-            notes
-        } = req.body;
+            notes,
+            admin_name
+        } = req.body || {};
 
-        const adminName = req.user.name || "Finance Operations Admin";
+        const adminName = admin_name || req.user?.name || req.user?.admin_name || "Finance Operations Admin";
 
         const settlement = await executeWeeklySettlement({
             partner_id,

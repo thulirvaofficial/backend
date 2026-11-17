@@ -124,8 +124,8 @@ router.get("/all", optionalAdminAuth, async (req, res) => {
 router.post("/:id/review", authenticateToken, adminOnly, async (req, res) => {
     try {
         const requestId = req.params.id;
-        const { action, reviewer_notes, utr_number } = req.body;
-        const adminName = req.user.name || "Operations Admin";
+        const { action, reviewer_notes, utr_number, admin_name } = req.body || {};
+        const adminName = admin_name || req.user?.name || req.user?.admin_name || "Operations Admin";
 
         const updated = await reviewWithdrawalRequest({
             request_id: requestId,

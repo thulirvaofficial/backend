@@ -1,5 +1,16 @@
 [
   {
+    "id": "notif-ann-1794905632901",
+    "announcement_id": "ann-2026-001",
+    "title": "THULIRVA deliveries start from 25/11/2026!",
+    "message": "Farm-fresh A2 cow milk, artisanal paneer, and bilona ghee delivered right to your doorstep. Pre-book your delivery slot today!",
+    "type": "announcement",
+    "audience": "all_customers",
+    "image_url": null,
+    "created_at": "2026-11-17T08:53:52.901Z",
+    "read": false
+  },
+  {
     "id": "NOTIF-1794843322779-40",
     "user_id": "THU-DP-0001",
     "title": "🚨 New Thulirva Order #THU-20261116-2084",

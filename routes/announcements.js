@@ -99,22 +99,28 @@ router.get("/", async (req, res) => {
     }
 });
 
+function extractAdminName(req) {
+    const b = req.body || {};
+    return b.admin_name || req.headers["x-admin-name"] || req.user?.admin_name || req.user?.name || "Super Admin";
+}
+
 // 3. POST - Create announcement (with optional banner image)
 router.post(["/", "/create", "/admin/create", "/admin"], upload.single("banner_image"), async (req, res) => {
     try {
-        const adminName = req.body.admin_name || req.headers["x-admin-name"] || "Super Admin";
-        let imageUrl = req.body.image_url || "";
+        const adminName = extractAdminName(req);
+        const b = req.body || {};
+        let imageUrl = b.image_url || "";
 
         if (req.file) {
             imageUrl = `/uploads/announcements/${req.file.filename}`;
         }
 
         const data = {
-            ...req.body,
+            ...b,
             image_url: imageUrl,
-            is_active: req.body.is_active === true || req.body.is_active === "true",
-            is_published: req.body.is_published === true || req.body.is_published === "true",
-            send_notification: req.body.send_notification === true || req.body.send_notification === "true"
+            is_active: b.is_active === true || b.is_active === "true",
+            is_published: b.is_published === true || b.is_published === "true",
+            send_notification: b.send_notification === true || b.send_notification === "true"
         };
 
         const created = await createAnnouncement(data, adminName);
@@ -146,10 +152,26 @@ router.post(["/upload-banner", "/admin/upload-banner"], upload.single("banner"),
 });
 
 // 5. PUT /:id - Update announcement
-router.put(["/:id", "/admin/:id"], upload.single("banner_image"), async (req, res) => {
+router.all(["/:id", "/admin/:id"], upload.single("banner_image"), async (req, res) => {
+    if (req.method !== "PUT" && req.method !== "POST" && req.method !== "DELETE") {
+        return res.status(405).json({ success: false, message: "Method Not Allowed" });
+    }
+    if (req.method === "DELETE") {
+        try {
+            const adminName = extractAdminName(req);
+            await deleteAnnouncement(req.params.id, adminName);
+            return res.json({
+                success: true,
+                message: `Announcement #${req.params.id} has been deleted.`
+            });
+        } catch (err) {
+            return res.status(500).json({ success: false, message: err.message });
+        }
+    }
     try {
-        const adminName = req.body.admin_name || req.headers["x-admin-name"] || "Super Admin";
-        let updates = { ...req.body };
+        const adminName = extractAdminName(req);
+        const b = req.body || {};
+        let updates = { ...b };
 
         if (req.file) {
             updates.image_url = `/uploads/announcements/${req.file.filename}`;
@@ -176,9 +198,9 @@ router.put(["/:id", "/admin/:id"], upload.single("banner_image"), async (req, re
 });
 
 // 6. DELETE /:id - Delete announcement
-router.delete(["/:id", "/admin/:id"], async (req, res) => {
+router.all(["/:id/delete", "/admin/:id/delete"], async (req, res) => {
     try {
-        const adminName = req.body.admin_name || req.headers["x-admin-name"] || "Super Admin";
+        const adminName = extractAdminName(req);
         await deleteAnnouncement(req.params.id, adminName);
         res.json({
             success: true,
@@ -189,10 +211,10 @@ router.delete(["/:id", "/admin/:id"], async (req, res) => {
     }
 });
 
-// 7. PATCH /:id/toggle - Toggle active status
-router.patch(["/:id/toggle", "/admin/:id/toggle"], async (req, res) => {
+// 7. PATCH or POST /:id/toggle - Toggle active status
+router.all(["/:id/toggle", "/admin/:id/toggle"], async (req, res) => {
     try {
-        const adminName = req.body.admin_name || req.headers["x-admin-name"] || "Super Admin";
+        const adminName = extractAdminName(req);
         const toggled = await toggleAnnouncementStatus(req.params.id, adminName);
         res.json({
             success: true,
@@ -204,11 +226,12 @@ router.patch(["/:id/toggle", "/admin/:id/toggle"], async (req, res) => {
     }
 });
 
-// 8. PATCH /:id/publish - Publish/unpublish announcement
-router.patch(["/:id/publish", "/admin/:id/publish"], async (req, res) => {
+// 8. PATCH or POST /:id/publish - Publish/unpublish announcement
+router.all(["/:id/publish", "/admin/:id/publish"], async (req, res) => {
     try {
-        const adminName = req.body.admin_name || req.headers["x-admin-name"] || "Super Admin";
-        const isPublished = req.body.is_published === true || req.body.is_published === "true";
+        const adminName = extractAdminName(req);
+        const b = req.body || {};
+        const isPublished = b.is_published === true || b.is_published === "true";
         const result = await setAnnouncementPublish(req.params.id, isPublished, adminName);
         res.json({
             success: true,

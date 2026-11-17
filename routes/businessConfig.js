@@ -118,8 +118,9 @@ router.all(["/admin/delivery", "/delivery/update", "/delivery", "/update"], asyn
         return res.status(405).json({ success: false, message: "Method Not Allowed" });
     }
     try {
-        const adminName = req.body.admin_name || req.headers["x-admin-name"] || "Super Admin";
-        const updated = await updateDeliveryConfig(req.body, adminName);
+        const b = req.body || {};
+        const adminName = b.admin_name || req.headers["x-admin-name"] || req.user?.admin_name || req.user?.name || "Super Admin";
+        const updated = await updateDeliveryConfig(b, adminName);
         res.json({
             success: true,
             message: "Delivery & Business configuration successfully updated.",
@@ -133,7 +134,7 @@ router.all(["/admin/delivery", "/delivery/update", "/delivery", "/update"], asyn
 // 7. POST /api/admin/payment-qr/verify-password - Verify Dedicated Security Password
 router.post(["/payment-qr/verify-password", "/verify-password", "/payment-qr/verify-security-password", "/verify-security-password"], async (req, res) => {
     try {
-        const { password } = req.body;
+        const { password } = req.body || {};
         const result = await verifyQrSecurityPassword(password);
         if (!result.verified) {
             return res.status(401).json({
@@ -153,7 +154,7 @@ router.post(["/payment-qr/verify-password", "/verify-password", "/payment-qr/ver
 // 8. POST /api/admin/payment-qr/set-password - Update/Reset Dedicated Security Password
 router.post(["/payment-qr/set-password", "/set-password"], async (req, res) => {
     try {
-        const { current_password, new_password, admin_name = "Super Admin" } = req.body;
+        const { current_password, new_password, admin_name = "Super Admin" } = req.body || {};
 
         // If a current password was provided, verify it first
         if (current_password) {
@@ -163,7 +164,8 @@ router.post(["/payment-qr/set-password", "/set-password"], async (req, res) => {
             }
         }
 
-        const result = await setQrSecurityPassword(new_password, admin_name);
+        const safeAdminName = admin_name || req.headers["x-admin-name"] || req.user?.name || "Super Admin";
+        const result = await setQrSecurityPassword(new_password, safeAdminName);
         if (!result.success) {
             return res.status(400).json(result);
         }
@@ -189,7 +191,7 @@ router.get(["/payment-qr/history", "/history"], async (req, res) => {
 // 10. POST /api/admin/payment-qr/upload - Upload, Replace & Publish New Payment QR
 router.post(["/payment-qr/upload", "/upload"], upload.single("qr_image"), async (req, res) => {
     try {
-        const { security_password, upi_id, merchant_name, notes, admin_name = "Super Admin", qr_image_base64 } = req.body;
+        const { security_password, upi_id, merchant_name, notes, admin_name = "Super Admin", qr_image_base64 } = req.body || {};
 
         // Strict Security Password Validation
         const authCheck = await verifyQrSecurityPassword(security_password);
@@ -219,12 +221,13 @@ router.post(["/payment-qr/upload", "/upload"], upload.single("qr_image"), async 
             return res.status(400).json({ success: false, message: "Payment QR image file or base64 is required." });
         }
 
+        const safeAdminName = admin_name || req.headers["x-admin-name"] || req.user?.name || "Super Admin";
         const result = await uploadAndActivatePaymentQr({
             qr_image_url: relativeUrl,
             upi_id,
             merchant_name,
             notes,
-            adminName: admin_name
+            adminName: safeAdminName
         });
 
         res.json(result);
@@ -236,7 +239,7 @@ router.post(["/payment-qr/upload", "/upload"], upload.single("qr_image"), async 
 // 11. POST /api/admin/payment-qr/status - Activate or Deactivate QR Code
 router.post(["/payment-qr/status", "/status"], async (req, res) => {
     try {
-        const { security_password, is_active, admin_name = "Super Admin" } = req.body;
+        const { security_password, is_active, admin_name = "Super Admin" } = req.body || {};
 
         const authCheck = await verifyQrSecurityPassword(security_password);
         if (!authCheck.verified) {
@@ -246,7 +249,8 @@ router.post(["/payment-qr/status", "/status"], async (req, res) => {
             });
         }
 
-        const result = await togglePaymentQrStatus({ is_active, adminName: admin_name });
+        const safeAdminName = admin_name || req.headers["x-admin-name"] || req.user?.name || "Super Admin";
+        const result = await togglePaymentQrStatus({ is_active, adminName: safeAdminName });
         res.json(result);
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });

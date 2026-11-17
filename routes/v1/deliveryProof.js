@@ -103,8 +103,9 @@ router.get("/:orderId/details", async (req, res) => {
  */
 router.post("/:orderId/verify", async (req, res) => {
     try {
-        const { admin_name, notes } = req.body;
-        const result = await verifyDeliveryProof(req.params.orderId, admin_name || "Operations Admin", notes || "");
+        const { admin_name, notes } = req.body || {};
+        const safeAdminName = admin_name || req.headers["x-admin-name"] || req.user?.name || "Operations Admin";
+        const result = await verifyDeliveryProof(req.params.orderId, safeAdminName, notes || "");
         return res.json(result);
     } catch (err) {
         return res.status(400).json({ success: false, message: err.message });
@@ -116,11 +117,12 @@ router.post("/:orderId/verify", async (req, res) => {
  */
 router.post("/:orderId/flag", async (req, res) => {
     try {
-        const { admin_name, reason } = req.body;
+        const { admin_name, reason } = req.body || {};
         if (!reason) {
             return res.status(400).json({ success: false, message: "Reason for flagging proof is required." });
         }
-        const result = await flagDeliveryProof(req.params.orderId, admin_name || "Operations Admin", reason);
+        const safeAdminName = admin_name || req.headers["x-admin-name"] || req.user?.name || "Operations Admin";
+        const result = await flagDeliveryProof(req.params.orderId, safeAdminName, reason);
         return res.json(result);
     } catch (err) {
         return res.status(400).json({ success: false, message: err.message });

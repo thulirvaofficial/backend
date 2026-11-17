@@ -3,6 +3,9 @@
   "delivery_charges_enabled": true,
   "fixed_delivery_charge": 30,
   "free_delivery_threshold": 299,
+  "min_order_value_for_delivery": 150,
+  "partner_base_payout": 35,
+  "partner_distance_bonus_per_km": 6,
   "distance_charges_enabled": false,
   "distance_base_km": 5,
   "distance_rate_per_km": 10,
@@ -28,6 +31,6 @@
   "launch_banner_bg_color": "#1B4332",
   "launch_banner_image_url": "",
   "zone_banners": {},
-  "updated_at": "2026-11-16T16:27:36.801Z",
+  "updated_at": "2026-11-17T08:53:44.048Z",
   "updated_by": "Super Admin"
 }
