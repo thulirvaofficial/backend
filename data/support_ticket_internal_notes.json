@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1795005647198,
+    "ticket_id": "undefined",
+    "admin_id": "1",
+    "admin_name": "THULIRVA Super Admin",
+    "note": "Escalated to Padur hub supervisor. Delivery route 4 was affected by road construction.",
+    "created_at": "2026-11-18T12:40:46.331Z"
+  },
+  {
+    "id": 1795005681133,
+    "ticket_id": "THU-TKT-20261118-3851",
+    "admin_id": "1",
+    "admin_name": "THULIRVA Super Admin",
+    "note": "Escalated to Padur hub supervisor. Delivery route 4 was affected by road construction.",
+    "created_at": "2026-11-18T12:41:20.999Z"
+  }
+]

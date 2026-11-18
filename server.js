@@ -83,6 +83,9 @@ const businessConfigRoutes =
 const announcementRoutes =
     require("./routes/announcements");
 
+const { supportRouter, adminSupportRouter } =
+    require("./routes/support");
+
 const app = express();
 
 const PORT =
@@ -349,6 +352,8 @@ app.use(
 ============================================================ */
 
 app.use("/api/v1", v1Routes);
+app.use("/api/support", supportRouter);
+app.use("/api/admin/support", adminSupportRouter);
 app.use("/api/health", require("./routes/v1/health"));
 app.use("/api/earnings-v1", require("./routes/v1/earnings"));
 app.use("/api/bank-accounts", require("./routes/v1/bankAccounts"));
@@ -377,6 +382,7 @@ const backendAssetsUploadsPath = path.resolve(__dirname, "assets", "images", "up
     path.join(backendPublicUploadsPath, "profiles"),
     path.join(backendPublicUploadsPath, "payments"),
     path.join(backendPublicUploadsPath, "announcements"),
+    path.join(backendPublicUploadsPath, "support"),
     backendAssetsUploadsPath,
     path.join(backendAssetsUploadsPath, "profiles"),
     websiteUploadsPath,

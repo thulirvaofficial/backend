@@ -1,5 +1,27 @@
 [
   {
+    "id": "NOTIF-1795005681028-61",
+    "user_id": "2",
+    "title": "Ticket Status Updated: IN_PROGRESS",
+    "message": "Your support ticket [THU-TKT-20261118-3851] is now IN PROGRESS.",
+    "type": "support_status_update",
+    "target_id": "THU-TKT-20261118-3851",
+    "is_read": false,
+    "for_admin": false,
+    "created_at": "2026-11-18T12:41:21.028Z"
+  },
+  {
+    "id": "NOTIF-1795005680961-466",
+    "user_id": null,
+    "title": "New Support Ticket [THU-TKT-20261118-3851]",
+    "message": "kamsh (customer): Morning Milk Delivery Slot Enquiry",
+    "type": "support_ticket_created",
+    "target_id": "THU-TKT-20261118-3851",
+    "is_read": false,
+    "for_admin": true,
+    "created_at": "2026-11-18T12:41:20.961Z"
+  },
+  {
     "id": "NOTIF-1794918289157-257",
     "user_id": "THU-DP-0001",
     "title": "🚨 New Thulirva Order #THU-20261116-2084",

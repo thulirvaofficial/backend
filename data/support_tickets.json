@@ -1,0 +1,23 @@
+[
+  {
+    "ticket_number": "THU-TKT-20261118-3851",
+    "user_id": "2",
+    "user_name": "kamsh",
+    "user_phone": "7904880944",
+    "user_email": "kamsh@thulirva.com",
+    "user_type": "customer",
+    "category": "Delivery Delay",
+    "subject": "Morning Milk Delivery Slot Enquiry",
+    "description": "My A2 milk delivery was delayed by 15 minutes today. Please check the route.",
+    "order_id": "ORD-2026-9901",
+    "priority": "NORMAL",
+    "status": "IN_PROGRESS",
+    "assigned_admin_id": null,
+    "assigned_admin_name": null,
+    "created_at": "2026-11-18T12:41:20.953Z",
+    "updated_at": "2026-11-18T12:41:21.026Z",
+    "resolved_at": null,
+    "closed_at": null,
+    "id": 1795005680953
+  }
+]

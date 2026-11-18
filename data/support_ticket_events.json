@@ -1,0 +1,64 @@
+[
+  {
+    "id": 1795005646976,
+    "ticket_id": "undefined",
+    "event_type": "INTERNAL_NOTE_ADDED",
+    "actor_id": "1",
+    "actor_name": "THULIRVA Super Admin",
+    "actor_role": "admin",
+    "event_data": {
+      "preview": "Escalated to Padur hub supervisor. Delivery route 4 was affe"
+    },
+    "created_at": "2026-11-18T12:40:46.332Z"
+  },
+  {
+    "id": 1795005646776,
+    "ticket_id": "undefined",
+    "event_type": "STATUS_CHANGED",
+    "actor_id": "1",
+    "actor_name": "THULIRVA Super Admin",
+    "actor_role": "admin",
+    "event_data": {
+      "newStatus": "IN_PROGRESS"
+    },
+    "created_at": "2026-11-18T12:40:46.354Z"
+  },
+  {
+    "id": 1795005681148,
+    "ticket_id": "THU-TKT-20261118-3851",
+    "event_type": "CREATED",
+    "actor_id": "2",
+    "actor_name": "kamsh",
+    "actor_role": "customer",
+    "event_data": {
+      "category": "Delivery Delay",
+      "priority": "NORMAL",
+      "order_id": "ORD-2026-9901"
+    },
+    "created_at": "2026-11-18T12:41:20.958Z"
+  },
+  {
+    "id": 1795005681982,
+    "ticket_id": "THU-TKT-20261118-3851",
+    "event_type": "INTERNAL_NOTE_ADDED",
+    "actor_id": "1",
+    "actor_name": "THULIRVA Super Admin",
+    "actor_role": "admin",
+    "event_data": {
+      "preview": "Escalated to Padur hub supervisor. Delivery route 4 was affe"
+    },
+    "created_at": "2026-11-18T12:41:21.002Z"
+  },
+  {
+    "id": 1795005681887,
+    "ticket_id": "THU-TKT-20261118-3851",
+    "event_type": "STATUS_CHANGED",
+    "actor_id": "1",
+    "actor_name": "THULIRVA Super Admin",
+    "actor_role": "admin",
+    "event_data": {
+      "newStatus": "IN_PROGRESS"
+    },
+    "created_at": "2026-11-18T12:41:21.032Z"
+  }
+]

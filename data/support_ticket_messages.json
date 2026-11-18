@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1795005680983,
+    "ticket_id": "THU-TKT-20261118-3851",
+    "ticket_number": "THU-TKT-20261118-3851",
+    "sender_id": "2",
+    "sender_name": "kamsh",
+    "sender_role": "customer",
+    "message": "My A2 milk delivery was delayed by 15 minutes today. Please check the route.",
+    "attachment_url": null,
+    "created_at": "2026-11-18T12:41:20.953Z",
+    "read_at": null
+  },
+  {
+    "id": 1795005681714,
+    "ticket_id": "THU-TKT-20261118-3851",
+    "ticket_number": "THU-TKT-20261118-3851",
+    "sender_id": "1",
+    "sender_name": "THULIRVA Super Admin",
+    "sender_role": "admin",
+    "message": "Dear Customer, we sincerely apologize for the delay. Padur Hub route 4 experienced temporary detour. Your delivery partner will arrive within 5 minutes.",
+    "attachment_url": null,
+    "created_at": "2026-11-18T12:41:21.015Z",
+    "read_at": null
+  }
+]
