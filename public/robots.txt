@@ -1,0 +1,26 @@
+# robots.txt for THULIRVA (https://thulirva.com/)
+User-agent: *
+Allow: /
+Allow: /index.html
+Allow: /pages/shop.html
+Allow: /pages/about.html
+Allow: /pages/farms.html
+Allow: /pages/subscriptions.html
+Allow: /pages/recipes.html
+Allow: /pages/contact.html
+Allow: /pages/product.html
+Allow: /assets/
+Allow: /css/
+Allow: /js/
+
+# Disallow private user sessions, internal checkout, and admin consoles
+Disallow: /admin/
+Disallow: /admin
+Disallow: /pages/account.html
+Disallow: /pages/checkout.html
+Disallow: /pages/cart.html
+Disallow: /api/
+Disallow: /auth/
+
+# Dynamic & Static Sitemap
+Sitemap: https://thulirva.com/sitemap.xml

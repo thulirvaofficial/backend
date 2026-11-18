@@ -498,6 +498,84 @@ app.use((err, req, res, next) => {
    HOME
 ============================================================ */
 
+/* ============================================================
+   SEO: SITEMAP & ROBOTS.TXT (DYNAMIC & AUTO-UPDATING)
+============================================================ */
+app.get("/sitemap.xml", async (req, res) => {
+    try {
+        const today = new Date().toISOString().split("T")[0];
+        let products = [];
+        try {
+            const prodRes = await pool.query("SELECT id, name, category, image, updated_at FROM products WHERE is_active = true");
+            if (prodRes.rows && prodRes.rows.length > 0) products = prodRes.rows;
+        } catch (_) {}
+
+        if (products.length === 0) {
+            const prodFile = path.resolve(__dirname, "data", "products.json");
+            if (fs.existsSync(prodFile)) {
+                products = JSON.parse(fs.readFileSync(prodFile, "utf-8"));
+            }
+        }
+
+        let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+        xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">\n';
+
+        const corePages = [
+            { path: "/", prio: "1.0", freq: "daily" },
+            { path: "/pages/shop.html", prio: "0.9", freq: "daily" },
+            { path: "/pages/subscriptions.html", prio: "0.9", freq: "daily" },
+            { path: "/pages/farms.html", prio: "0.8", freq: "weekly" },
+            { path: "/pages/recipes.html", prio: "0.8", freq: "weekly" },
+            { path: "/pages/about.html", prio: "0.7", freq: "monthly" },
+            { path: "/pages/contact.html", prio: "0.7", freq: "monthly" }
+        ];
+
+        for (const p of corePages) {
+            xml += `  <url>\n    <loc>https://thulirva.com${p.path}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>${p.freq}</changefreq>\n    <priority>${p.prio}</priority>\n  </url>\n`;
+        }
+
+        const categories = ["Milk", "Curd", "Paneer", "Ghee", "Oils", "Masalas", "Vegan"];
+        for (const cat of categories) {
+            xml += `  <url>\n    <loc>https://thulirva.com/pages/shop.html?category=${encodeURIComponent(cat)}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>\n`;
+        }
+
+        for (const p of products) {
+            const lastMod = p.updated_at ? new Date(p.updated_at).toISOString().split("T")[0] : today;
+            xml += `  <url>\n    <loc>https://thulirva.com/pages/product.html?id=${p.id}</loc>\n    <lastmod>${lastMod}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n`;
+            if (p.image) {
+                const imgUrl = p.image.startsWith("http") ? p.image : `https://thulirva.com/${p.image.replace(/^\/+/, "")}`;
+                const safeName = (p.name || "Product").replace(/&/g, "&amp;");
+                xml += `    <image:image>\n      <image:loc>${imgUrl}</image:loc>\n      <image:title>${safeName} | THULIRVA</image:title>\n    </image:image>\n`;
+            }
+            xml += `  </url>\n`;
+        }
+
+        xml += '</urlset>';
+        res.header("Content-Type", "application/xml; charset=utf-8");
+        return res.send(xml);
+    } catch (err) {
+        const staticFile = path.resolve(__dirname, "..", "website", "website", "sitemap.xml");
+        if (fs.existsSync(staticFile)) {
+            res.header("Content-Type", "application/xml; charset=utf-8");
+            return res.sendFile(staticFile);
+        }
+        res.status(500).send("Error generating sitemap");
+    }
+});
+
+app.get("/robots.txt", (req, res) => {
+    res.header("Content-Type", "text/plain");
+    const robotsFile = path.resolve(__dirname, "..", "website", "website", "robots.txt");
+    if (fs.existsSync(robotsFile)) {
+        return res.sendFile(robotsFile);
+    }
+    const publicRobots = path.join(__dirname, "public", "robots.txt");
+    if (fs.existsSync(publicRobots)) {
+        return res.sendFile(publicRobots);
+    }
+    res.status(404).send("Robots not found");
+});
+
 app.get(
     "/",
     (req, res) => {
