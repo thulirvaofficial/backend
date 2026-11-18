@@ -81,7 +81,18 @@ async function saveChatMessage(orderId, { sender = "customer", sender_name, text
     }
 
     const chats = loadChats();
-    if (!chats[idKey]) chats[idKey] = [];
+    if (!chats[idKey] || chats[idKey].length === 0) {
+        chats[idKey] = [{
+            id: `sys-${idKey}-0`,
+            order_id: idKey,
+            sender: "system",
+            sender_name: "Thulirva Support",
+            text: "Chat connected with your delivery partner. You can send delivery notes or questions directly here.",
+            status: "delivered",
+            is_read: true,
+            timestamp: new Date().toISOString()
+        }];
+    }
 
     const effectiveRole = (role || sender).toLowerCase();
     const isPartner = effectiveRole.includes("partner") || effectiveRole.includes("driver") || effectiveRole.includes("rider");
@@ -178,7 +189,7 @@ async function markChatAsRead(orderId, readerRole = "customer") {
         } catch (_) {}
     }
 
-    return { updated: updatedCount };
+    return { updated: updatedCount, read_count: updatedCount };
 }
 
 module.exports = {

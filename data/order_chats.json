@@ -86,5 +86,233 @@
       "read_at": null,
       "timestamp": "2026-11-14T19:27:21.149Z"
     }
+  ],
+  "TEST-ORD-1795024549535": [
+    {
+      "id": "msg_1795024549537_mohyi",
+      "order_id": "TEST-ORD-1795024549535",
+      "sender": "customer",
+      "sender_name": "Kavitha S.",
+      "text": "Please leave package with security guard if door unanswered.",
+      "status": "sent",
+      "is_read": false,
+      "read_at": null,
+      "timestamp": "2026-11-18T17:55:49.537Z"
+    },
+    {
+      "id": "msg_1795024549556_130c5",
+      "order_id": "TEST-ORD-1795024549535",
+      "sender": "partner",
+      "sender_name": "Murugan D. (Delivery Partner)",
+      "text": "Understood ma'am, will do that upon arrival.",
+      "status": "sent",
+      "is_read": false,
+      "read_at": null,
+      "timestamp": "2026-11-18T17:55:49.556Z"
+    }
+  ],
+  "TEST-ORD-1795024586165": [
+    {
+      "id": "sys-TEST-ORD-1795024586165-0",
+      "order_id": "TEST-ORD-1795024586165",
+      "sender": "system",
+      "sender_name": "Thulirva Support",
+      "text": "Chat connected with your delivery partner. You can send delivery notes or questions directly here.",
+      "status": "delivered",
+      "is_read": true,
+      "timestamp": "2026-11-18T17:56:26.169Z"
+    },
+    {
+      "id": "msg_1795024586169_w5x8f",
+      "order_id": "TEST-ORD-1795024586165",
+      "sender": "customer",
+      "sender_name": "Kavitha S.",
+      "text": "Please leave package with security guard if door unanswered.",
+      "status": "sent",
+      "is_read": false,
+      "read_at": null,
+      "timestamp": "2026-11-18T17:56:26.169Z"
+    },
+    {
+      "id": "msg_1795024586187_ql4w7",
+      "order_id": "TEST-ORD-1795024586165",
+      "sender": "partner",
+      "sender_name": "Murugan D. (Delivery Partner)",
+      "text": "Understood ma'am, will do that upon arrival.",
+      "status": "read",
+      "is_read": true,
+      "read_at": "2026-11-18T17:56:26.190Z",
+      "timestamp": "2026-11-18T17:56:26.187Z"
+    }
+  ],
+  "TEST-ORD-1795024637589": [
+    {
+      "id": "sys-TEST-ORD-1795024637589-0",
+      "order_id": "TEST-ORD-1795024637589",
+      "sender": "system",
+      "sender_name": "Thulirva Support",
+      "text": "Chat connected with your delivery partner. You can send delivery notes or questions directly here.",
+      "status": "delivered",
+      "is_read": true,
+      "timestamp": "2026-11-18T17:57:17.592Z"
+    },
+    {
+      "id": "msg_1795024637592_9hzx7",
+      "order_id": "TEST-ORD-1795024637589",
+      "sender": "customer",
+      "sender_name": "Kavitha S.",
+      "text": "Please leave package with security guard if door unanswered.",
+      "status": "sent",
+      "is_read": false,
+      "read_at": null,
+      "timestamp": "2026-11-18T17:57:17.592Z"
+    },
+    {
+      "id": "msg_1795024637611_v0o5c",
+      "order_id": "TEST-ORD-1795024637589",
+      "sender": "partner",
+      "sender_name": "Murugan D. (Delivery Partner)",
+      "text": "Understood ma'am, will do that upon arrival.",
+      "status": "read",
+      "is_read": true,
+      "read_at": "2026-11-18T17:57:17.615Z",
+      "timestamp": "2026-11-18T17:57:17.611Z"
+    }
+  ],
+  "TEST-ORD-1795024686800": [
+    {
+      "id": "sys-TEST-ORD-1795024686800-0",
+      "order_id": "TEST-ORD-1795024686800",
+      "sender": "system",
+      "sender_name": "Thulirva Support",
+      "text": "Chat connected with your delivery partner. You can send delivery notes or questions directly here.",
+      "status": "delivered",
+      "is_read": true,
+      "timestamp": "2026-11-18T17:58:06.803Z"
+    },
+    {
+      "id": "msg_1795024686803_ma8yt",
+      "order_id": "TEST-ORD-1795024686800",
+      "sender": "customer",
+      "sender_name": "Kavitha S.",
+      "text": "Please leave package with security guard if door unanswered.",
+      "status": "sent",
+      "is_read": false,
+      "read_at": null,
+      "timestamp": "2026-11-18T17:58:06.803Z"
+    },
+    {
+      "id": "msg_1795024686821_di979",
+      "order_id": "TEST-ORD-1795024686800",
+      "sender": "partner",
+      "sender_name": "Murugan D. (Delivery Partner)",
+      "text": "Understood ma'am, will do that upon arrival.",
+      "status": "read",
+      "is_read": true,
+      "read_at": "2026-11-18T17:58:06.824Z",
+      "timestamp": "2026-11-18T17:58:06.821Z"
+    }
+  ],
+  "TEST-ORD-1795024748681": [
+    {
+      "id": "sys-TEST-ORD-1795024748681-0",
+      "order_id": "TEST-ORD-1795024748681",
+      "sender": "system",
+      "sender_name": "Thulirva Support",
+      "text": "Chat connected with your delivery partner. You can send delivery notes or questions directly here.",
+      "status": "delivered",
+      "is_read": true,
+      "timestamp": "2026-11-18T17:59:08.684Z"
+    },
+    {
+      "id": "msg_1795024748684_i1gqd",
+      "order_id": "TEST-ORD-1795024748681",
+      "sender": "customer",
+      "sender_name": "Kavitha S.",
+      "text": "Please leave package with security guard if door unanswered.",
+      "status": "sent",
+      "is_read": false,
+      "read_at": null,
+      "timestamp": "2026-11-18T17:59:08.684Z"
+    },
+    {
+      "id": "msg_1795024748704_7w3dq",
+      "order_id": "TEST-ORD-1795024748681",
+      "sender": "partner",
+      "sender_name": "Murugan D. (Delivery Partner)",
+      "text": "Understood ma'am, will do that upon arrival.",
+      "status": "read",
+      "is_read": true,
+      "read_at": "2026-11-18T17:59:08.707Z",
+      "timestamp": "2026-11-18T17:59:08.704Z"
+    }
+  ],
+  "TEST-ORD-1795024782476": [
+    {
+      "id": "sys-TEST-ORD-1795024782476-0",
+      "order_id": "TEST-ORD-1795024782476",
+      "sender": "system",
+      "sender_name": "Thulirva Support",
+      "text": "Chat connected with your delivery partner. You can send delivery notes or questions directly here.",
+      "status": "delivered",
+      "is_read": true,
+      "timestamp": "2026-11-18T17:59:42.479Z"
+    },
+    {
+      "id": "msg_1795024782479_50bri",
+      "order_id": "TEST-ORD-1795024782476",
+      "sender": "customer",
+      "sender_name": "Kavitha S.",
+      "text": "Please leave package with security guard if door unanswered.",
+      "status": "sent",
+      "is_read": false,
+      "read_at": null,
+      "timestamp": "2026-11-18T17:59:42.479Z"
+    },
+    {
+      "id": "msg_1795024782499_fan5g",
+      "order_id": "TEST-ORD-1795024782476",
+      "sender": "partner",
+      "sender_name": "Murugan D. (Delivery Partner)",
+      "text": "Understood ma'am, will do that upon arrival.",
+      "status": "read",
+      "is_read": true,
+      "read_at": "2026-11-18T17:59:42.502Z",
+      "timestamp": "2026-11-18T17:59:42.499Z"
+    }
+  ],
+  "TEST-ORD-1795024898046": [
+    {
+      "id": "sys-TEST-ORD-1795024898046-0",
+      "order_id": "TEST-ORD-1795024898046",
+      "sender": "system",
+      "sender_name": "Thulirva Support",
+      "text": "Chat connected with your delivery partner. You can send delivery notes or questions directly here.",
+      "status": "delivered",
+      "is_read": true,
+      "timestamp": "2026-11-18T18:01:38.050Z"
+    },
+    {
+      "id": "msg_1795024898050_t49r2",
+      "order_id": "TEST-ORD-1795024898046",
+      "sender": "customer",
+      "sender_name": "Kavitha S.",
+      "text": "Please leave package with security guard if door unanswered.",
+      "status": "sent",
+      "is_read": false,
+      "read_at": null,
+      "timestamp": "2026-11-18T18:01:38.050Z"
+    },
+    {
+      "id": "msg_1795024898069_knpb4",
+      "order_id": "TEST-ORD-1795024898046",
+      "sender": "partner",
+      "sender_name": "Murugan D. (Delivery Partner)",
+      "text": "Understood ma'am, will do that upon arrival.",
+      "status": "read",
+      "is_read": true,
+      "read_at": "2026-11-18T18:01:38.072Z",
+      "timestamp": "2026-11-18T18:01:38.069Z"
+    }
   ]
 }

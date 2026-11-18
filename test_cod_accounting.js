@@ -12,8 +12,8 @@ const {
 
 const TEST_PARTNER_ID = "TEST-DP-COD-001";
 const DATA_DIR = path.resolve(__dirname, "data");
-const COD_LEDGER_FILE = path.join(DATA_DIR, "cod_ledger.json");
-const COD_REMITTANCES_FILE = path.join(DATA_DIR, "cod_remittances.json");
+const COD_LEDGER_FILE = path.join(DATA_DIR, "partner_cod_ledger.json");
+const COD_REMITTANCES_FILE = path.join(DATA_DIR, "partner_cod_remittances.json");
 
 async function runCodTests() {
     console.log("=== THULIRVA COD CASH COLLECTION & REMITTANCE AUDIT ===");

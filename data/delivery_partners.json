@@ -25,7 +25,8 @@
     "speed": 24.5,
     "heading": 65,
     "accuracy": 3.2,
-    "location_updated_at": "2026-11-16T10:05:33.494Z"
+    "location_updated_at": "2026-11-16T10:05:33.494Z",
+    "ratings_count": 4
   },
   {
     "partner_id": "DP-TEST-9999",

@@ -106,5 +106,101 @@
     "attachment_url": null,
     "created_at": "2026-11-18T16:37:41.460Z",
     "read_at": null
+  },
+  {
+    "id": 1795024779013,
+    "ticket_id": "THU-TKT-20261118-6488",
+    "ticket_number": "THU-TKT-20261118-6488",
+    "sender_id": "CUST-SUP-001",
+    "sender_name": "Ananya Sharma",
+    "sender_role": "customer",
+    "message": "My farm fresh milk bottle has not arrived within the morning delivery slot.",
+    "attachment_url": "/uploads/support/delay_screen.jpg",
+    "created_at": "2026-11-18T17:59:38.604Z",
+    "read_at": null
+  },
+  {
+    "id": 1795024779116,
+    "ticket_id": "THU-TKT-20261118-5085",
+    "ticket_number": "THU-TKT-20261118-5085",
+    "sender_id": "PARTNER-SUP-001",
+    "sender_name": "Karthik Raja",
+    "sender_role": "delivery_partner",
+    "message": "Bank transfer reference UTR123456 was entered incorrectly.",
+    "attachment_url": null,
+    "created_at": "2026-11-18T17:59:38.626Z",
+    "read_at": null
+  },
+  {
+    "id": 1795024778898,
+    "ticket_id": "THU-TKT-20261118-6488",
+    "ticket_number": "THU-TKT-20261118-6488",
+    "sender_id": "CUST-SUP-001",
+    "sender_name": "Ananya Sharma",
+    "sender_role": "customer",
+    "message": "I checked the gate again, still not delivered. Please check with partner.",
+    "attachment_url": null,
+    "created_at": "2026-11-18T17:59:38.634Z",
+    "read_at": null
+  },
+  {
+    "id": 1795024779265,
+    "ticket_id": "THU-TKT-20261118-6488",
+    "ticket_number": "THU-TKT-20261118-6488",
+    "sender_id": "ADMIN-01",
+    "sender_name": "Priya Senior Support",
+    "sender_role": "admin",
+    "message": "Dear Ananya, our delivery executive had a brief delay and is 10 minutes away from your location.",
+    "attachment_url": null,
+    "created_at": "2026-11-18T17:59:38.657Z",
+    "read_at": null
+  },
+  {
+    "id": 1795024895061,
+    "ticket_id": "THU-TKT-20261118-2246",
+    "ticket_number": "THU-TKT-20261118-2246",
+    "sender_id": "CUST-SUP-001",
+    "sender_name": "Ananya Sharma",
+    "sender_role": "customer",
+    "message": "My farm fresh milk bottle has not arrived within the morning delivery slot.",
+    "attachment_url": "/uploads/support/delay_screen.jpg",
+    "created_at": "2026-11-18T18:01:34.342Z",
+    "read_at": null
+  },
+  {
+    "id": 1795024894960,
+    "ticket_id": "THU-TKT-20261118-5311",
+    "ticket_number": "THU-TKT-20261118-5311",
+    "sender_id": "PARTNER-SUP-001",
+    "sender_name": "Karthik Raja",
+    "sender_role": "delivery_partner",
+    "message": "Bank transfer reference UTR123456 was entered incorrectly.",
+    "attachment_url": null,
+    "created_at": "2026-11-18T18:01:34.364Z",
+    "read_at": null
+  },
+  {
+    "id": 1795024894707,
+    "ticket_id": "THU-TKT-20261118-2246",
+    "ticket_number": "THU-TKT-20261118-2246",
+    "sender_id": "CUST-SUP-001",
+    "sender_name": "Ananya Sharma",
+    "sender_role": "customer",
+    "message": "I checked the gate again, still not delivered. Please check with partner.",
+    "attachment_url": null,
+    "created_at": "2026-11-18T18:01:34.372Z",
+    "read_at": null
+  },
+  {
+    "id": 1795024894440,
+    "ticket_id": "THU-TKT-20261118-2246",
+    "ticket_number": "THU-TKT-20261118-2246",
+    "sender_id": "ADMIN-01",
+    "sender_name": "Priya Senior Support",
+    "sender_role": "admin",
+    "message": "Dear Ananya, our delivery executive had a brief delay and is 10 minutes away from your location.",
+    "attachment_url": null,
+    "created_at": "2026-11-18T18:01:34.388Z",
+    "read_at": null
   }
 ]
