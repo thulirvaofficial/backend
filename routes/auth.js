@@ -497,14 +497,104 @@ router.post("/login", async (req, res) => {
 });
 
 /* ============================================================
-   FORGOT PASSWORD ENDPOINT
+   FORGOT PASSWORD & OTP RESET ENDPOINTS (MODULE 26)
 ============================================================ */
+const passwordResetService = require("../services/passwordResetService");
+
+// 1. Check Account Existence & Retrieve Available Verification Methods
 router.post("/forgot-password", async (req, res) => {
-    const { email } = req.body;
-    res.json({
-        success: true,
-        message: "If this email is registered, password reset instructions have been sent."
-    });
+    try {
+        const identifier = (req.body.identifier || req.body.email || req.body.phone || "").trim();
+        if (!identifier) {
+            return res.status(400).json({
+                success: false,
+                message: "Please enter your registered email address or mobile number."
+            });
+        }
+
+        const user = await passwordResetService.findAccountByIdentifier(identifier);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "No account found matching this email or phone number. Please check the details or create an account."
+            });
+        }
+
+        const methods = [];
+        if (user.email && user.email.includes("@")) methods.push("email");
+        if (user.phone && user.phone.replace(/\D/g, "").length >= 10) methods.push("sms");
+
+        res.json({
+            success: true,
+            message: "Account verified. Please select your preferred verification method.",
+            user_id: user.id,
+            masked_email: passwordResetService.maskEmail(user.email),
+            masked_phone: passwordResetService.maskPhone(user.phone),
+            methods: methods
+        });
+    } catch (err) {
+        console.error("[FORGOT PASSWORD ERROR]", err);
+        res.status(500).json({ success: false, message: err.message || "An unexpected error occurred." });
+    }
+});
+
+// 2. Dispatch Reset OTP (Email or SMS)
+router.post("/send-reset-otp", async (req, res) => {
+    try {
+        const identifier = (req.body.identifier || req.body.email || req.body.phone || "").trim();
+        const method = (req.body.method || "email").toLowerCase();
+        const reqIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+
+        const result = await passwordResetService.generateAndSendResetOtp({ identifier, method, reqIp });
+        res.json(result);
+    } catch (err) {
+        res.status(400).json({ success: false, message: err.message || "Failed to send verification code." });
+    }
+});
+
+// 3. Resend Reset OTP with 60-second cooldown
+router.post("/resend-reset-otp", async (req, res) => {
+    try {
+        const identifier = (req.body.identifier || req.body.email || req.body.phone || "").trim();
+        const method = (req.body.method || "email").toLowerCase();
+        const reqIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+
+        const result = await passwordResetService.generateAndSendResetOtp({ identifier, method, reqIp });
+        res.json(result);
+    } catch (err) {
+        res.status(400).json({ success: false, message: err.message || "Failed to resend verification code." });
+    }
+});
+
+// 4. Verify Reset OTP -> Generates Single-Use Reset Token
+router.post("/verify-reset-otp", async (req, res) => {
+    try {
+        const identifier = (req.body.identifier || req.body.email || req.body.phone || "").trim();
+        const otp = (req.body.otp || req.body.code || "").trim();
+
+        const result = await passwordResetService.verifyResetOtp({ identifier, otp });
+        res.json(result);
+    } catch (err) {
+        res.status(400).json({ success: false, message: err.message || "Verification code validation failed." });
+    }
+});
+
+// 5. Set New Password with Reset Token
+router.post("/reset-password", async (req, res) => {
+    try {
+        const resetToken = req.body.reset_token || req.body.token || req.headers["x-reset-token"];
+        const newPassword = req.body.new_password || req.body.password;
+        const confirmPassword = req.body.confirm_password || req.body.confirmPassword;
+
+        const result = await passwordResetService.resetPassword({
+            reset_token: resetToken,
+            new_password: newPassword,
+            confirm_password: confirmPassword
+        });
+        res.json(result);
+    } catch (err) {
+        res.status(400).json({ success: false, message: err.message || "Failed to reset password." });
+    }
 });
 
 /* ============================================================

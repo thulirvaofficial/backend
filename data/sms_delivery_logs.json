@@ -1,0 +1,14 @@
+[
+  {
+    "timestamp": "2026-11-18T13:38:25.434Z",
+    "masked_phone": "+91 ••••• •0944",
+    "status": "DISPATCHED",
+    "provider": "dlt_telecom_gateway"
+  },
+  {
+    "timestamp": "2026-11-18T13:36:55.444Z",
+    "masked_phone": "+91 ••••• •0944",
+    "status": "DISPATCHED",
+    "provider": "dlt_telecom_gateway"
+  }
+]
