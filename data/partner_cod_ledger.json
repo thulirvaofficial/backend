@@ -1,0 +1,26 @@
+[
+  {
+    "id": "COD-1795019022841-4133",
+    "partner_id": "TEST-DP-COD-001",
+    "order_id": "ORD-COD-002",
+    "order_number": "ORD-COD-002",
+    "expected_amount": 400,
+    "cash_collected": 400,
+    "is_mismatch": false,
+    "mismatch_reason": "",
+    "proof_image": "",
+    "created_at": "2026-11-18T16:23:42.841Z"
+  },
+  {
+    "id": "COD-1795019022680-9156",
+    "partner_id": "TEST-DP-COD-001",
+    "order_id": "ORD-COD-001",
+    "order_number": "ORD-COD-001",
+    "expected_amount": 500,
+    "cash_collected": 500,
+    "is_mismatch": false,
+    "mismatch_reason": "",
+    "proof_image": "/uploads/proofs/test1.jpg",
+    "created_at": "2026-11-18T16:23:42.680Z"
+  }
+]

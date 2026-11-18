@@ -121,6 +121,7 @@ async function attachVariantsToProducts(products) {
 }
 
 const PRODUCTS_JSON_PATH = path.resolve(__dirname, "..", "data", "products.json");
+const PRODUCT_CONTENT_PATH = path.resolve(__dirname, "..", "data", "product_content.json");
 
 function loadLocalProducts() {
     try {
@@ -144,7 +145,47 @@ function saveLocalProducts(products) {
     }
 }
 
-/* GET ALL PRODUCTS WITH DYNAMIC VARIANTS */
+function loadProductContent() {
+    try {
+        if (fs.existsSync(PRODUCT_CONTENT_PATH)) {
+            return JSON.parse(fs.readFileSync(PRODUCT_CONTENT_PATH, "utf-8"));
+        }
+    } catch (e) {
+        console.error("Error reading product content:", e.message);
+    }
+    return {};
+}
+
+function saveProductContent(contentMap) {
+    try {
+        const dir = path.dirname(PRODUCT_CONTENT_PATH);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(PRODUCT_CONTENT_PATH, JSON.stringify(contentMap, null, 2), "utf-8");
+    } catch (e) {
+        console.error("Error writing product content:", e.message);
+    }
+}
+
+function attachContentToProducts(products) {
+    const allContent = loadProductContent();
+    for (const p of products) {
+        const c = allContent[p.id.toString()] || allContent[p.id] || null;
+        if (c) {
+            p.content = c;
+            p.highlights = c.highlights || [];
+            p.ingredients = c.ingredients || [];
+            p.nutritional_info = c.nutritional_info || null;
+            p.storage_instructions = c.storage_instructions || "";
+            p.usage_instructions = c.usage_instructions || "";
+            p.refund_policy = c.refund_policy || null;
+            p.shelf_life = c.shelf_life || "";
+            p.certification = c.certification || "";
+        }
+    }
+    return products;
+}
+
+/* GET ALL PRODUCTS WITH DYNAMIC VARIANTS & RICH CONTENT */
 router.get("/", async (req, res) => {
     try {
         let list = [];
@@ -164,14 +205,16 @@ router.get("/", async (req, res) => {
         }
 
         const productsWithVariants = await attachVariantsToProducts(list);
-        return res.json({ success: true, products: productsWithVariants });
+        const enriched = attachContentToProducts(productsWithVariants);
+        return res.json({ success: true, products: enriched });
     } catch (err) {
         const fallback = loadLocalProducts().filter(p => p.status !== "inactive");
-        return res.json({ success: true, products: fallback });
+        const enriched = attachContentToProducts(fallback);
+        return res.json({ success: true, products: enriched });
     }
 });
 
-/* GET SINGLE PRODUCT WITH VARIANTS */
+/* GET SINGLE PRODUCT WITH VARIANTS & RICH CONTENT */
 router.get("/:id", async (req, res) => {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -200,11 +243,15 @@ router.get("/:id", async (req, res) => {
             return res.status(404).json({ success: false, message: "Product not found" });
         }
         const withVariants = await attachVariantsToProducts([product]);
-        res.json({ success: true, product: withVariants[0] });
+        const enriched = attachContentToProducts(withVariants);
+        res.json({ success: true, product: enriched[0] });
     } catch (err) {
         const all = loadLocalProducts();
         const p = all.find(x => x.id === id);
-        if (p) return res.json({ success: true, product: p });
+        if (p) {
+            const enriched = attachContentToProducts([p]);
+            return res.json({ success: true, product: enriched[0] });
+        }
         res.status(500).json({ success: false, message: "Failed to fetch product" });
     }
 });
@@ -228,10 +275,46 @@ router.get("/admin/all", async (req, res) => {
         }
 
         const withVariants = await attachVariantsToProducts(list);
-        res.json({ success: true, products: withVariants });
+        const enriched = attachContentToProducts(withVariants);
+        res.json({ success: true, products: enriched });
     } catch (err) {
         const fallback = loadLocalProducts();
-        res.json({ success: true, products: fallback });
+        const enriched = attachContentToProducts(fallback);
+        res.json({ success: true, products: enriched });
+    }
+});
+
+/* ============================================================
+   PRODUCT CONTENT & PRODUCT-SPECIFIC REFUND POLICIES (MODULE 5)
+============================================================ */
+
+/* GET PRODUCT CONTENT */
+router.get("/:id/content", (req, res) => {
+    const id = parseInt(req.params.id);
+    const allContent = loadProductContent();
+    const content = allContent[id.toString()] || allContent[id];
+    if (!content) {
+        return res.status(404).json({ success: false, message: "Product content not found" });
+    }
+    return res.json({ success: true, content });
+});
+
+/* UPDATE PRODUCT CONTENT (Admin) */
+router.put("/:id/content", authenticateToken, adminOnly, (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const allContent = loadProductContent();
+        const existing = allContent[id.toString()] || { product_id: id };
+        const updated = {
+            ...existing,
+            ...req.body,
+            product_id: id
+        };
+        allContent[id.toString()] = updated;
+        saveProductContent(allContent);
+        return res.json({ success: true, content: updated, message: "Product content updated successfully" });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 });
 

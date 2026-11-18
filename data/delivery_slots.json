@@ -1,0 +1,36 @@
+[
+  {
+    "id": 1,
+    "slot_name": "Morning Slot",
+    "slot_type": "morning",
+    "start_time": "06:00 AM",
+    "end_time": "07:30 AM",
+    "display_text": "Morning (6:00 AM - 7:30 AM)",
+    "cutoff_time": "10:00 PM",
+    "max_orders_per_slot": 150,
+    "is_active": true
+  },
+  {
+    "id": 2,
+    "slot_name": "Evening Slot",
+    "slot_type": "evening",
+    "start_time": "05:30 PM",
+    "end_time": "07:00 PM",
+    "display_text": "Evening (5:30 PM - 7:00 PM)",
+    "cutoff_time": "02:00 PM",
+    "max_orders_per_slot": 100,
+    "is_active": true
+  },
+  {
+    "id": 3,
+    "slot_name": "Both Morning & Evening",
+    "slot_type": "both",
+    "start_time": "06:00 AM & 05:30 PM",
+    "end_time": "07:30 AM & 07:00 PM",
+    "display_text": "Twice Daily (Morning & Evening)",
+    "cutoff_time": "10:00 PM",
+    "max_orders_per_slot": 50,
+    "is_active": true
+  }
+]
+

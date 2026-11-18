@@ -60,5 +60,121 @@
       "newStatus": "IN_PROGRESS"
     },
     "created_at": "2026-11-18T12:41:21.032Z"
+  },
+  {
+    "id": 1795019745598,
+    "ticket_id": "THU-TKT-20261118-6159",
+    "event_type": "CREATED",
+    "actor_id": "CUST-SUP-001",
+    "actor_name": "Ananya Sharma",
+    "actor_role": "customer",
+    "event_data": {
+      "category": "Delivery Delay",
+      "priority": "HIGH",
+      "order_id": "ORD-7788"
+    },
+    "created_at": "2026-11-18T16:35:45.299Z"
+  },
+  {
+    "id": 1795019745800,
+    "ticket_id": "THU-TKT-20261118-4781",
+    "event_type": "CREATED",
+    "actor_id": "PARTNER-SUP-001",
+    "actor_name": "Karthik Raja",
+    "actor_role": "delivery_partner",
+    "event_data": {
+      "category": "COD Remittance",
+      "priority": "MEDIUM",
+      "order_id": null
+    },
+    "created_at": "2026-11-18T16:35:45.321Z"
+  },
+  {
+    "id": 1795019861519,
+    "ticket_id": "THU-TKT-20261118-2680",
+    "event_type": "CREATED",
+    "actor_id": "CUST-SUP-001",
+    "actor_name": "Ananya Sharma",
+    "actor_role": "customer",
+    "event_data": {
+      "category": "Delivery Delay",
+      "priority": "HIGH",
+      "order_id": "ORD-7788"
+    },
+    "created_at": "2026-11-18T16:37:41.415Z"
+  },
+  {
+    "id": 1795019861933,
+    "ticket_id": "THU-TKT-20261118-2416",
+    "event_type": "CREATED",
+    "actor_id": "PARTNER-SUP-001",
+    "actor_name": "Karthik Raja",
+    "actor_role": "delivery_partner",
+    "event_data": {
+      "category": "COD Remittance",
+      "priority": "MEDIUM",
+      "order_id": null
+    },
+    "created_at": "2026-11-18T16:37:41.436Z"
+  },
+  {
+    "id": 1795019861448,
+    "ticket_id": "THU-TKT-20261118-2680",
+    "event_type": "ASSIGNED",
+    "actor_id": "ADMIN-01",
+    "actor_name": "Priya Senior Support",
+    "actor_role": "admin",
+    "event_data": {
+      "assignedTo": "Priya Senior Support"
+    },
+    "created_at": "2026-11-18T16:37:41.445Z"
+  },
+  {
+    "id": 1795019861871,
+    "ticket_id": "THU-TKT-20261118-2680",
+    "event_type": "STATUS_CHANGED",
+    "actor_id": "ADMIN-01",
+    "actor_name": "Priya Senior Support",
+    "actor_role": "admin",
+    "event_data": {
+      "newStatus": "IN_PROGRESS"
+    },
+    "created_at": "2026-11-18T16:37:41.450Z"
+  },
+  {
+    "id": 1795019861712,
+    "ticket_id": "THU-TKT-20261118-2680",
+    "event_type": "INTERNAL_NOTE_ADDED",
+    "actor_id": "ADMIN-01",
+    "actor_name": "Priya Senior Support",
+    "actor_role": "admin",
+    "event_data": {
+      "preview": "Called partner DP-001, he had a flat tyre, ETA 15 mins."
+    },
+    "created_at": "2026-11-18T16:37:41.458Z"
+  },
+  {
+    "id": 1795019861960,
+    "ticket_id": "THU-TKT-20261118-2680",
+    "event_type": "STATUS_CHANGED",
+    "actor_id": "ADMIN-01",
+    "actor_name": "Priya Senior Support",
+    "actor_role": "admin",
+    "event_data": {
+      "newStatus": "RESOLVED"
+    },
+    "created_at": "2026-11-18T16:37:41.471Z"
+  },
+  {
+    "id": 1795019861796,
+    "ticket_id": "THU-TKT-20261118-2680",
+    "event_type": "STATUS_CHANGED",
+    "actor_id": "ADMIN-01",
+    "actor_name": "Priya Senior Support",
+    "actor_role": "admin",
+    "event_data": {
+      "newStatus": "CLOSED"
+    },
+    "created_at": "2026-11-18T16:37:41.478Z"
   }
 ]

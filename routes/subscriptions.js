@@ -371,6 +371,191 @@ router.delete("/plans/:id", authenticateToken, adminOnly, async (req, res) => {
     res.json({ success: true, message: "Subscription plan deleted successfully" });
 });
 
+/* ============================================================
+   1.5 DYNAMIC QUANTITY-BASED PRICING & DELIVERY SLOTS (MODULE 9)
+============================================================ */
+
+const SLOTS_FILE = path.join(DATA_DIR, "delivery_slots.json");
+
+function loadDeliverySlotsFromDisk() {
+    try {
+        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+        if (fs.existsSync(SLOTS_FILE)) {
+            return JSON.parse(fs.readFileSync(SLOTS_FILE, "utf-8"));
+        }
+    } catch (e) {
+        console.warn("[DELIVERY SLOTS LOAD WARN]:", e.message);
+    }
+    return [
+        { id: 1, slot_name: "Morning Slot", slot_type: "morning", start_time: "06:00 AM", end_time: "07:30 AM", display_text: "Morning (6:00 AM - 7:30 AM)", cutoff_time: "10:00 PM", max_orders_per_slot: 150, is_active: true },
+        { id: 2, slot_name: "Evening Slot", slot_type: "evening", start_time: "05:30 PM", end_time: "07:00 PM", display_text: "Evening (5:30 PM - 7:00 PM)", cutoff_time: "02:00 PM", max_orders_per_slot: 100, is_active: true },
+        { id: 3, slot_name: "Both Morning & Evening", slot_type: "both", start_time: "06:00 AM & 05:30 PM", end_time: "07:30 AM & 07:00 PM", display_text: "Twice Daily (Morning & Evening)", cutoff_time: "10:00 PM", max_orders_per_slot: 50, is_active: true }
+    ];
+}
+
+function saveDeliverySlotsToDisk(slots) {
+    try {
+        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+        fs.writeFileSync(SLOTS_FILE, JSON.stringify(slots, null, 2), "utf-8");
+    } catch (e) {
+        console.warn("[DELIVERY SLOTS SAVE WARN]:", e.message);
+    }
+}
+
+function calculateSubscriptionPricing({ plan_id, quantity, frequency, duration_days, slot_type }) {
+    const qty = Math.max(1, parseInt(quantity) || 1);
+    const planIdNum = parseInt(plan_id);
+    const plan = MOCK_PLANS.find(p => p.id === planIdNum) || MOCK_PLANS[0];
+
+    const effectiveFrequency = (frequency || plan?.frequency || "Daily").trim();
+    const effectiveDuration = parseInt(duration_days) || plan?.duration_days || 30;
+    const effectiveSlotType = (slot_type || "morning").toLowerCase().trim();
+
+    // Determine baseline deliveries for frequency
+    let deliveries = 30;
+    const freqLower = effectiveFrequency.toLowerCase();
+    if (freqLower.includes("daily")) {
+        deliveries = effectiveDuration;
+    } else if (freqLower.includes("alternate")) {
+        deliveries = Math.ceil(effectiveDuration / 2);
+    } else if (freqLower.includes("twice")) {
+        deliveries = Math.floor(effectiveDuration / 7) * 2;
+    } else if (freqLower.includes("weekly")) {
+        deliveries = Math.max(1, Math.floor(effectiveDuration / 7));
+    } else if (freqLower.includes("monthly")) {
+        deliveries = Math.max(1, Math.floor(effectiveDuration / 30));
+    } else {
+        deliveries = effectiveDuration;
+    }
+
+    if (effectiveSlotType === "both" || effectiveSlotType.includes("twice")) {
+        deliveries = deliveries * 2;
+    }
+
+    // Determine per-delivery unit price
+    let planDeliveries = 30;
+    const pFreqLower = (plan?.frequency || "Daily").toLowerCase();
+    if (pFreqLower.includes("alternate")) planDeliveries = 15;
+    else if (pFreqLower.includes("twice")) planDeliveries = 8;
+    else if (pFreqLower.includes("monthly")) planDeliveries = 1;
+    else if (pFreqLower.includes("weekly")) planDeliveries = 4;
+    else planDeliveries = plan?.duration_days || 30;
+
+    const basePlanPrice = Number(plan?.price) || 1320;
+    const unitPrice = parseFloat((basePlanPrice / planDeliveries).toFixed(2));
+
+    // Quantity-Based Tier Discounts (0%, 3%, 6%, 9%, 12%)
+    let tierDiscountPercent = 0;
+    if (qty === 2) tierDiscountPercent = 3;
+    else if (qty === 3) tierDiscountPercent = 6;
+    else if (qty === 4) tierDiscountPercent = 9;
+    else if (qty >= 5) tierDiscountPercent = 12;
+
+    const grossTotal = Math.round(unitPrice * deliveries * qty);
+    const discountAmount = Math.round(grossTotal * (tierDiscountPercent / 100));
+    const totalPrice = grossTotal - discountAmount;
+    const pricePerDelivery = deliveries > 0 ? parseFloat((totalPrice / deliveries).toFixed(2)) : totalPrice;
+
+    return {
+        plan_id: plan?.id || planIdNum || 1,
+        product_name: plan?.product_name || "Fresh Farm Milk",
+        quantity: qty,
+        frequency: effectiveFrequency,
+        duration_days: effectiveDuration,
+        slot_type: effectiveSlotType,
+        total_deliveries: deliveries,
+        base_unit_price: unitPrice,
+        gross_total: grossTotal,
+        tier_discount_percent: tierDiscountPercent,
+        discount_amount: discountAmount,
+        total_price: totalPrice,
+        price_per_delivery: pricePerDelivery
+    };
+}
+
+router.calculatePricing = calculateSubscriptionPricing;
+
+/* POST /api/subscriptions/calculate-price */
+router.post("/calculate-price", (req, res) => {
+    try {
+        const { plan_id, quantity, frequency, duration_days, slot_type } = req.body || {};
+        const result = calculateSubscriptionPricing({ plan_id, quantity, frequency, duration_days, slot_type });
+        return res.json({ success: true, data: result });
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+});
+
+/* GET DELIVERY SLOTS */
+const getDeliverySlotsHandler = (req, res) => {
+    const slots = loadDeliverySlotsFromDisk().filter(s => s.is_active !== false);
+    return res.json({ success: true, slots });
+};
+router.get("/slots", getDeliverySlotsHandler);
+router.get("/delivery-slots", getDeliverySlotsHandler);
+
+/* ADMIN CREATE DELIVERY SLOT */
+router.post("/slots", authenticateToken, adminOnly, (req, res) => {
+    try {
+        const { slot_name, slot_type, start_time, end_time, display_text, cutoff_time, max_orders_per_slot } = req.body || {};
+        if (!slot_name || !start_time || !end_time) {
+            return res.status(400).json({ success: false, message: "Slot name, start time, and end time are required" });
+        }
+        const slots = loadDeliverySlotsFromDisk();
+        const nextId = slots.length > 0 ? Math.max(...slots.map(s => s.id || 0)) + 1 : 1;
+        const newSlot = {
+            id: nextId,
+            slot_name,
+            slot_type: slot_type || "morning",
+            start_time,
+            end_time,
+            display_text: display_text || `${slot_name} (${start_time} - ${end_time})`,
+            cutoff_time: cutoff_time || "10:00 PM",
+            max_orders_per_slot: Number(max_orders_per_slot) || 100,
+            is_active: true
+        };
+        slots.push(newSlot);
+        saveDeliverySlotsToDisk(slots);
+        return res.json({ success: true, slot: newSlot, message: "Delivery slot created successfully" });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/* ADMIN UPDATE DELIVERY SLOT */
+router.put("/slots/:id", authenticateToken, adminOnly, (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const slots = loadDeliverySlotsFromDisk();
+        const idx = slots.findIndex(s => s.id === id);
+        if (idx === -1) {
+            return res.status(404).json({ success: false, message: "Delivery slot not found" });
+        }
+        slots[idx] = {
+            ...slots[idx],
+            ...req.body,
+            id: id // Ensure ID doesn't change
+        };
+        saveDeliverySlotsToDisk(slots);
+        return res.json({ success: true, slot: slots[idx], message: "Delivery slot updated successfully" });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/* ADMIN DELETE DELIVERY SLOT */
+router.delete("/slots/:id", authenticateToken, adminOnly, (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        let slots = loadDeliverySlotsFromDisk();
+        slots = slots.filter(s => s.id !== id);
+        saveDeliverySlotsToDisk(slots);
+        return res.json({ success: true, message: "Delivery slot deleted successfully" });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 
 /* ============================================================
    2. CUSTOMER SUBSCRIPTIONS (ACTIVE SUBSCRIBERS)
@@ -558,6 +743,27 @@ async function createSubscriptionInternal(inputData) {
     const payment_status = inputData.payment_status || (transaction_id ? "Verification Pending" : "Pending");
     const status = inputData.status || (transaction_id ? "Pending Approval" : "Pending");
 
+    // Server-side Price Tampering Protection & Dynamic Tier Calculation (Module 9)
+    let verifiedTotalPrice = total_price;
+    let verifiedPricePerDelivery = Number(inputData.price_per_delivery) || 44;
+    if (inputData.plan_id) {
+        const calculated = calculateSubscriptionPricing({
+            plan_id: inputData.plan_id,
+            quantity: inputData.quantity || 1,
+            frequency: inputData.frequency || "Daily",
+            duration_days: duration_days,
+            slot_type: inputData.slot_type || (inputData.delivery_slot && inputData.delivery_slot.toLowerCase().includes("evening") ? "evening" : "morning")
+        });
+        if (total_price < calculated.total_price * 0.90) {
+            console.warn(`[SECURITY PRICE TAMPER DETECTED] Subscription for customer '${customer_name}' submitted price ₹${total_price} but server calculated ₹${calculated.total_price}. Enforcing server verified price.`);
+            verifiedTotalPrice = calculated.total_price;
+            verifiedPricePerDelivery = calculated.price_per_delivery;
+        } else {
+            verifiedTotalPrice = total_price;
+            verifiedPricePerDelivery = calculated.price_per_delivery;
+        }
+    }
+
     const subData = {
         id: subId,
         user_id: user_id,
@@ -582,10 +788,10 @@ async function createSubscriptionInternal(inputData) {
         quantity: Number(inputData.quantity) || 1,
         delivery_slot: inputData.delivery_slot || inputData.deliverySlot || "6:00 AM - 7:00 AM",
         deliverySlot: inputData.delivery_slot || inputData.deliverySlot || "6:00 AM - 7:00 AM",
-        price_per_delivery: Number(inputData.price_per_delivery) || 44,
-        total_price: total_price,
-        totalPrice: total_price,
-        total: total_price,
+        price_per_delivery: verifiedPricePerDelivery,
+        total_price: verifiedTotalPrice,
+        totalPrice: verifiedTotalPrice,
+        total: verifiedTotalPrice,
         start_date: start_date,
         startDate: start_date,
         expiry_date: expiry_date,

@@ -1,0 +1,352 @@
+{
+  "1": {
+    "product_id": 1,
+    "highlights": [
+      "100% Raw Single-Origin Desi A2 Cow Milk",
+      "Zero preservatives, hormones, or chemical additives",
+      "Direct morning cold-chain delivery before 7:00 AM",
+      "Hygienic sterilized glass bottle packaging"
+    ],
+    "ingredients": ["100% Pure Farm-Fresh Desi Cow Milk"],
+    "nutritional_info": {
+      "serving_size": "100ml",
+      "energy": "62 kcal",
+      "protein": "3.4g",
+      "fat": "3.8g",
+      "carbohydrates": "4.8g",
+      "calcium": "124mg",
+      "added_sugar": "0g"
+    },
+    "storage_instructions": "Store strictly under refrigeration between 2°C and 4°C. Consume within 48 hours of delivery.",
+    "usage_instructions": "Gentle boiling recommended. Ideal for authentic filter coffee, tea, homemade curd, and infant nutrition.",
+    "refund_policy": {
+      "is_refundable": true,
+      "window_hours": 4,
+      "type": "Instant Replacement or Full Wallet Refund",
+      "condition": "Eligible if milk seal is broken, leaked, or sours upon initial delivery boil test.",
+      "return_required": false
+    },
+    "shelf_life": "48 Hours Chilled",
+    "certification": "FSSAI Certified • Verified A2 Beta-Casein"
+  },
+  "2": {
+    "product_id": 2,
+    "highlights": [
+      "1 Litre Family Glass Bottle chilled farm milk",
+      "Ethically milked from free-grazing native Indian cows",
+      "Delivered within 3 hours of morning milking",
+      "100% natural cream retention without homogenization"
+    ],
+    "ingredients": ["100% Pure Unadulterated Desi Cow Milk"],
+    "nutritional_info": {
+      "serving_size": "100ml",
+      "energy": "64 kcal",
+      "protein": "3.5g",
+      "fat": "4.0g",
+      "carbohydrates": "4.8g",
+      "calcium": "126mg",
+      "added_sugar": "0g"
+    },
+    "storage_instructions": "Keep chilled in refrigerator. Do not leave exposed to ambient room temperature.",
+    "usage_instructions": "Boil gently on medium flame. Great for family daily consumption, golden haldi doodh, and paneer.",
+    "refund_policy": {
+      "is_refundable": true,
+      "window_hours": 4,
+      "type": "Instant Replacement or Wallet Credit",
+      "condition": "Report within 4 hours if bottle is cracked or milk quality does not meet our pure standard.",
+      "return_required": false
+    },
+    "shelf_life": "48 Hours Chilled",
+    "certification": "FSSAI Registered • Pure Desi Standard"
+  },
+  "3": {
+    "product_id": 3,
+    "highlights": [
+      "Traditional Vedic Bilona method (Curd to Makkhan to Ghee)",
+      "Slow-simmered in earthen pots over low flame",
+      "Rich golden granular (danedar) texture & heavenly aroma",
+      "Zero palm oil, starch, or synthetic fragrances"
+    ],
+    "ingredients": ["100% Cultured Desi Cow Milk Fat (A2 Makkhan)"],
+    "nutritional_info": {
+      "serving_size": "10g (1 tbsp)",
+      "energy": "89 kcal",
+      "fat": "9.9g",
+      "saturated_fat": "6.5g",
+      "protein": "0g",
+      "carbohydrates": "0g",
+      "vitamin_a": "300 mcg"
+    },
+    "storage_instructions": "Store in a cool, dry place away from direct sunlight. Use a clean, dry spoon. No refrigeration required.",
+    "usage_instructions": "Drizzle over piping hot rice, dosas, rotis, or use for traditional Ayurvedic rasayana.",
+    "refund_policy": {
+      "is_refundable": true,
+      "window_hours": 48,
+      "type": "Free Replacement or Refund",
+      "condition": "Eligible if jar arrives unsealed, damaged, or packaging is breached during transit.",
+      "return_required": true
+    },
+    "shelf_life": "12 Months from Manufacturing",
+    "certification": "FSSAI Certified • 100% Vedic Bilona Tested"
+  },
+  "4": {
+    "product_id": 4,
+    "highlights": [
+      "Freshly prepared artisanal cottage cheese",
+      "Zero maida, starch, chemical coagulants, or bleaching agents",
+      "Melt-in-mouth soft texture with high natural protein",
+      "Curdled naturally with organic lemon extract"
+    ],
+    "ingredients": ["Pasteurized Fresh Cow Milk", "Natural Citrus Coagulant"],
+    "nutritional_info": {
+      "serving_size": "100g",
+      "energy": "265 kcal",
+      "protein": "18.5g",
+      "fat": "20.8g",
+      "carbohydrates": "2.2g",
+      "calcium": "480mg"
+    },
+    "storage_instructions": "Submerge in cold water and store in refrigerator. Change water daily to retain maximum softness.",
+    "usage_instructions": "Cut into cubes for curries, grill as tikkas, or crumble fresh into salads and parathas.",
+    "refund_policy": {
+      "is_refundable": true,
+      "window_hours": 6,
+      "type": "Instant Replacement",
+      "condition": "Eligible if paneer arrives sour or dry upon delivery inspection.",
+      "return_required": false
+    },
+    "shelf_life": "4 Days Chilled",
+    "certification": "FSSAI Certified Fresh Dairy"
+  },
+  "5": {
+    "product_id": 5,
+    "highlights": [
+      "Thick set natural curd with active live probiotics",
+      "Cultured overnight from fresh warm whole cow milk",
+      "Zero gelatin, thickeners, or artificial stabilizers",
+      "Supports gut health and smooth digestion"
+    ],
+    "ingredients": ["Pure Whole Cow Milk", "Active Traditional Starter Culture"],
+    "nutritional_info": {
+      "serving_size": "100g",
+      "energy": "68 kcal",
+      "protein": "4.2g",
+      "fat": "4.1g",
+      "carbohydrates": "4.6g",
+      "calcium": "145mg"
+    },
+    "storage_instructions": "Keep refrigerated at 4°C. Consume within 3 days for sweet, creamy taste.",
+    "usage_instructions": "Enjoy fresh with meals, prepare authentic South Indian curd rice, or blend into buttermilk (chaas).",
+    "refund_policy": {
+      "is_refundable": true,
+      "window_hours": 6,
+      "type": "Full Wallet Refund",
+      "condition": "Eligible if packaging is ruptured or excessively fermented upon delivery.",
+      "return_required": false
+    },
+    "shelf_life": "4 Days Chilled",
+    "certification": "FSSAI Certified • Probiotic Active"
+  },
+  "6": {
+    "product_id": 6,
+    "highlights": [
+      "Traditional wooden Vaagai Mara Chekku cold-pressed",
+      "Zero chemical refining, bleaching, or deodorizing",
+      "Pressed below 40°C to preserve natural antioxidants",
+      "Rich peanut aroma and high smoke point for cooking"
+    ],
+    "ingredients": ["100% Native Tamil Nadu Sun-Dried Groundnuts"],
+    "nutritional_info": {
+      "serving_size": "15ml (1 tbsp)",
+      "energy": "120 kcal",
+      "total_fat": "14g",
+      "mufa": "6.8g",
+      "pufa": "4.2g",
+      "trans_fat": "0g",
+      "cholesterol": "0mg"
+    },
+    "storage_instructions": "Store in a cool dry place away from heat. Keep lid tightly closed.",
+    "usage_instructions": "Perfect for deep frying, sautéing, traditional sambar, and everyday Indian cooking.",
+    "refund_policy": {
+      "is_refundable": true,
+      "window_hours": 48,
+      "type": "Replacement or Refund",
+      "condition": "Eligible if container leaks or seal is tampered.",
+      "return_required": true
+    },
+    "shelf_life": "9 Months from Pressing",
+    "certification": "FSSAI Registered Cold-Pressed"
+  },
+  "7": {
+    "product_id": 7,
+    "highlights": [
+      "Traditional Mara Chekku cold-pressed sesame oil",
+      "Infused with organic palm jaggery (Karupatti) to balance bitterness",
+      "Golden amber tint with authentic nutty sesame aroma",
+      "Rich in sesamol and natural Vitamin E"
+    ],
+    "ingredients": ["100% Black Sesame Seeds", "Pure Organic Palm Jaggery"],
+    "nutritional_info": {
+      "serving_size": "15ml (1 tbsp)",
+      "energy": "120 kcal",
+      "total_fat": "14g",
+      "mufa": "5.6g",
+      "pufa": "5.9g",
+      "vitamin_e": "1.4mg"
+    },
+    "storage_instructions": "Store in amber glass or steel containers away from moisture.",
+    "usage_instructions": "Ideal for South Indian gravies, Kara Kuzhambu, Idli Podi, and Ayurvedic oil pulling.",
+    "refund_policy": {
+      "is_refundable": true,
+      "window_hours": 48,
+      "type": "Replacement or Refund",
+      "condition": "Eligible if bottle damaged or unsealed.",
+      "return_required": true
+    },
+    "shelf_life": "9 Months",
+    "certification": "FSSAI Certified Wood-Pressed"
+  },
+  "8": {
+    "product_id": 8,
+    "highlights": [
+      "Salem single-origin heirloom turmeric rhizomes",
+      "High natural Curcumin content (> 4.2%)",
+      "Zero lead chromate, chalk powder, or yellow food dye",
+      "Sun-dried and slowly pulverized to retain essential oils"
+    ],
+    "ingredients": ["100% Pure Salem Turmeric Rhizomes (Curcuma Longa)"],
+    "nutritional_info": {
+      "serving_size": "5g (1 tsp)",
+      "curcumin": "210mg",
+      "iron": "2.1mg",
+      "antioxidants": "High"
+    },
+    "storage_instructions": "Store in an airtight jar in a cool, dark kitchen cabinet.",
+    "usage_instructions": "Use in daily cooking, golden milk (haldi latte), or natural skin wellness packs.",
+    "refund_policy": {
+      "is_refundable": true,
+      "window_hours": 72,
+      "type": "Replacement",
+      "condition": "Eligible if pouch arrives punctured or damaged.",
+      "return_required": false
+    },
+    "shelf_life": "12 Months",
+    "certification": "FSSAI Certified Single-Origin"
+  },
+  "9": {
+    "product_id": 9,
+    "highlights": [
+      "Pasture-raised free-range country chicken eggs",
+      "Hens forage naturally on open fields without hormone feeds",
+      "Rich dark golden yolk packed with natural Omega-3",
+      "Collected fresh daily from Kanchipuram farm"
+    ],
+    "ingredients": ["100% Farm Fresh Country Chicken Eggs"],
+    "nutritional_info": {
+      "serving_size": "1 Egg (Approx 50g)",
+      "energy": "74 kcal",
+      "protein": "6.3g",
+      "fat": "5.0g",
+      "omega_3": "120mg",
+      "choline": "145mg"
+    },
+    "storage_instructions": "Refrigerate with pointed end down to keep yolk centered and fresh.",
+    "usage_instructions": "Boiled, poached, sunny-side-up, or in baking. Cook thoroughly before eating.",
+    "refund_policy": {
+      "is_refundable": true,
+      "window_hours": 6,
+      "type": "Instant Credit / Replacement",
+      "condition": "Free replacement or wallet credit for any egg broken during transit.",
+      "return_required": false
+    },
+    "shelf_life": "21 Days Chilled",
+    "certification": "FSSAI Registered Free-Range"
+  },
+  "10": {
+    "product_id": 10,
+    "highlights": [
+      "100% Raw unprocessed multi-flora forest honey",
+      "Directly harvested by tribal beekeepers in Western Ghats",
+      "Never heated, pasteurized, or ultra-filtered",
+      "Contains natural pollen, bee propolis, and royal jelly traces"
+    ],
+    "ingredients": ["100% Pure Raw Multi-Flora Wild Honey"],
+    "nutritional_info": {
+      "serving_size": "20g (1 tbsp)",
+      "energy": "64 kcal",
+      "carbohydrates": "17g",
+      "natural_fructose": "8.2g",
+      "enzymes": "Active Invertase & Diastase"
+    },
+    "storage_instructions": "Store at room temperature. Natural crystallization is proof of purity. Place jar in warm water to reliquefy.",
+    "usage_instructions": "Stir into warm lemon water, herbal teas, or drizzle over morning oatmeal and pancakes.",
+    "refund_policy": {
+      "is_refundable": true,
+      "window_hours": 48,
+      "type": "Replacement or Refund",
+      "condition": "Eligible if glass jar is broken or tamper seal breached.",
+      "return_required": true
+    },
+    "shelf_life": "24 Months (Does not expire if stored dry)",
+    "certification": "FSSAI Certified Pure Raw Honey"
+  },
+  "11": {
+    "product_id": 11,
+    "highlights": [
+      "Grade A jumbo California raw almonds",
+      "Zero sulfur bleaching, roasting additives, or preservatives",
+      "High natural Vitamin E, magnesium, and dietary fiber",
+      "Crunchy, sweet, and nutrient-dense"
+    ],
+    "ingredients": ["100% Raw Whole Almond Kernels"],
+    "nutritional_info": {
+      "serving_size": "28g (Approx 23 almonds)",
+      "energy": "164 kcal",
+      "protein": "6g",
+      "healthy_fats": "14g",
+      "dietary_fiber": "3.5g",
+      "vitamin_e": "7.3mg"
+    },
+    "storage_instructions": "Keep in an airtight jar in a cool refrigerator or freezer for lasting crunch.",
+    "usage_instructions": "Soak overnight in water, peel, and eat in the morning for maximum nutrient absorption.",
+    "refund_policy": {
+      "is_refundable": true,
+      "window_hours": 72,
+      "type": "Replacement or Refund",
+      "condition": "Eligible if vacuum seal is compromised upon arrival.",
+      "return_required": false
+    },
+    "shelf_life": "9 Months",
+    "certification": "FSSAI Certified Premium Dry Fruits"
+  },
+  "12": {
+    "product_id": 12,
+    "highlights": [
+      "W240 Whole premium cashew nuts",
+      "Naturally sweet, buttery crunch from fresh harvest",
+      "Zero artificial roasting chemicals or artificial salt",
+      "Excellent plant-based source of copper, zinc, and healthy fats"
+    ],
+    "ingredients": ["100% Whole Raw Cashew Kernels"],
+    "nutritional_info": {
+      "serving_size": "28g",
+      "energy": "157 kcal",
+      "protein": "5.2g",
+      "fat": "12.4g",
+      "carbohydrates": "8.6g",
+      "magnesium": "83mg"
+    },
+    "storage_instructions": "Store in an airtight container away from moisture.",
+    "usage_instructions": "Eat as healthy snack, blend into creamy korma gravies, or make rich cashew milk.",
+    "refund_policy": {
+      "is_refundable": true,
+      "window_hours": 72,
+      "type": "Replacement or Refund",
+      "condition": "Eligible if packet seal is broken.",
+      "return_required": false
+    },
+    "shelf_life": "6 Months",
+    "certification": "FSSAI Certified Whole Cashews"
+  }
+}
+
