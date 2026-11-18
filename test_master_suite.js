@@ -4,6 +4,7 @@
  */
 
 const { execSync } = require("child_process");
+const path = require("path");
 
 const SUITES = [
     { name: "Module 8: Partner Profile & Image Persistence", script: "test_profile_persistence.js" },
@@ -27,7 +28,8 @@ let failedCount = 0;
 for (const suite of SUITES) {
     console.log(`▶ RUNNING SUITE: ${suite.name} (${suite.script})...`);
     try {
-        const output = execSync(`node backend/${suite.script}`, {
+        const scriptPath = path.join(__dirname, suite.script);
+        const output = execSync(`node "${scriptPath}"`, {
             encoding: "utf-8",
             timeout: 60000,
             stdio: "pipe"
