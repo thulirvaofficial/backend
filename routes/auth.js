@@ -840,18 +840,19 @@ router.post("/profile/photo", uploadUserProfilePhoto, async (req, res) => {
         });
 
         // 1. Update PostgreSQL database
+        const versionedUrl = photoUrl.includes("?v=") ? photoUrl : `${photoUrl}?v=${Date.now()}`;
         try {
             await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo TEXT;");
             await pool.query(
                 "UPDATE users SET profile_photo = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
-                [photoUrl, userId]
+                [versionedUrl, userId]
             );
         } catch (_) {}
 
         // 2. Update In-memory and disk fallback store
         let userObj = IN_MEMORY_USERS.find(u => u.id == userId);
         if (userObj) {
-            userObj.profile_photo = photoUrl;
+            userObj.profile_photo = versionedUrl;
             userObj.updated_at = new Date().toISOString();
         } else {
             userObj = {
@@ -859,7 +860,7 @@ router.post("/profile/photo", uploadUserProfilePhoto, async (req, res) => {
                 name: "Customer",
                 email: "",
                 phone: "",
-                profile_photo: photoUrl,
+                profile_photo: versionedUrl,
                 role: "customer"
             };
             IN_MEMORY_USERS.push(userObj);
@@ -869,10 +870,10 @@ router.post("/profile/photo", uploadUserProfilePhoto, async (req, res) => {
         res.json({
             success: true,
             message: "Profile photo uploaded successfully",
-            profile_photo: photoUrl,
-            photoUrl,
-            url: photoUrl,
-            full_url: photoUrl,
+            profile_photo: versionedUrl,
+            photoUrl: versionedUrl,
+            url: versionedUrl,
+            full_url: versionedUrl,
             user: userObj
         });
     } catch (err) {

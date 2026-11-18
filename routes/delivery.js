@@ -942,13 +942,14 @@ router.post("/profile/photo", authenticatePartner, uploadPartnerPhoto, async (re
 
         // Retrieve existing partner or initialize fallback so photo is NEVER dropped
         let partner = await getPartnerById(partnerId);
+        const versionedPhotoUrl = photoUrl.includes("?v=") ? photoUrl : `${photoUrl}?v=${Date.now()}`;
         if (!partner) {
             partner = {
                 partner_id: partnerId,
                 name: req.partner?.name || "Delivery Partner",
                 phone: req.partner?.phone || "",
                 email: req.partner?.email || "",
-                profile_photo: photoUrl,
+                profile_photo: versionedPhotoUrl,
                 is_online: true,
                 is_active: true,
                 registration_status: "approved",
@@ -962,7 +963,7 @@ router.post("/profile/photo", authenticatePartner, uploadPartnerPhoto, async (re
                 current_longitude: 80.2233
             };
         } else {
-            partner.profile_photo = photoUrl;
+            partner.profile_photo = versionedPhotoUrl;
             partner.updated_at = new Date().toISOString();
         }
 
@@ -974,7 +975,7 @@ router.post("/profile/photo", authenticatePartner, uploadPartnerPhoto, async (re
             await pool.query("ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS profile_photo TEXT;");
             await pool.query(
                 "UPDATE delivery_partners SET profile_photo = $1, updated_at = NOW() WHERE partner_id = $2 OR phone = $2",
-                [photoUrl, partnerId]
+                [versionedPhotoUrl, partnerId]
             );
         } catch (dbErr) {
             console.warn("[POSTGRES PROFILE PHOTO UPDATE WARN]:", dbErr.message);
@@ -982,31 +983,31 @@ router.post("/profile/photo", authenticatePartner, uploadPartnerPhoto, async (re
 
         emitToAdmin("partner:updated", {
             partner_id: partner.partner_id,
-            profile_photo: photoUrl,
+            profile_photo: versionedPhotoUrl,
             updated_at: new Date().toISOString()
         });
 
         emitToAdmin("fleet:partner_update", {
             partner_id: partner.partner_id,
-            profile_photo: photoUrl,
+            profile_photo: versionedPhotoUrl,
             updated_at: new Date().toISOString()
         });
 
         const host = req.get("host") || "localhost:5500";
-        const fullUrl = `${req.protocol}://${host}${photoUrl}`;
+        const fullUrl = `${req.protocol}://${host}${versionedPhotoUrl}`;
 
         return res.json({
             success: true,
             message: "Profile photo uploaded successfully.",
-            profile_photo: photoUrl,
-            photo_url: photoUrl,
+            profile_photo: versionedPhotoUrl,
+            photo_url: versionedPhotoUrl,
             full_photo_url: fullUrl,
             partner: {
                 partner_id: partner.partner_id,
                 name: partner.name,
                 phone: partner.phone,
                 email: partner.email,
-                profile_photo: photoUrl,
+                profile_photo: versionedPhotoUrl,
                 vehicle_type: partner.vehicle_type || "Electric Scooter",
                 vehicle_number: partner.vehicle_number || "TN 09 CY 4567",
                 assigned_area: partner.assigned_area || "Padur",

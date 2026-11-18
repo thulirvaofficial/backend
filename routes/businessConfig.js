@@ -83,13 +83,19 @@ router.get(["/delivery/availability", "/availability"], async (req, res) => {
     }
 });
 
-// 4. GET /api/config/launch-banner - Dynamic Promotional / Launch Banner
+// 4. GET /api/config/launch-banner - Dynamic Promotional / Launch Banner & Active Announcements
 router.get(["/launch-banner", "/banner"], async (req, res) => {
     try {
+        const { getActiveAnnouncements } = require("../services/announcementService");
         const banner = await getLaunchBanner(req.query.zone);
+        let announcements = [];
+        try {
+            announcements = await getActiveAnnouncements();
+        } catch (_) {}
         res.json({
             success: true,
-            banner
+            banner,
+            announcements: announcements.filter(a => a.is_active && a.is_published)
         });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });

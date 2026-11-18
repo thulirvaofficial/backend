@@ -18,7 +18,7 @@ function saveBase64Image(image) {
                 if (!fs.existsSync(uploadsDir)) {
                     fs.mkdirSync(uploadsDir, { recursive: true });
                 }
-                const fileName = `prod_${Date.now()}_${Math.floor(Math.random()*1000)}.${ext}`;
+                const fileName = `prod_${Date.now()}_${Math.floor(Math.random() * 1000)}.${ext}`;
                 const filePath = path.join(uploadsDir, fileName);
                 fs.writeFileSync(filePath, buffer);
                 return `/assets/images/uploads/${fileName}`;
@@ -157,7 +157,7 @@ router.get("/", async (req, res) => {
                 ORDER BY p.id DESC
             `);
             list = result.rows || [];
-        } catch (_) {}
+        } catch (_) { }
 
         if (!list.length) {
             list = loadLocalProducts().filter(p => p.status !== "inactive");
@@ -189,7 +189,7 @@ router.get("/:id", async (req, res) => {
             if (result.rows.length > 0) {
                 product = result.rows[0];
             }
-        } catch (_) {}
+        } catch (_) { }
 
         if (!product) {
             const all = loadLocalProducts();
@@ -221,7 +221,7 @@ router.get("/admin/all", async (req, res) => {
                 ORDER BY p.id DESC
             `);
             list = result.rows || [];
-        } catch (_) {}
+        } catch (_) { }
 
         if (!list.length) {
             list = loadLocalProducts();
@@ -248,7 +248,7 @@ router.get("/:id/variants", async (req, res) => {
         if (result.rows.length > 0) {
             return res.json({ success: true, variants: result.rows });
         }
-    } catch {}
+    } catch { }
 
     const prod = MOCK_PRODUCTS.find(p => p.id === productId);
     const variants = IN_MEMORY_VARIANTS[productId] || (prod ? generateDefaultVariants(prod) : []);
@@ -310,7 +310,7 @@ router.put("/variants/:variantId", authenticateToken, adminOnly, async (req, res
             RETURNING *
         `, [name, weight_value, unit, price !== undefined ? Number(price) : null, compare_price !== undefined ? Number(compare_price) : null, stock !== undefined ? Number(stock) : null, is_default, is_active, variantId]);
         if (result.rows.length) return res.json({ success: true, variant: result.rows[0] });
-    } catch {}
+    } catch { }
 
     for (const pid in IN_MEMORY_VARIANTS) {
         const idx = IN_MEMORY_VARIANTS[pid].findIndex(v => v.id === variantId);
@@ -327,7 +327,7 @@ router.delete("/variants/:variantId", authenticateToken, adminOnly, async (req, 
     const variantId = parseInt(req.params.variantId);
     try {
         await pool.query("DELETE FROM product_variants WHERE id = $1", [variantId]);
-    } catch {}
+    } catch { }
 
     for (const pid in IN_MEMORY_VARIANTS) {
         IN_MEMORY_VARIANTS[pid] = IN_MEMORY_VARIANTS[pid].filter(v => v.id !== variantId);
@@ -362,7 +362,7 @@ router.post("/", authenticateToken, adminOnly, async (req, res) => {
                 status || "active"
             ]);
             newProd = result.rows[0];
-        } catch (_) {}
+        } catch (_) { }
 
         const localList = loadLocalProducts();
         const nextId = newProd?.id || (localList.reduce((max, p) => Math.max(max, p.id || 0), 0) + 1);
@@ -420,7 +420,7 @@ router.put("/:id", authenticateToken, adminOnly, async (req, res) => {
                 RETURNING *
             `, [name, description, category_id, price !== undefined ? Number(price) : null, compare_price !== undefined ? Number(compare_price) : null, sku, stock !== undefined ? Number(stock) : null, weight, savedImage, status, badge, id]);
             if (result.rows.length > 0) updatedProd = result.rows[0];
-        } catch (_) {}
+        } catch (_) { }
 
         const localList = loadLocalProducts();
         const idx = localList.findIndex(p => p.id === id);
@@ -455,7 +455,7 @@ router.delete("/:id", authenticateToken, adminOnly, async (req, res) => {
     try {
         try {
             await pool.query("DELETE FROM products WHERE id=$1", [id]);
-        } catch (_) {}
+        } catch (_) { }
         const localList = loadLocalProducts().filter(p => p.id !== id);
         saveLocalProducts(localList);
         res.json({ success: true, message: "Product deleted" });

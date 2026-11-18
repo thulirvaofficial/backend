@@ -396,23 +396,30 @@ app.use(express.static(websitePath));
 app.use("/admin", express.static(adminPath));
 
 // 3. Common Static Assets & Uploads (shared with Mobile App and Web)
+const staticUploadOptions = {
+    setHeaders: (res) => {
+        res.set("Cache-Control", "no-cache, must-revalidate");
+        res.set("Pragma", "no-cache");
+    }
+};
+
 app.use("/assets", express.static(path.resolve(websitePath, "assets")));
-app.use("/assets/images/uploads", express.static(backendAssetsUploadsPath));
-app.use("/assets/images/uploads", express.static(websiteUploadsPath));
+app.use("/assets/images/uploads", express.static(backendAssetsUploadsPath, staticUploadOptions));
+app.use("/assets/images/uploads", express.static(websiteUploadsPath, staticUploadOptions));
 
 // 4. Central Uploads routes (available at /uploads AND /api/uploads)
-app.use("/uploads", express.static(backendPublicUploadsPath));
-app.use("/uploads", express.static(websiteUploadsPath));
-app.use("/uploads", express.static(backendAssetsUploadsPath));
+app.use("/uploads", express.static(backendPublicUploadsPath, staticUploadOptions));
+app.use("/uploads", express.static(websiteUploadsPath, staticUploadOptions));
+app.use("/uploads", express.static(backendAssetsUploadsPath, staticUploadOptions));
 
-app.use("/api/uploads", express.static(backendPublicUploadsPath));
-app.use("/api/uploads", express.static(websiteUploadsPath));
-app.use("/api/uploads", express.static(backendAssetsUploadsPath));
+app.use("/api/uploads", express.static(backendPublicUploadsPath, staticUploadOptions));
+app.use("/api/uploads", express.static(websiteUploadsPath, staticUploadOptions));
+app.use("/api/uploads", express.static(backendAssetsUploadsPath, staticUploadOptions));
 
 app.use("/admin/assets", express.static(path.resolve(adminPath, "assets")));
 app.use("/admin/images", express.static(path.resolve(adminPath, "images")));
-app.use("/admin/uploads", express.static(backendPublicUploadsPath));
-app.use("/admin/uploads", express.static(websiteUploadsPath));
+app.use("/admin/uploads", express.static(backendPublicUploadsPath, staticUploadOptions));
+app.use("/admin/uploads", express.static(websiteUploadsPath, staticUploadOptions));
 
 // 5. Fallback for missing images in upload routes (Never return HTML to Flutter image decoders!)
 const TRANSPARENT_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
