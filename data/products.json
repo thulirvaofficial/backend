@@ -2,7 +2,7 @@
   {
     "id": 1,
     "name": "Farm Fresh A2 Desi Cow Milk",
-    "description": "100% pure raw chilled A2 cow milk directly from pasture-fed cows in Kanchipuram. Delivered cold to your doorstep by 7 AM.",
+    "description": "100% pure raw chilled A2 cow milk directly from pasture-fed cows in Kanchipuram. Delivered cold to your doorstep by 7:00 AM.",
     "category": "Milk",
     "category_name": "Milk",
     "category_id": 1,
@@ -148,36 +148,5 @@
     "image": "/assets/images/products/product_lineup.jpg",
     "badge": "Wild Harvest",
     "status": "active"
-  },
-  {
-    "id": 11,
-    "name": "Premium California Raw Almonds (Badam)",
-    "description": "Crunchy, sweet, and nutrient-dense raw almonds. Packed with plant protein, vitamin E, and dietary fiber.",
-    "category": "Vegan",
-    "category_name": "Vegan",
-    "category_id": 7,
-    "price": 280,
-    "compare_price": 320,
-    "weight": "250 g",
-    "stock": 45,
-    "image": "/assets/images/products/product_lineup.jpg",
-    "badge": "Organic",
-    "status": "active"
-  },
-  {
-    "id": 12,
-    "name": "Whole Crunchy Cashew Nuts (Kaju)",
-    "description": "Jumbo grade whole crunchy cashew nuts sourced fresh. Naturally sweet and rich in heart-healthy minerals.",
-    "category": "Vegan",
-    "category_name": "Vegan",
-    "category_id": 7,
-    "price": 180,
-    "compare_price": 210,
-    "weight": "200 g",
-    "stock": 40,
-    "image": "/assets/images/products/product_lineup.jpg",
-    "badge": "Whole Nuts",
-    "status": "active"
   }
 ]
-

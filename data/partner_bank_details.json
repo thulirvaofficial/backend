@@ -1,13 +1,1 @@
-[
-  {
-    "partner_id": "THU-DP-0001",
-    "account_holder_name": "Kamalesh",
-    "bank_name": "HDFC Bank",
-    "encrypted_account_number": "58d2ded1770339c5e112e53b9289d33f:932482dc1a55d998b02fbed8f4e0d5c5",
-    "last4_account_number": "9876",
-    "masked_account_number": "XXXX-XXXX-9876",
-    "ifsc_code": "HDFC0001234",
-    "account_type": "savings",
-    "updated_at": "2026-11-17T14:30:07.994Z"
-  }
-]
+[]
