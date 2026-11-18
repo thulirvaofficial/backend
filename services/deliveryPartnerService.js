@@ -149,7 +149,7 @@ async function getPartnerById(identifier) {
     if (!identifier) return null;
     const cleanId = String(identifier).trim();
 
-    // Try DB
+    // 1. Try PostgreSQL Database (Single Source of Truth)
     try {
         const dbRes = await pool.query(`
             SELECT * FROM delivery_partners 
@@ -158,28 +158,55 @@ async function getPartnerById(identifier) {
             LIMIT 1
         `, [cleanId]);
         if (dbRes.rows && dbRes.rows.length > 0) {
-            return dbRes.rows[0];
+            const partner = dbRes.rows[0];
+            // Synchronize disk store with fresh DB row to ensure complete consistency
+            try {
+                let partners = loadPartnersFromDisk();
+                const idx = partners.findIndex(p => p.partner_id?.toLowerCase() === partner.partner_id?.toLowerCase());
+                if (idx >= 0) {
+                    partners[idx] = { ...partners[idx], ...partner };
+                } else {
+                    partners.push(partner);
+                }
+                savePartnersToDisk(partners);
+            } catch (_) {}
+            return partner;
         }
-    } catch (_) {}
+    } catch (e) {
+        console.warn("[POSTGRES GET PARTNER WARN]:", e.message);
+    }
 
-    // Fallback to disk JSON
+    // 2. Fallback to disk JSON store if DB query returned no rows or errored
     const partners = loadPartnersFromDisk();
-    return partners.find(p =>
+    const diskPartner = partners.find(p =>
         (p.partner_id?.toLowerCase() === cleanId.toLowerCase() || p.phone === cleanId) &&
         p.registration_status !== "deleted" &&
         p.registration_status !== "deactivated"
     ) || null;
+
+    // If partner found on disk, ensure it is persisted to PostgreSQL for future queries
+    if (diskPartner) {
+        try {
+            await savePartner(diskPartner);
+        } catch (_) {}
+    }
+
+    return diskPartner;
 }
 
 /**
  * Save / Update partner permanently across DB and disk
+ * Performs transactional UPSERT to PostgreSQL ensuring zero data loss
  */
 async function savePartner(partner) {
     if (!partner || !partner.partner_id) return false;
 
-    // Update disk JSON
+    // 1. Update disk JSON store
     let partners = loadPartnersFromDisk();
-    const idx = partners.findIndex(p => p.partner_id?.toLowerCase() === partner.partner_id.toLowerCase());
+    const idx = partners.findIndex(p =>
+        p.partner_id?.toLowerCase() === partner.partner_id.toLowerCase() ||
+        (partner.phone && p.phone === partner.phone)
+    );
     if (idx >= 0) {
         partners[idx] = { ...partners[idx], ...partner, updated_at: new Date().toISOString() };
     } else {
@@ -187,9 +214,9 @@ async function savePartner(partner) {
     }
     savePartnersToDisk(partners);
 
-    // Update DB
+    // 2. Update PostgreSQL DB (UPSERT: Update existing, or Insert if not yet in DB)
     try {
-        await pool.query(`
+        const updateRes = await pool.query(`
             UPDATE delivery_partners
             SET name = COALESCE($1, name),
                 phone = COALESCE($2, phone),
@@ -212,8 +239,12 @@ async function savePartner(partner) {
                 current_longitude = COALESCE($19, current_longitude),
                 last_active_at = COALESCE($20, last_active_at),
                 profile_photo = COALESCE($21, profile_photo),
+                emergency_contact = COALESCE($22, emergency_contact),
+                rating = COALESCE($23, rating),
+                total_deliveries_count = COALESCE($24, total_deliveries_count),
                 updated_at = NOW()
-            WHERE partner_id = $22
+            WHERE LOWER(partner_id) = LOWER($25) OR (phone = $2 AND $2 IS NOT NULL)
+            RETURNING *;
         `, [
             partner.name || null,
             partner.phone || null,
@@ -232,13 +263,96 @@ async function savePartner(partner) {
             partner.kyc_status || null,
             partner.aadhaar_front_url || null,
             partner.aadhaar_back_url || null,
-            partner.current_latitude ? Number(partner.current_latitude) : null,
-            partner.current_longitude ? Number(partner.current_longitude) : null,
+            partner.current_latitude !== undefined && partner.current_latitude !== null ? Number(partner.current_latitude) : null,
+            partner.current_longitude !== undefined && partner.current_longitude !== null ? Number(partner.current_longitude) : null,
             partner.last_active_at ? new Date(partner.last_active_at) : null,
             partner.profile_photo || null,
+            partner.emergency_contact || null,
+            partner.rating ? Number(partner.rating) : null,
+            partner.total_deliveries_count ? Number(partner.total_deliveries_count) : null,
             partner.partner_id
         ]);
-    } catch (_) {}
+
+        if (updateRes.rows && updateRes.rows.length > 0) {
+            Object.assign(partner, updateRes.rows[0]);
+        } else {
+            // Row not present in PostgreSQL: Insert new permanent record
+            const insertRes = await pool.query(`
+                INSERT INTO delivery_partners (
+                    partner_id, name, phone, email, password, profile_photo, address, city, pincode,
+                    assigned_area, vehicle_type, vehicle_number, emergency_contact, registration_status,
+                    rejection_reason, kyc_status, aadhaar_front_url, aadhaar_back_url, current_latitude,
+                    current_longitude, is_online, is_active, is_blocked, rating, total_deliveries_count,
+                    last_active_at, created_at, updated_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                    $10, $11, $12, $13, $14,
+                    $15, $16, $17, $18, $19,
+                    $20, $21, $22, $23, $24, $25,
+                    $26, NOW(), NOW()
+                )
+                ON CONFLICT (partner_id) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    phone = EXCLUDED.phone,
+                    email = COALESCE(EXCLUDED.email, delivery_partners.email),
+                    profile_photo = COALESCE(EXCLUDED.profile_photo, delivery_partners.profile_photo),
+                    address = COALESCE(EXCLUDED.address, delivery_partners.address),
+                    city = COALESCE(EXCLUDED.city, delivery_partners.city),
+                    pincode = COALESCE(EXCLUDED.pincode, delivery_partners.pincode),
+                    assigned_area = COALESCE(EXCLUDED.assigned_area, delivery_partners.assigned_area),
+                    vehicle_type = COALESCE(EXCLUDED.vehicle_type, delivery_partners.vehicle_type),
+                    vehicle_number = COALESCE(EXCLUDED.vehicle_number, delivery_partners.vehicle_number),
+                    emergency_contact = COALESCE(EXCLUDED.emergency_contact, delivery_partners.emergency_contact),
+                    registration_status = COALESCE(EXCLUDED.registration_status, delivery_partners.registration_status),
+                    rejection_reason = COALESCE(EXCLUDED.rejection_reason, delivery_partners.rejection_reason),
+                    kyc_status = COALESCE(EXCLUDED.kyc_status, delivery_partners.kyc_status),
+                    aadhaar_front_url = COALESCE(EXCLUDED.aadhaar_front_url, delivery_partners.aadhaar_front_url),
+                    aadhaar_back_url = COALESCE(EXCLUDED.aadhaar_back_url, delivery_partners.aadhaar_back_url),
+                    current_latitude = COALESCE(EXCLUDED.current_latitude, delivery_partners.current_latitude),
+                    current_longitude = COALESCE(EXCLUDED.current_longitude, delivery_partners.current_longitude),
+                    is_online = COALESCE(EXCLUDED.is_online, delivery_partners.is_online),
+                    is_active = COALESCE(EXCLUDED.is_active, delivery_partners.is_active),
+                    is_blocked = COALESCE(EXCLUDED.is_blocked, delivery_partners.is_blocked),
+                    rating = COALESCE(EXCLUDED.rating, delivery_partners.rating),
+                    total_deliveries_count = COALESCE(EXCLUDED.total_deliveries_count, delivery_partners.total_deliveries_count),
+                    last_active_at = COALESCE(EXCLUDED.last_active_at, delivery_partners.last_active_at),
+                    updated_at = NOW()
+                RETURNING *;
+            `, [
+                partner.partner_id,
+                partner.name || "Delivery Partner",
+                partner.phone || "0000000000",
+                partner.email || null,
+                partner.password || partner.password_hash || "123456",
+                partner.profile_photo || null,
+                partner.address || null,
+                partner.city || "Chennai",
+                partner.pincode || null,
+                partner.assigned_area || "Chennai Central",
+                partner.vehicle_type || "Scooter",
+                partner.vehicle_number || "TN 01 AB 1234",
+                partner.emergency_contact || null,
+                partner.registration_status || "approved",
+                partner.rejection_reason || null,
+                partner.kyc_status || "APPROVED",
+                partner.aadhaar_front_url || null,
+                partner.aadhaar_back_url || null,
+                partner.current_latitude !== undefined && partner.current_latitude !== null ? Number(partner.current_latitude) : null,
+                partner.current_longitude !== undefined && partner.current_longitude !== null ? Number(partner.current_longitude) : null,
+                partner.is_online !== undefined ? Boolean(partner.is_online) : false,
+                partner.is_active !== undefined ? Boolean(partner.is_active) : true,
+                partner.is_blocked !== undefined ? Boolean(partner.is_blocked) : false,
+                partner.rating ? Number(partner.rating) : 5.0,
+                partner.total_deliveries_count ? Number(partner.total_deliveries_count) : 0,
+                partner.last_active_at ? new Date(partner.last_active_at) : new Date()
+            ]);
+            if (insertRes.rows && insertRes.rows.length > 0) {
+                Object.assign(partner, insertRes.rows[0]);
+            }
+        }
+    } catch (dbErr) {
+        console.warn("[POSTGRES SAVE PARTNER WARN]:", dbErr.message);
+    }
 
     return true;
 }

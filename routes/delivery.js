@@ -524,14 +524,19 @@ const loginPartnerHandler = async (req, res) => {
                 partner_id: partner.partner_id,
                 name: partner.name,
                 phone: partner.phone,
-                email: partner.email,
+                email: partner.email || "",
                 profile_photo: partner.profile_photo || null,
-                assigned_area: partner.assigned_area,
-                vehicle_type: partner.vehicle_type,
-                vehicle_number: partner.vehicle_number,
+                address: partner.address || "",
+                city: partner.city || "Chennai",
+                pincode: partner.pincode || "",
+                assigned_area: partner.assigned_area || "",
+                vehicle_type: partner.vehicle_type || "",
+                vehicle_number: partner.vehicle_number || "",
+                emergency_contact: partner.emergency_contact || null,
                 current_latitude: partner.current_latitude,
                 current_longitude: partner.current_longitude,
                 is_online: Boolean(partner.is_online),
+                is_active: Boolean(partner.is_active),
                 rating: partner.rating || 5.0,
                 total_deliveries_count: partner.total_deliveries_count || 0,
                 registration_status: regStatus,
@@ -765,7 +770,7 @@ const updatePartnerProfileHandler = async (req, res) => {
         const partnerId = req.partner.partner_id;
         const {
             name, phone, email, address, city, pincode,
-            vehicle_type, vehicle_number, emergency_contact
+            vehicle_type, vehicle_number, emergency_contact, assigned_area
         } = req.body;
 
         let partner = await getPartnerById(partnerId);
@@ -775,64 +780,44 @@ const updatePartnerProfileHandler = async (req, res) => {
 
         if (name && name.trim()) partner.name = name.trim();
         if (phone && phone.trim()) partner.phone = phone.trim();
-        if (email && email.trim()) partner.email = email.trim();
-        if (address !== undefined) partner.address = address.trim();
-        if (city !== undefined) partner.city = city.trim();
-        if (pincode !== undefined) partner.pincode = pincode.trim();
-        if (vehicle_type && vehicle_type.trim()) partner.vehicle_type = vehicle_type.trim();
-        if (vehicle_number && vehicle_number.trim()) partner.vehicle_number = vehicle_number.trim();
+        if (email !== undefined) partner.email = email ? email.trim() : null;
+        if (address !== undefined) partner.address = address ? address.trim() : "";
+        if (city !== undefined) partner.city = city ? city.trim() : "Chennai";
+        if (pincode !== undefined) partner.pincode = pincode ? pincode.trim() : "";
+        if (assigned_area !== undefined && assigned_area.trim()) partner.assigned_area = assigned_area.trim();
+        if (vehicle_type !== undefined && vehicle_type.trim()) partner.vehicle_type = vehicle_type.trim();
+        if (vehicle_number !== undefined && vehicle_number.trim()) partner.vehicle_number = vehicle_number.trim();
         if (emergency_contact !== undefined) partner.emergency_contact = emergency_contact ? emergency_contact.trim() : null;
         partner.updated_at = new Date().toISOString();
 
+        // Save permanently across PostgreSQL (Single Source of Truth) and disk JSON mirror
         await savePartner(partner);
 
-        try {
-            await pool.query(`
-                UPDATE delivery_partners
-                SET name = COALESCE($1, name),
-                    phone = COALESCE($2, phone),
-                    email = COALESCE($3, email),
-                    address = COALESCE($4, address),
-                    city = COALESCE($5, city),
-                    pincode = COALESCE($6, pincode),
-                    vehicle_type = COALESCE($7, vehicle_type),
-                    vehicle_number = COALESCE($8, vehicle_number),
-                    emergency_contact = COALESCE($9, emergency_contact),
-                    updated_at = NOW()
-                WHERE partner_id = $10
-            `, [
-                name ? name.trim() : null,
-                phone ? phone.trim() : null,
-                email ? email.trim() : null,
-                address !== undefined ? address.trim() : null,
-                city !== undefined ? city.trim() : null,
-                pincode !== undefined ? pincode.trim() : null,
-                vehicle_type ? vehicle_type.trim() : null,
-                vehicle_number ? vehicle_number.trim() : null,
-                emergency_contact ? emergency_contact.trim() : null,
-                partnerId
-            ]);
-        } catch (_) {}
+        // Fetch freshly stored database row to guarantee fidelity
+        const updatedPartner = await getPartnerById(partnerId) || partner;
 
         return res.json({
             success: true,
             message: "Profile updated successfully.",
             partner: {
-                partner_id: partner.partner_id,
-                name: partner.name,
-                phone: partner.phone,
-                email: partner.email,
-                profile_photo: partner.profile_photo || null,
-                address: partner.address || "",
-                city: partner.city || "Chennai",
-                pincode: partner.pincode || "",
-                assigned_area: partner.assigned_area,
-                vehicle_type: partner.vehicle_type,
-                vehicle_number: partner.vehicle_number,
-                emergency_contact: partner.emergency_contact || null,
-                is_online: Boolean(partner.is_online),
-                is_active: Boolean(partner.is_active),
-                rating: partner.rating || 5.0
+                partner_id: updatedPartner.partner_id,
+                name: updatedPartner.name,
+                phone: updatedPartner.phone,
+                email: updatedPartner.email || "",
+                profile_photo: updatedPartner.profile_photo || null,
+                address: updatedPartner.address || "",
+                city: updatedPartner.city || "Chennai",
+                pincode: updatedPartner.pincode || "",
+                assigned_area: updatedPartner.assigned_area || "",
+                vehicle_type: updatedPartner.vehicle_type || "",
+                vehicle_number: updatedPartner.vehicle_number || "",
+                emergency_contact: updatedPartner.emergency_contact || null,
+                is_online: Boolean(updatedPartner.is_online),
+                is_active: Boolean(updatedPartner.is_active),
+                rating: updatedPartner.rating || 5.0,
+                total_deliveries_count: updatedPartner.total_deliveries_count || 0,
+                registration_status: updatedPartner.registration_status || "approved",
+                kyc_status: updatedPartner.kyc_status || "APPROVED"
             }
         });
     } catch (err) {
@@ -940,46 +925,21 @@ router.post("/profile/photo", authenticatePartner, uploadPartnerPhoto, async (re
             } catch (_) {}
         });
 
-        // Retrieve existing partner or initialize fallback so photo is NEVER dropped
+        // Retrieve existing partner from Database
         let partner = await getPartnerById(partnerId);
-        const versionedPhotoUrl = photoUrl.includes("?v=") ? photoUrl : `${photoUrl}?v=${Date.now()}`;
+        if (!partner && req.partner?.phone) {
+            partner = await getPartnerById(req.partner.phone);
+        }
         if (!partner) {
-            partner = {
-                partner_id: partnerId,
-                name: req.partner?.name || "Delivery Partner",
-                phone: req.partner?.phone || "",
-                email: req.partner?.email || "",
-                profile_photo: versionedPhotoUrl,
-                is_online: true,
-                is_active: true,
-                registration_status: "approved",
-                kyc_status: "APPROVED",
-                rating: 5.0,
-                total_deliveries_count: 0,
-                vehicle_type: "Electric Scooter",
-                vehicle_number: "TN 09 CY 4567",
-                assigned_area: "Padur",
-                current_latitude: 12.8025,
-                current_longitude: 80.2233
-            };
-        } else {
-            partner.profile_photo = versionedPhotoUrl;
-            partner.updated_at = new Date().toISOString();
+            return res.status(404).json({ success: false, message: "Delivery partner record not found." });
         }
 
-        // Update in central disk store
+        const versionedPhotoUrl = photoUrl.includes("?v=") ? photoUrl : `${photoUrl}?v=${Date.now()}`;
+        partner.profile_photo = versionedPhotoUrl;
+        partner.updated_at = new Date().toISOString();
+
+        // Save permanently across PostgreSQL (Single Source of Truth) and disk JSON mirror
         await savePartner(partner);
-
-        // Update in PostgreSQL
-        try {
-            await pool.query("ALTER TABLE delivery_partners ADD COLUMN IF NOT EXISTS profile_photo TEXT;");
-            await pool.query(
-                "UPDATE delivery_partners SET profile_photo = $1, updated_at = NOW() WHERE partner_id = $2 OR phone = $2",
-                [versionedPhotoUrl, partnerId]
-            );
-        } catch (dbErr) {
-            console.warn("[POSTGRES PROFILE PHOTO UPDATE WARN]:", dbErr.message);
-        }
 
         emitToAdmin("partner:updated", {
             partner_id: partner.partner_id,
@@ -1006,11 +966,15 @@ router.post("/profile/photo", authenticatePartner, uploadPartnerPhoto, async (re
                 partner_id: partner.partner_id,
                 name: partner.name,
                 phone: partner.phone,
-                email: partner.email,
+                email: partner.email || "",
                 profile_photo: versionedPhotoUrl,
-                vehicle_type: partner.vehicle_type || "Electric Scooter",
-                vehicle_number: partner.vehicle_number || "TN 09 CY 4567",
-                assigned_area: partner.assigned_area || "Padur",
+                address: partner.address || "",
+                city: partner.city || "Chennai",
+                pincode: partner.pincode || "",
+                assigned_area: partner.assigned_area || "",
+                vehicle_type: partner.vehicle_type || "",
+                vehicle_number: partner.vehicle_number || "",
+                emergency_contact: partner.emergency_contact || null,
                 rating: partner.rating || 5.0,
                 is_online: Boolean(partner.is_online)
             }
@@ -1033,8 +997,9 @@ router.delete("/profile/photo", authenticatePartner, async (req, res) => {
 
         const partner = await getPartnerById(partnerId);
         if (partner) {
-            if (partner.profile_photo && partner.profile_photo.startsWith("/uploads/partners/")) {
-                const oldPath = path.resolve(__dirname, "..", "public", partner.profile_photo.replace(/^\//, ""));
+            if (partner.profile_photo) {
+                const cleanRelPath = partner.profile_photo.split("?")[0].replace(/^\/api/, "").replace(/^\//, "");
+                const oldPath = path.resolve(__dirname, "..", "public", cleanRelPath);
                 try { if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath); } catch (_) {}
             }
             partner.profile_photo = null;
