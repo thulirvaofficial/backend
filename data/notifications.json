@@ -1,5 +1,44 @@
 [
   {
+    "id": "NOTIF-1795111180340-433",
+    "user_id": "THU-DP-0002",
+    "title": "🚨 New Thulirva Order #THU-20261119-6084",
+    "message": "New delivery order (₹170, 1 items) at Chennai. Tap to accept within 3 minutes!",
+    "type": "NEW_ORDER_ASSIGNED",
+    "target_id": "1795111180303",
+    "is_read": false,
+    "for_admin": false,
+    "recipient_role": "delivery_partner",
+    "app_type": "partner",
+    "created_at": "2026-11-19T17:59:40.340Z"
+  },
+  {
+    "id": "NOTIF-1795111180308-467",
+    "user_id": null,
+    "title": "Order Placed! 🌾",
+    "message": "Your Thulirva order #THU-20261119-6084 worth ₹170 has been placed successfully.",
+    "type": "order_status",
+    "target_id": "1795111180303",
+    "is_read": false,
+    "for_admin": false,
+    "recipient_role": "customer",
+    "app_type": "customer",
+    "created_at": "2026-11-19T17:59:40.308Z"
+  },
+  {
+    "id": "NOTIF-1795111180307-885",
+    "user_id": null,
+    "title": "New Order Received! 🔔",
+    "message": "New Home Delivery Order #1795111180303 received from Karthik Raja worth ₹170.",
+    "type": "new_order",
+    "target_id": "1795111180303",
+    "is_read": false,
+    "for_admin": true,
+    "recipient_role": "admin",
+    "app_type": "admin",
+    "created_at": "2026-11-19T17:59:40.307Z"
+  },
+  {
     "id": "NOTIF-1795074808225-936",
     "user_id": "THU-DP-9999",
     "title": "🚨 New Thulirva Order #ORD-12345",

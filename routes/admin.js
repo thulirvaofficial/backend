@@ -40,6 +40,12 @@ router.get("/dashboard", async (req, res) => {
         const totalRevenue = (Number(orderRevRes.rows[0]?.revenue) || 0) + (Number(subRevRes.rows[0]?.sub_revenue) || 0);
         const pending = await pool.query("SELECT COUNT(*) FROM orders WHERE LOWER(COALESCE(order_status, 'pending'))='pending'");
         const subscriptions = await pool.query("SELECT COUNT(*) FROM subscriptions WHERE LOWER(COALESCE(status, 'active'))='active'");
+        const pendingSubscriptions = await pool.query(`
+            SELECT COUNT(*) FROM subscriptions 
+            WHERE LOWER(COALESCE(status, '')) IN ('pending', 'pending_approval', 'awaiting_approval', 'payment_pending', 'verifying', 'under_review')
+               OR (LOWER(COALESCE(status, '')) NOT IN ('approved', 'active', 'rejected', 'cancelled', 'expired', 'completed')
+                   AND LOWER(COALESCE(payment_status, '')) IN ('pending', 'submitted', 'uploaded', 'under_review', 'verifying'))
+        `);
         const pendingVerifications = await pool.query("SELECT COUNT(*) FROM orders WHERE LOWER(COALESCE(payment_status, 'pending')) NOT IN ('paid', 'verified', 'rejected', 'failed')");
         const pendingPickups = await pool.query("SELECT COUNT(*) FROM orders WHERE LOWER(COALESCE(delivery_type, ''))='pickup' AND LOWER(COALESCE(order_status, '')) NOT IN ('collected', 'delivered', 'cancelled')");
         const recentOrdersRes = await pool.query("SELECT * FROM orders ORDER BY created_at DESC LIMIT 10");
@@ -54,6 +60,7 @@ router.get("/dashboard", async (req, res) => {
                 total_revenue: totalRevenue,
                 pending_orders: Number(pending.rows[0]?.count) || 0,
                 subscriptions: Number(subscriptions.rows[0]?.count) || 0,
+                pending_subscriptions: Number(pendingSubscriptions.rows[0]?.count) || 0,
                 pending_verifications: Number(pendingVerifications.rows[0]?.count) || 0,
                 pending_pickups: Number(pendingPickups.rows[0]?.count) || 0
             },
@@ -84,6 +91,16 @@ router.get("/dashboard", async (req, res) => {
             if (k) customerSet.add(k);
         });
 
+        const pendingSubsCount = subs.filter(s => {
+            const status = (s.status || '').toLowerCase();
+            const paymentStatus = (s.payment_status || '').toLowerCase();
+            if (['approved', 'active', 'rejected', 'cancelled', 'expired', 'completed'].includes(status)) {
+                return false;
+            }
+            return ['pending', 'pending_approval', 'awaiting_approval', 'payment_pending', 'verifying', 'under_review'].includes(status) ||
+                   ['pending', 'submitted', 'uploaded', 'under_review', 'verifying'].includes(paymentStatus);
+        }).length;
+
         res.json({
             success: true,
             stats: {
@@ -94,6 +111,7 @@ router.get("/dashboard", async (req, res) => {
                 total_revenue: totalRevenue,
                 pending_orders: pendingCount,
                 subscriptions: subs.filter(s => (s.status || '').toLowerCase() === 'active').length,
+                pending_subscriptions: pendingSubsCount,
                 pending_verifications: orders.filter(o => !['paid', 'verified', 'rejected', 'failed'].includes((o.payment_status || '').toLowerCase())).length,
                 pending_pickups: orders.filter(o => o.is_pickup && !['collected', 'delivered', 'cancelled'].includes((o.order_status || '').toLowerCase())).length
             },

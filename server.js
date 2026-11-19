@@ -70,6 +70,9 @@ const adminDeliveryRoutes =
 const serviceabilityRoutes =
     require("./routes/serviceability");
 
+const deliverySettingsRoutes =
+    require("./routes/deliverySettings");
+
 const v1Routes =
     require("./routes/v1");
 
@@ -164,6 +167,16 @@ app.use(
 app.use(
     "/api/orders",
     orderRoutes
+);
+
+app.use(
+    "/api",
+    deliverySettingsRoutes.router
+);
+
+app.use(
+    "/",
+    deliverySettingsRoutes.router
 );
 
 app.use(
