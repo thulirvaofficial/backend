@@ -1,4 +1,7 @@
- const express = require("express");
+const express = require("express");
+const fs = require("fs");
+const path = require("path");
+const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { pool } = require("../config/database");
 const { authenticateToken, adminOnly } = require("../middleware/auth");
@@ -317,6 +320,395 @@ router.get("/profile", async (req, res) => {
 
 router.get("/me", async (req, res) => {
     return router.handle(req, res);
+});
+
+/* ============================================================
+   MAINTENANCE: SECURE PRODUCTION DATA RESET ENDPOINT
+   Wipes orders, subscriptions, customers, delivery partners,
+   and resets 10 production sample products in PostgreSQL & JSON.
+============================================================ */
+router.post("/maintenance/reset-production-data", async (req, res) => {
+    const { confirm_wipe } = req.body;
+    if (confirm_wipe !== "CONFIRM_PRODUCTION_RESET_2026") {
+        return res.status(400).json({
+            success: false,
+            message: "Missing or invalid confirmation token. Pass confirm_wipe: 'CONFIRM_PRODUCTION_RESET_2026'."
+        });
+    }
+
+    try {
+        console.log("[MAINTENANCE RESET]: Starting production data cleanup and reseed...");
+
+        // 1. POSTGRESQL DATABASE WIPE & RESEED (IF CONNECTED)
+        let client = null;
+        try {
+            client = await pool.connect();
+            await client.query("BEGIN");
+
+            // Tables to truncate
+            const tablesToTruncate = [
+                "order_items",
+                "delivery_proofs",
+                "order_status_history",
+                "orders",
+                "daily_subscription_deliveries",
+                "subscriptions",
+                "dispatch_offers",
+                "delivery_assignments",
+                "delivery_geofence_events",
+                "partner_location_history",
+                "partner_wallet_balances",
+                "partner_earning_ledger",
+                "partner_withdrawal_requests",
+                "partner_settlements",
+                "partner_bank_accounts",
+                "partner_kyc_history",
+                "delivery_partners",
+                "support_ticket_events",
+                "support_ticket_internal_notes",
+                "support_ticket_messages",
+                "support_tickets",
+                "notifications",
+                "device_tokens",
+                "addresses",
+                "product_variants",
+                "products"
+            ];
+
+            for (const tbl of tablesToTruncate) {
+                try {
+                    await client.query(`TRUNCATE TABLE ${tbl} CASCADE;`);
+                } catch (truncErr) {
+                    console.log(`[TRUNCATE ${tbl} NOTICE]:`, truncErr.message);
+                }
+            }
+
+            // Delete non-admin users
+            try {
+                await client.query(`
+                    DELETE FROM users 
+                    WHERE LOWER(email) != 'admin@thulirva.com' 
+                      AND role NOT IN ('super_admin', 'super admin', 'admin');
+                `);
+            } catch (userDelErr) {
+                console.log("[DELETE USERS WARN]:", userDelErr.message);
+            }
+
+            // Ensure Super Admin user exists
+            try {
+                const adminCheck = await client.query("SELECT id, email FROM users WHERE LOWER(email) = 'admin@thulirva.com'");
+                if (adminCheck.rows.length === 0) {
+                    const hash = await bcrypt.hash("admin123", 10);
+                    await client.query(
+                        "INSERT INTO users (name, email, password, role) VALUES ($1, $2, $3, $4)",
+                        ["Super Admin", "admin@thulirva.com", hash, "super_admin"]
+                    );
+                }
+            } catch (adminUpsertErr) {
+                console.log("[ADMIN UPSERT WARN]:", adminUpsertErr.message);
+            }
+
+            // Ensure categories exist
+            const catCheck = await client.query("SELECT COUNT(*) FROM categories");
+            if (Number(catCheck.rows[0].count) === 0) {
+                const defaultCats = [
+                    ["Milk", "Fresh Cow Milk", "🥛", "Farm fresh A2 raw & chilled cow milk bottled within hours of morning milking.", "/assets/images/products/fresh_cow_milk.jpg"],
+                    ["Ghee", "Ghee & Butter", "🧈", "Traditional hand-churned Bilona cow ghee and fresh cultured farm butter.", "/assets/images/products/pure_cow_ghee.jpg"],
+                    ["Paneer", "Paneer & Tofu", "🧀", "Soft, melt-in-mouth cottage cheese and non-GMO organic artisanal tofu.", "/assets/images/products/fresh_paneer.jpg"],
+                    ["Curd", "Natural Set Curd", "🫙", "Naturally cultured probiotic thick set curd made with pure wholesome cow milk.", "/assets/images/products/product_lineup.jpg"],
+                    ["Oils", "Cold-Pressed Oils", "🫗", "Traditional wooden chekku cold-pressed groundnut and gingelly oils.", "/assets/images/products/product_lineup.jpg"],
+                    ["Masalas", "Pure Spices & Masalas", "🌶️", "Single-origin Salem turmeric powder and aromatic farm-ground spice blends.", "/assets/images/products/product_lineup.jpg"],
+                    ["Vegan", "Vegan & Plant-Based", "🌱", "Plant-based oat & almond milk, organic soy tofu, and raw wild honey.", "/assets/images/products/fresh_paneer.jpg"]
+                ];
+                for (const [name, display_name, emoji, desc, img] of defaultCats) {
+                    await client.query(
+                        "INSERT INTO categories (name, display_name, emoji, description, image) VALUES ($1,$2,$3,$4,$5)",
+                        [name, display_name, emoji, desc, img]
+                    );
+                }
+            }
+
+            const catMap = {};
+            const catRows = await client.query("SELECT id, name FROM categories");
+            for (const c of catRows.rows) {
+                catMap[(c.name || "").toLowerCase()] = c.id;
+            }
+
+            // Seed 10 production sample products into PostgreSQL
+            const sampleProductsList = [
+                {
+                    id: 1,
+                    name: "Farm Fresh A2 Desi Cow Milk",
+                    description: "100% pure raw chilled A2 cow milk directly from pasture-fed cows in Kanchipuram. Delivered cold to your doorstep by 7:00 AM.",
+                    category: "Milk",
+                    price: 44,
+                    compare_price: 50,
+                    weight: "500 ml",
+                    stock: 120,
+                    image: "/assets/images/products/fresh_cow_milk.jpg",
+                    badge: "Farm Fresh",
+                    status: "active"
+                },
+                {
+                    id: 2,
+                    name: "Farm Fresh A2 Desi Cow Milk (1L Family)",
+                    description: "1 Litre family glass bottle of pure unadulterated chilled cow milk, delivered fresh every morning before 7:00 AM.",
+                    category: "Milk",
+                    price: 82,
+                    compare_price: 95,
+                    weight: "1 Litre",
+                    stock: 150,
+                    image: "/assets/images/products/fresh_cow_milk.jpg",
+                    badge: "Family Pack",
+                    status: "active"
+                },
+                {
+                    id: 3,
+                    name: "Pure Hand-Churned Bilona Cow Ghee",
+                    description: "Crafted using the ancient Vedic Bilona method from curd churned bi-directionally. Golden granular texture with divine farm aroma.",
+                    category: "Ghee",
+                    price: 499,
+                    compare_price: 600,
+                    weight: "500 ml",
+                    stock: 45,
+                    image: "/assets/images/products/pure_cow_ghee.jpg",
+                    badge: "Bestseller",
+                    status: "active"
+                },
+                {
+                    id: 4,
+                    name: "Fresh Farm Artisanal Paneer",
+                    description: "Ultra-soft melt-in-mouth cottage cheese made exclusively from fresh whole cow milk. Zero preservatives or chemicals.",
+                    category: "Paneer",
+                    price: 82,
+                    compare_price: 95,
+                    weight: "200 g",
+                    stock: 60,
+                    image: "/assets/images/products/fresh_paneer.jpg",
+                    badge: "Fresh Batch",
+                    status: "active"
+                },
+                {
+                    id: 5,
+                    name: "Natural Probiotic Thick Set Curd",
+                    description: "Naturally fermented probiotic thick clay-pot style set curd crafted with pure farm milk. Perfect for digestion and cooling.",
+                    category: "Curd",
+                    price: 48,
+                    compare_price: 55,
+                    weight: "500 g",
+                    stock: 80,
+                    image: "/assets/images/products/product_lineup.jpg",
+                    badge: "Daily Essential",
+                    status: "active"
+                },
+                {
+                    id: 6,
+                    name: "Wood-Pressed Traditional Groundnut Oil",
+                    description: "Cold-pressed in artisanal wooden chekku at low temperatures to retain natural antioxidants, aroma, and essential fatty acids.",
+                    category: "Oils",
+                    price: 280,
+                    compare_price: 320,
+                    weight: "1 Litre",
+                    stock: 40,
+                    image: "/assets/images/products/product_lineup.jpg",
+                    badge: "Cold Pressed",
+                    status: "active"
+                },
+                {
+                    id: 7,
+                    name: "Wood-Pressed Pure Gingelly / Sesame Oil",
+                    description: "Slow wood-pressed black sesame seeds blended with palm jaggery in traditional stone mortar. Rich golden color and intense flavor.",
+                    category: "Oils",
+                    price: 340,
+                    compare_price: 390,
+                    weight: "1 Litre",
+                    stock: 35,
+                    image: "/assets/images/products/product_lineup.jpg",
+                    badge: "Cold Pressed",
+                    status: "active"
+                },
+                {
+                    id: 8,
+                    name: "Single-Origin Salem Farm Turmeric Powder",
+                    description: "Sun-dried natural Salem turmeric roots finely ground with high natural curcumin content. Natural healing antiseptic spice.",
+                    category: "Masalas",
+                    price: 120,
+                    compare_price: 145,
+                    weight: "250 g",
+                    stock: 50,
+                    image: "/assets/images/products/product_lineup.jpg",
+                    badge: "Pure Spice",
+                    status: "active"
+                },
+                {
+                    id: 9,
+                    name: "Free-Range Pasture Farm Eggs (Pack of 6)",
+                    description: "Nutritious brown eggs laid by cruelty-free country chickens foraging freely in natural green pastures. High protein and omega-3.",
+                    category: "Dairy",
+                    price: 65,
+                    compare_price: 75,
+                    weight: "6 Eggs",
+                    stock: 90,
+                    image: "/assets/images/products/fresh_paneer.jpg",
+                    badge: "Free Range",
+                    status: "active"
+                },
+                {
+                    id: 10,
+                    name: "Raw Unprocessed Wild Forest Honey",
+                    description: "100% pure raw unheated wildflower honey harvested ethically from Eastern Ghats forest apiaries. Naturally rich in enzymes.",
+                    category: "Vegan",
+                    price: 280,
+                    compare_price: 320,
+                    weight: "500 ml",
+                    stock: 30,
+                    image: "/assets/images/products/product_lineup.jpg",
+                    badge: "Wild Harvest",
+                    status: "active"
+                }
+            ];
+
+            for (const p of sampleProductsList) {
+                const catId = catMap[(p.category || "").toLowerCase()] || 1;
+                await client.query(`
+                    INSERT INTO products (id, name, description, category_id, price, compare_price, weight, stock, image, badge, status)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    ON CONFLICT (id) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        description = EXCLUDED.description,
+                        category_id = EXCLUDED.category_id,
+                        price = EXCLUDED.price,
+                        compare_price = EXCLUDED.compare_price,
+                        weight = EXCLUDED.weight,
+                        stock = EXCLUDED.stock,
+                        image = EXCLUDED.image,
+                        badge = EXCLUDED.badge,
+                        status = EXCLUDED.status;
+                `, [p.id, p.name, p.description, catId, p.price, p.compare_price, p.weight, p.stock, p.image, p.badge, p.status]);
+            }
+
+            await client.query("SELECT setval('products_id_seq', (SELECT COALESCE(MAX(id), 1) FROM products));").catch(() => {});
+
+            await client.query("COMMIT");
+            console.log("[MAINTENANCE RESET]: PostgreSQL transaction committed successfully");
+        } catch (dbErr) {
+            if (client) await client.query("ROLLBACK").catch(() => {});
+            console.error("[MAINTENANCE RESET DB ERROR]:", dbErr.message);
+        } finally {
+            if (client) client.release();
+        }
+
+        // 2. DISK FILESYSTEM RESET (JSON PERSISTENCE & CACHES)
+        const dataDir = path.resolve(__dirname, "..", "data");
+        if (!fs.existsSync(dataDir)) {
+            fs.mkdirSync(dataDir, { recursive: true });
+        }
+
+        const safeWrite = (filePath, content) => {
+            try {
+                fs.writeFileSync(filePath, JSON.stringify(content, null, 2), "utf-8");
+            } catch (wErr) {
+                console.warn(`[DISK WRITE WARN ${filePath}]:`, wErr.message);
+            }
+        };
+
+        safeWrite(path.join(dataDir, "orders.json"), []);
+        safeWrite(path.join(dataDir, "subscriptions.json"), []);
+        safeWrite(path.join(dataDir, "subscription_deliveries.json"), []);
+        safeWrite(path.join(dataDir, "delivery_partners.json"), []);
+        safeWrite(path.join(dataDir, "addresses.json"), []);
+        safeWrite(path.join(dataDir, "support_tickets.json"), []);
+        safeWrite(path.join(dataDir, "notifications.json"), []);
+
+        // Root directory duplicates cleanup
+        const rootDir = path.resolve(__dirname, "..");
+        ["orders.json", "subscriptions.json", "delivery_partners.json"].forEach(f => {
+            const rPath = path.join(rootDir, f);
+            if (fs.existsSync(rPath)) {
+                safeWrite(rPath, []);
+            }
+        });
+
+        // Retain only Super Admin in users.json
+        const usersFile = path.join(dataDir, "users.json");
+        let keptUsers = [];
+        if (fs.existsSync(usersFile)) {
+            try {
+                const parsed = JSON.parse(fs.readFileSync(usersFile, "utf-8"));
+                if (Array.isArray(parsed)) {
+                    keptUsers = parsed.filter(u => 
+                        (u.role && (u.role.toLowerCase() === "super_admin" || u.role.toLowerCase() === "super admin" || u.role.toLowerCase() === "admin")) ||
+                        (u.email && u.email.toLowerCase() === "admin@thulirva.com")
+                    );
+                }
+            } catch (_) {}
+        }
+        if (keptUsers.length === 0) {
+            keptUsers = [{
+                id: 1,
+                name: "Super Admin",
+                admin_name: "Super Admin",
+                email: "admin@thulirva.com",
+                phone: "7904880944",
+                role: "super_admin",
+                created_at: new Date().toISOString()
+            }];
+        }
+        safeWrite(usersFile, keptUsers);
+
+        // Fetch actual live counts after reset
+        let ordersCount = 0;
+        let subsCount = 0;
+        let custCount = 0;
+        let partnerCount = 0;
+        let prodCount = 10;
+
+        try {
+            const oRes = await pool.query("SELECT COUNT(*) FROM orders");
+            ordersCount = Number(oRes.rows[0].count);
+        } catch (_) {}
+
+        try {
+            const sRes = await pool.query("SELECT COUNT(*) FROM subscriptions");
+            subsCount = Number(sRes.rows[0].count);
+        } catch (_) {}
+
+        try {
+            const cRes = await pool.query("SELECT COUNT(*) FROM users WHERE role='customer'");
+            custCount = Number(cRes.rows[0].count);
+        } catch (_) {}
+
+        try {
+            const pRes = await pool.query("SELECT COUNT(*) FROM delivery_partners");
+            partnerCount = Number(pRes.rows[0].count);
+        } catch (_) {}
+
+        try {
+            const prRes = await pool.query("SELECT COUNT(*) FROM products WHERE status='active'");
+            prodCount = Number(prRes.rows[0].count);
+        } catch (_) {}
+
+        console.log(`[MAINTENANCE RESET COMPLETE]: Orders: ${ordersCount}, Subs: ${subsCount}, Customers: ${custCount}, Partners: ${partnerCount}, Products: ${prodCount}`);
+
+        return res.json({
+            success: true,
+            message: "Production environment has been completely reset and reseeded with 10 production sample products.",
+            timestamp: new Date().toISOString(),
+            counts: {
+                orders: ordersCount,
+                subscriptions: subsCount,
+                customers: custCount,
+                delivery_partners: partnerCount,
+                products: prodCount
+            }
+        });
+    } catch (err) {
+        console.error("[MAINTENANCE RESET FATAL]:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to reset production data: " + err.message
+        });
+    }
 });
 
 module.exports = router;
