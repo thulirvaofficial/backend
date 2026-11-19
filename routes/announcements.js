@@ -194,6 +194,11 @@ router.post(["/", "/create", "/admin/create", "/admin"], authenticateToken, admi
         };
 
         const created = await createAnnouncement(data, adminName);
+        const io = req.app.get("io");
+        if (io) {
+            io.emit("announcement:updated", created);
+            io.emit("announcement:sync");
+        }
         res.json({
             success: true,
             message: "Announcement successfully created.",
@@ -230,6 +235,11 @@ router.all(["/:id", "/admin/:id"], authenticateToken, adminOnly, upload.single("
         try {
             const adminName = extractAdminName(req);
             await deleteAnnouncement(req.params.id, adminName);
+            const io = req.app.get("io");
+            if (io) {
+                io.emit("announcement:deleted", { id: req.params.id });
+                io.emit("announcement:sync");
+            }
             return res.json({
                 success: true,
                 message: `Announcement #${req.params.id} has been deleted.`
@@ -257,6 +267,11 @@ router.all(["/:id", "/admin/:id"], authenticateToken, adminOnly, upload.single("
         }
 
         const updated = await updateAnnouncement(req.params.id, updates, adminName);
+        const io = req.app.get("io");
+        if (io) {
+            io.emit("announcement:updated", updated);
+            io.emit("announcement:sync");
+        }
         res.json({
             success: true,
             message: "Announcement updated successfully.",
@@ -272,6 +287,11 @@ router.all(["/:id/delete", "/admin/:id/delete"], authenticateToken, adminOnly, a
     try {
         const adminName = extractAdminName(req);
         await deleteAnnouncement(req.params.id, adminName);
+        const io = req.app.get("io");
+        if (io) {
+            io.emit("announcement:deleted", { id: req.params.id });
+            io.emit("announcement:sync");
+        }
         res.json({
             success: true,
             message: `Announcement #${req.params.id} has been deleted.`
@@ -291,6 +311,11 @@ router.all(["/:id/toggle", "/admin/:id/toggle"], authenticateToken, adminOnly, a
             targetState = b.is_active === true || b.is_active === "true";
         }
         const toggled = await toggleAnnouncementStatus(req.params.id, targetState, adminName);
+        const io = req.app.get("io");
+        if (io) {
+            io.emit("announcement:status", toggled);
+            io.emit("announcement:sync");
+        }
         res.json({
             success: true,
             message: `Announcement #${req.params.id} is now ${toggled.is_active ? 'ACTIVE' : 'INACTIVE'}.`,
@@ -308,6 +333,11 @@ router.all(["/:id/publish", "/admin/:id/publish"], authenticateToken, adminOnly,
         const b = req.body || {};
         const isPublished = b.is_published === true || b.is_published === "true";
         const result = await setAnnouncementPublish(req.params.id, isPublished, adminName);
+        const io = req.app.get("io");
+        if (io) {
+            io.emit("announcement:updated", result);
+            io.emit("announcement:sync");
+        }
         res.json({
             success: true,
             message: `Announcement #${req.params.id} ${result.is_published ? 'published' : 'unpublished'}.`,

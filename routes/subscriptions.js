@@ -794,6 +794,7 @@ router.post("/calculate-price", async (req, res) => {
         return res.json({
             success: true,
             total_price: result.total_price,
+            calculated_price: result.total_price,
             price_per_delivery: result.price_per_delivery,
             data: result
         });

@@ -36,12 +36,12 @@
     "accent_color": "#86EFAC",
     "cta_text": "Explore Products",
     "cta_url": "/pages/shop.html",
-    "is_active": true,
+    "is_active": false,
     "is_published": true,
     "send_notification": false,
     "priority": 2,
     "created_at": "2026-11-17T07:16:40.829Z",
-    "updated_at": "2026-11-17T10:30:38.200Z",
+    "updated_at": "2026-11-19T20:20:00.000Z",
     "created_by": "Super Admin",
     "updated_by": "Super Admin"
   }
