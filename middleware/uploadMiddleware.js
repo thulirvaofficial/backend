@@ -5,9 +5,10 @@ const fs = require("fs");
 const PROOF_UPLOADS_DIR = path.resolve(__dirname, "..", "public", "uploads", "delivery_proofs");
 const PARTNER_UPLOADS_DIR = path.resolve(__dirname, "..", "public", "uploads", "partners");
 const USER_UPLOADS_DIR = path.resolve(__dirname, "..", "public", "uploads", "profiles");
+const CATEGORY_UPLOADS_DIR = path.resolve(__dirname, "..", "public", "uploads", "categories");
 
 // Ensure upload dirs exist
-[PROOF_UPLOADS_DIR, PARTNER_UPLOADS_DIR, USER_UPLOADS_DIR].forEach(dir => {
+[PROOF_UPLOADS_DIR, PARTNER_UPLOADS_DIR, USER_UPLOADS_DIR, CATEGORY_UPLOADS_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
     }
@@ -188,12 +189,92 @@ const uploadUserProfilePhoto = (req, res, next) => {
     });
 };
 
+// 4. Category Image Storage (Max 5MB, JPG/PNG/WEBP)
+const categoryStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        if (!fs.existsSync(CATEGORY_UPLOADS_DIR)) {
+            try { fs.mkdirSync(CATEGORY_UPLOADS_DIR, { recursive: true }); } catch (_) {}
+        }
+        cb(null, CATEGORY_UPLOADS_DIR);
+    },
+    filename: (req, file, cb) => {
+        let ext = path.extname(file.originalname).toLowerCase();
+        if (!ext || ext === "." || ext === ".tmp") ext = ".jpg";
+        const cleanExt = ext.startsWith(".") ? ext : `.${ext}`;
+        const rawBase = path.basename(file.originalname, ext);
+        const cleanBase = rawBase.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 30) || "category";
+        const uniqueSuffix = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+        cb(null, `cat_${cleanBase}_${uniqueSuffix}${cleanExt}`);
+    }
+});
+
+const CATEGORY_ALLOWED_EXTS = /^(jpeg|jpg|png|webp)$/i;
+
+function categoryFileFilter(req, file, cb) {
+    const ext = path.extname(file.originalname).toLowerCase().replace(".", "");
+    const mime = (file.mimetype || "").toLowerCase();
+    const isValidExt = CATEGORY_ALLOWED_EXTS.test(ext);
+    const isValidMime = mime === "image/jpeg" || mime === "image/png" || mime === "image/webp" || mime === "image/jpg";
+
+    if (isValidExt || isValidMime || mime.startsWith("image/")) {
+        cb(null, true);
+    } else {
+        cb(new Error("Invalid file format. Only JPG, JPEG, PNG, and WEBP images are allowed."));
+    }
+}
+
+const uploadCategoryMulter = multer({
+    storage: categoryStorage,
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB maximum
+    fileFilter: categoryFileFilter
+});
+
+const uploadCategoryImage = (req, res, next) => {
+    const ct = (req.headers["content-type"] || "").toLowerCase();
+    if (!ct.includes("multipart/form-data")) {
+        return next();
+    }
+
+    const handler = uploadCategoryMulter.fields([
+        { name: "image", maxCount: 1 },
+        { name: "category_image", maxCount: 1 },
+        { name: "file", maxCount: 1 },
+        { name: "photo", maxCount: 1 }
+    ]);
+
+    handler(req, res, (err) => {
+        if (err) {
+            console.warn("[UPLOAD CATEGORY WARNING]:", err.message);
+            if (err.code === "LIMIT_FILE_SIZE") {
+                return res.status(400).json({
+                    success: false,
+                    message: "File size exceeds 5 MB maximum limit. Please select a smaller image."
+                });
+            }
+            return res.status(400).json({
+                success: false,
+                message: err.message || "Failed to upload category image."
+            });
+        }
+        if (req.files) {
+            const found = req.files["image"]?.[0] ||
+                          req.files["category_image"]?.[0] ||
+                          req.files["file"]?.[0] ||
+                          req.files["photo"]?.[0];
+            if (found) req.file = found;
+        }
+        next();
+    });
+};
+
 module.exports = {
     uploadDeliveryProof,
     uploadPartnerPhoto,
     uploadUserProfilePhoto,
+    uploadCategoryImage,
     USER_UPLOADS_DIR,
     PARTNER_UPLOADS_DIR,
-    PROOF_UPLOADS_DIR
+    PROOF_UPLOADS_DIR,
+    CATEGORY_UPLOADS_DIR
 };
 

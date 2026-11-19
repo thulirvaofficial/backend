@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { pool } = require("../config/database");
 const { authenticateToken, adminOnly } = require("../middleware/auth");
+const { uploadCategoryImage, CATEGORY_UPLOADS_DIR } = require("../middleware/uploadMiddleware");
 
 const router = express.Router();
 
@@ -58,6 +59,40 @@ function saveBase64Image(image, prefix = "cat") {
         }
     }
     return image;
+}
+
+function cleanupOldCategoryImage(oldPath, newPath = null, excludeCatId = null) {
+    if (!oldPath || typeof oldPath !== "string") return;
+    if (newPath && oldPath === newPath) return; // Same image, do not delete
+    // Only cleanup files within /uploads/categories/
+    if (!oldPath.includes("/uploads/categories/")) return;
+
+    try {
+        const rawFile = oldPath.split("?")[0];
+        const filename = path.basename(rawFile);
+        // Prevent directory traversal or deleting non-category files
+        if (!filename || filename.includes("..") || filename.includes("/") || filename.includes("\\")) return;
+
+        // Check if any other category in local database still references this filename
+        const local = loadLocalCategories();
+        const isInUseByOther = local.some(c => {
+            if (excludeCatId && (Number(c.id) === Number(excludeCatId) || Number(c.category_id) === Number(excludeCatId))) {
+                return false;
+            }
+            const imgs = [c.image, c.category_image, c.website_image, c.mobile_image, c.appImage];
+            return imgs.some(img => img && typeof img === "string" && img.includes(filename) && (newPath ? !newPath.includes(filename) : true));
+        });
+
+        if (!isInUseByOther) {
+            const fullPath = path.join(CATEGORY_UPLOADS_DIR, filename);
+            if (fs.existsSync(fullPath)) {
+                fs.unlinkSync(fullPath);
+                console.log(`[CATEGORIES] Cleaned up orphaned category image: ${filename}`);
+            }
+        }
+    } catch (err) {
+        console.warn("[CATEGORIES] Could not delete orphaned image:", err.message);
+    }
 }
 
 function normalizeCategory(r) {
@@ -184,8 +219,34 @@ router.get("/:id", async (req, res) => {
 });
 
 /* =========================================================================
-   ADMIN CATEGORY MANAGEMENT APIs (Create, Update, Delete)
+   ADMIN CATEGORY MANAGEMENT APIs (Create, Update, Delete, Upload)
 ========================================================================= */
+
+// UPLOAD CATEGORY IMAGE (Admin Only)
+router.post(["/upload", "/upload-image"], authenticateToken, adminOnly, uploadCategoryImage, (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: "No image file provided. Please choose a JPG, PNG, or WEBP file (Max 5MB)."
+            });
+        }
+
+        const relativeUrl = `/uploads/categories/${req.file.filename}`;
+        return res.json({
+            success: true,
+            message: "Category image uploaded successfully",
+            image_url: relativeUrl,
+            url: relativeUrl,
+            filename: req.file.filename,
+            original_name: req.file.originalname,
+            size: req.file.size,
+            mimetype: req.file.mimetype
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
 
 // CREATE CATEGORY (Admin Only)
 router.post(["/", "/create"], authenticateToken, adminOnly, async (req, res) => {
@@ -299,6 +360,9 @@ router.put(["/:id", "/update/:id"], authenticateToken, adminOnly, async (req, re
         const updatedActive = body.is_active !== undefined ? Boolean(body.is_active) : existing.is_active;
         const updatedIcon = body.category_icon || body.emoji || existing.category_icon || existing.emoji || "🥛";
 
+        const prevWebImg = existing.website_image || existing.image;
+        const prevMobImg = existing.mobile_image || existing.appImage || existing.category_image;
+
         let savedWebImg = existing.website_image || existing.image;
         if (body.website_image !== undefined || body.category_image !== undefined || body.image !== undefined) {
             savedWebImg = saveBase64Image(body.website_image || body.category_image || body.image, "cat_web");
@@ -356,6 +420,14 @@ router.put(["/:id", "/update/:id"], authenticateToken, adminOnly, async (req, re
         local.sort((a, b) => a.display_order - b.display_order || a.id - b.id);
         saveLocalCategories(local);
 
+        // Cleanup orphaned category image files if replaced or removed
+        if (prevWebImg && prevWebImg !== savedWebImg && prevWebImg !== savedMobImg) {
+            cleanupOldCategoryImage(prevWebImg, savedWebImg);
+        }
+        if (prevMobImg && prevMobImg !== savedMobImg && prevMobImg !== savedWebImg && prevMobImg !== prevWebImg) {
+            cleanupOldCategoryImage(prevMobImg, savedMobImg);
+        }
+
         return res.json({
             success: true,
             message: "Category updated successfully",
@@ -375,8 +447,16 @@ router.delete("/:id", authenticateToken, adminOnly, async (req, res) => {
         } catch (_) {}
 
         const local = loadLocalCategories();
+        const toDelete = local.find(c => Number(c.id) === id || Number(c.category_id) === id);
         const updated = local.filter(c => Number(c.id) !== id && Number(c.category_id) !== id);
         saveLocalCategories(updated);
+
+        if (toDelete) {
+            const img1 = toDelete.website_image || toDelete.image;
+            const img2 = toDelete.mobile_image || toDelete.category_image;
+            if (img1) cleanupOldCategoryImage(img1, null, id);
+            if (img2 && img2 !== img1) cleanupOldCategoryImage(img2, null, id);
+        }
 
         return res.json({ success: true, message: "Category deleted successfully" });
     } catch (err) {

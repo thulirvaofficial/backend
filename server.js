@@ -381,6 +381,7 @@ const backendAssetsUploadsPath = path.resolve(__dirname, "assets", "images", "up
 // Ensure upload directories exist
 [
     backendPublicUploadsPath,
+    path.join(backendPublicUploadsPath, "categories"),
     path.join(backendPublicUploadsPath, "partners"),
     path.join(backendPublicUploadsPath, "delivery_proofs"),
     path.join(backendPublicUploadsPath, "attendance"),
