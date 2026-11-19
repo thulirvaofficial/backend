@@ -170,17 +170,42 @@ function attachContentToProducts(products) {
     const allContent = loadProductContent();
     for (const p of products) {
         const c = allContent[p.id.toString()] || allContent[p.id] || null;
-        if (c) {
-            p.content = c;
-            p.highlights = c.highlights || [];
-            p.ingredients = c.ingredients || [];
-            p.nutritional_info = c.nutritional_info || null;
-            p.storage_instructions = c.storage_instructions || "";
-            p.usage_instructions = c.usage_instructions || "";
-            p.refund_policy = c.refund_policy || null;
-            p.shelf_life = c.shelf_life || "";
-            p.certification = c.certification || "";
-        }
+
+        // Parse JSON fields if they come from DB as strings
+        const parseJsonField = (val, fallback = []) => {
+            if (!val) return fallback;
+            if (Array.isArray(val) || (typeof val === 'object' && val !== null)) return val;
+            try { return JSON.parse(val); } catch { return fallback; }
+        };
+
+        p.short_description = p.short_description || (c && c.short_description) || "";
+        p.feature_badges = parseJsonField(p.feature_badges, (c && c.feature_badges) || []);
+        p.highlights = parseJsonField(p.highlights, (c && c.highlights) || []);
+        p.ingredients = parseJsonField(p.ingredients, (c && c.ingredients) || []);
+        p.nutritional_info = parseJsonField(p.nutritional_info, (c && c.nutritional_info) || null);
+        p.storage_instructions = p.storage_instructions || (c && c.storage_instructions) || "";
+        p.usage_instructions = p.usage_instructions || (c && c.usage_instructions) || "";
+        p.refund_policy = parseJsonField(p.refund_policy, (c && c.refund_policy) || null);
+        p.shelf_life = p.shelf_life || (c && c.shelf_life) || "";
+        p.certification = p.certification || (c && c.certification) || "";
+        p.seo_title = p.seo_title || (c && c.seo_title) || "";
+        p.seo_description = p.seo_description || (c && c.seo_description) || "";
+
+        p.content = {
+            product_id: p.id,
+            short_description: p.short_description,
+            feature_badges: p.feature_badges,
+            highlights: p.highlights,
+            ingredients: p.ingredients,
+            nutritional_info: p.nutritional_info,
+            storage_instructions: p.storage_instructions,
+            usage_instructions: p.usage_instructions,
+            refund_policy: p.refund_policy,
+            shelf_life: p.shelf_life,
+            certification: p.certification,
+            seo_title: p.seo_title,
+            seo_description: p.seo_description
+        };
     }
     return products;
 }
@@ -422,18 +447,33 @@ router.delete("/variants/:variantId", authenticateToken, adminOnly, async (req, 
 /* CREATE PRODUCT */
 router.post("/", authenticateToken, adminOnly, async (req, res) => {
     try {
-        const { name, description, category, category_id, price, compare_price, sku, stock, weight, image, badge, status } = req.body;
+        const {
+            name, description, short_description, category, category_id,
+            price, compare_price, sku, stock, weight, image, badge, status,
+            feature_badges, highlights, ingredients, storage_instructions, usage_instructions,
+            seo_title, seo_description
+        } = req.body;
         const savedImage = saveBase64Image(image);
         let newProd = null;
 
+        const featureBadgesJson = JSON.stringify(Array.isArray(feature_badges) ? feature_badges : []);
+        const highlightsJson = JSON.stringify(Array.isArray(highlights) ? highlights : []);
+        const ingredientsJson = JSON.stringify(Array.isArray(ingredients) ? ingredients : []);
+
         try {
             const result = await pool.query(`
-                INSERT INTO products (name, description, category_id, price, compare_price, sku, stock, weight, image, badge, status)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                INSERT INTO products (
+                    name, description, short_description, category_id, price, compare_price,
+                    sku, stock, weight, image, badge, status,
+                    feature_badges, highlights, ingredients, storage_instructions, usage_instructions,
+                    seo_title, seo_description
+                )
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
                 RETURNING *
             `, [
                 name || "Product",
                 description || "",
+                short_description || "",
                 category_id || null,
                 Number(price) || 0,
                 compare_price ? Number(compare_price) : null,
@@ -442,10 +482,19 @@ router.post("/", authenticateToken, adminOnly, async (req, res) => {
                 weight || null,
                 savedImage || null,
                 badge || null,
-                status || "active"
+                status || "active",
+                featureBadgesJson,
+                highlightsJson,
+                ingredientsJson,
+                storage_instructions || "",
+                usage_instructions || "",
+                seo_title || null,
+                seo_description || null
             ]);
             newProd = result.rows[0];
-        } catch (_) { }
+        } catch (dbErr) {
+            console.warn("[CREATE PRODUCT DB WARN]:", dbErr.message);
+        }
 
         const localList = loadLocalProducts();
         const nextId = newProd?.id || (localList.reduce((max, p) => Math.max(max, p.id || 0), 0) + 1);
@@ -454,6 +503,7 @@ router.post("/", authenticateToken, adminOnly, async (req, res) => {
                 id: nextId,
                 name: name || "Product",
                 description: description || "",
+                short_description: short_description || "",
                 category: category || "General",
                 category_name: category || "General",
                 category_id: category_id || 1,
@@ -463,13 +513,37 @@ router.post("/", authenticateToken, adminOnly, async (req, res) => {
                 stock: stock !== undefined ? Number(stock) : 50,
                 image: savedImage || "/assets/images/products/fresh_cow_milk.jpg",
                 badge: badge || null,
-                status: status || "active"
+                status: status || "active",
+                feature_badges: Array.isArray(feature_badges) ? feature_badges : [],
+                highlights: Array.isArray(highlights) ? highlights : [],
+                ingredients: Array.isArray(ingredients) ? ingredients : [],
+                storage_instructions: storage_instructions || "",
+                usage_instructions: usage_instructions || "",
+                seo_title: seo_title || "",
+                seo_description: seo_description || ""
             };
         }
+
+        // Keep local products and content in sync
         localList.unshift(newProd);
         saveLocalProducts(localList);
 
-        return res.json({ success: true, product: newProd });
+        const allContent = loadProductContent();
+        allContent[newProd.id.toString()] = {
+            product_id: newProd.id,
+            short_description: short_description || newProd.short_description || "",
+            feature_badges: Array.isArray(feature_badges) ? feature_badges : (newProd.feature_badges || []),
+            highlights: Array.isArray(highlights) ? highlights : (newProd.highlights || []),
+            ingredients: Array.isArray(ingredients) ? ingredients : (newProd.ingredients || []),
+            storage_instructions: storage_instructions || newProd.storage_instructions || "",
+            usage_instructions: usage_instructions || newProd.usage_instructions || "",
+            seo_title: seo_title || newProd.seo_title || "",
+            seo_description: seo_description || newProd.seo_description || ""
+        };
+        saveProductContent(allContent);
+
+        const enriched = attachContentToProducts([newProd]);
+        return res.json({ success: true, product: enriched[0] });
     } catch (error) {
         console.error("Create product error:", error.message);
         res.status(500).json({ success: false, message: error.message });
@@ -480,52 +554,107 @@ router.post("/", authenticateToken, adminOnly, async (req, res) => {
 router.put("/:id", authenticateToken, adminOnly, async (req, res) => {
     try {
         const id = parseInt(req.params.id);
-        const { name, description, category, category_id, price, compare_price, sku, stock, weight, image, status, badge } = req.body;
+        const {
+            name, description, short_description, category, category_id,
+            price, compare_price, sku, stock, weight, image, status, badge,
+            feature_badges, highlights, ingredients, storage_instructions, usage_instructions,
+            seo_title, seo_description
+        } = req.body;
         const savedImage = saveBase64Image(image);
         let updatedProd = null;
+
+        const featureBadgesJson = feature_badges !== undefined ? JSON.stringify(feature_badges) : null;
+        const highlightsJson = highlights !== undefined ? JSON.stringify(highlights) : null;
+        const ingredientsJson = ingredients !== undefined ? JSON.stringify(ingredients) : null;
 
         try {
             const result = await pool.query(`
                 UPDATE products
                 SET name=COALESCE($1, name),
                     description=COALESCE($2, description),
-                    category_id=COALESCE($3, category_id),
-                    price=COALESCE($4, price),
-                    compare_price=COALESCE($5, compare_price),
-                    sku=COALESCE($6, sku),
-                    stock=COALESCE($7, stock),
-                    weight=COALESCE($8, weight),
-                    image=COALESCE($9, image),
-                    status=COALESCE($10, status),
-                    badge=COALESCE($11, badge),
+                    short_description=COALESCE($3, short_description),
+                    category_id=COALESCE($4, category_id),
+                    price=COALESCE($5, price),
+                    compare_price=COALESCE($6, compare_price),
+                    sku=COALESCE($7, sku),
+                    stock=COALESCE($8, stock),
+                    weight=COALESCE($9, weight),
+                    image=COALESCE($10, image),
+                    status=COALESCE($11, status),
+                    badge=COALESCE($12, badge),
+                    feature_badges=COALESCE($13::jsonb, feature_badges),
+                    highlights=COALESCE($14::jsonb, highlights),
+                    ingredients=COALESCE($15::jsonb, ingredients),
+                    storage_instructions=COALESCE($16, storage_instructions),
+                    usage_instructions=COALESCE($17, usage_instructions),
+                    seo_title=COALESCE($18, seo_title),
+                    seo_description=COALESCE($19, seo_description),
                     updated_at=CURRENT_TIMESTAMP
-                WHERE id=$12
+                WHERE id=$20
                 RETURNING *
-            `, [name, description, category_id, price !== undefined ? Number(price) : null, compare_price !== undefined ? Number(compare_price) : null, sku, stock !== undefined ? Number(stock) : null, weight, savedImage, status, badge, id]);
+            `, [
+                name, description, short_description, category_id,
+                price !== undefined ? Number(price) : null,
+                compare_price !== undefined ? Number(compare_price) : null,
+                sku, stock !== undefined ? Number(stock) : null,
+                weight, savedImage, status, badge,
+                featureBadgesJson, highlightsJson, ingredientsJson,
+                storage_instructions, usage_instructions,
+                seo_title, seo_description,
+                id
+            ]);
             if (result.rows.length > 0) updatedProd = result.rows[0];
-        } catch (_) { }
+        } catch (dbErr) {
+            console.warn("[UPDATE PRODUCT DB WARN]:", dbErr.message);
+        }
 
         const localList = loadLocalProducts();
         const idx = localList.findIndex(p => p.id === id);
         if (idx !== -1) {
             localList[idx] = Object.assign({}, localList[idx], {
-                name: name || localList[idx].name,
+                name: name !== undefined ? name : localList[idx].name,
                 description: description !== undefined ? description : localList[idx].description,
-                category: category || localList[idx].category,
-                category_name: category || localList[idx].category_name,
+                short_description: short_description !== undefined ? short_description : localList[idx].short_description,
+                category: category !== undefined ? category : localList[idx].category,
+                category_name: category !== undefined ? category : localList[idx].category_name,
                 price: price !== undefined ? Number(price) : localList[idx].price,
                 compare_price: compare_price !== undefined ? Number(compare_price) : localList[idx].compare_price,
-                weight: weight || localList[idx].weight,
+                weight: weight !== undefined ? weight : localList[idx].weight,
                 stock: stock !== undefined ? Number(stock) : localList[idx].stock,
                 image: savedImage || localList[idx].image,
                 badge: badge !== undefined ? badge : localList[idx].badge,
-                status: status || localList[idx].status
+                status: status !== undefined ? status : localList[idx].status,
+                feature_badges: feature_badges !== undefined ? feature_badges : localList[idx].feature_badges,
+                highlights: highlights !== undefined ? highlights : localList[idx].highlights,
+                ingredients: ingredients !== undefined ? ingredients : localList[idx].ingredients,
+                storage_instructions: storage_instructions !== undefined ? storage_instructions : localList[idx].storage_instructions,
+                usage_instructions: usage_instructions !== undefined ? usage_instructions : localList[idx].usage_instructions,
+                seo_title: seo_title !== undefined ? seo_title : localList[idx].seo_title,
+                seo_description: seo_description !== undefined ? seo_description : localList[idx].seo_description
             });
             updatedProd = localList[idx];
             saveLocalProducts(localList);
         }
 
-        return res.json({ success: true, product: updatedProd || req.body });
+        // Update product_content.json
+        const allContent = loadProductContent();
+        const existingContent = allContent[id.toString()] || {};
+        allContent[id.toString()] = {
+            ...existingContent,
+            product_id: id,
+            short_description: short_description !== undefined ? short_description : existingContent.short_description,
+            feature_badges: feature_badges !== undefined ? feature_badges : existingContent.feature_badges,
+            highlights: highlights !== undefined ? highlights : existingContent.highlights,
+            ingredients: ingredients !== undefined ? ingredients : existingContent.ingredients,
+            storage_instructions: storage_instructions !== undefined ? storage_instructions : existingContent.storage_instructions,
+            usage_instructions: usage_instructions !== undefined ? usage_instructions : existingContent.usage_instructions,
+            seo_title: seo_title !== undefined ? seo_title : existingContent.seo_title,
+            seo_description: seo_description !== undefined ? seo_description : existingContent.seo_description
+        };
+        saveProductContent(allContent);
+
+        const enriched = attachContentToProducts([updatedProd || req.body]);
+        return res.json({ success: true, product: enriched[0] });
     } catch (error) {
         console.error("Update product error:", error.message);
         res.status(500).json({ success: false, message: error.message });
@@ -541,6 +670,9 @@ router.delete("/:id", authenticateToken, adminOnly, async (req, res) => {
         } catch (_) { }
         const localList = loadLocalProducts().filter(p => p.id !== id);
         saveLocalProducts(localList);
+        const allContent = loadProductContent();
+        delete allContent[id.toString()];
+        saveProductContent(allContent);
         res.json({ success: true, message: "Product deleted" });
     } catch (error) {
         console.error("Delete product error:", error.message);

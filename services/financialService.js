@@ -771,6 +771,8 @@ async function submitCodRemittance({
         const { sendNotification } = require("./notificationService");
         await sendNotification({
             userId: partner_id,
+            recipientRole: "delivery_partner",
+            appType: "partner",
             title: "COD Remittance Submitted",
             message: `Your COD cash remittance request of ₹${numAmount} (Ref: ${transaction_id || remittanceId}) was submitted and is awaiting Admin verification.`,
             type: "cod_remittance",
@@ -847,6 +849,8 @@ async function reviewCodRemittance({
         if (status === "approved") {
             await sendNotification({
                 userId: partnerId,
+                recipientRole: "delivery_partner",
+                appType: "partner",
                 title: "COD Remittance Confirmed",
                 message: `Your COD remittance of ₹${remittance.amount} has been verified and APPROVED by Admin. Your remaining COD capacity has been restored to ₹${balance.remaining_cod_capacity}.`,
                 type: "cod_remittance",
@@ -855,6 +859,8 @@ async function reviewCodRemittance({
         } else {
             await sendNotification({
                 userId: partnerId,
+                recipientRole: "delivery_partner",
+                appType: "partner",
                 title: "COD Remittance Rejected",
                 message: `Your COD remittance of ₹${remittance.amount} was REJECTED: ${remittance.rejection_reason || 'Verification failure'}. Please contact Admin.`,
                 type: "cod_remittance",
@@ -923,6 +929,8 @@ async function recordCashHandover({
         emitToPartner(partner_id, "cod:balance_updated", balance);
         await sendNotification({
             userId: partner_id,
+            recipientRole: "delivery_partner",
+            appType: "partner",
             title: "Cash Handover Confirmed",
             message: `Official Admin Cash Receipt: ₹${numAmount} cash handover confirmed by ${admin_name}. Remaining COD Capacity: ₹${balance.remaining_cod_capacity}.`,
             type: "cod_remittance",
@@ -1167,6 +1175,8 @@ async function executePartnerPayout({
 
         await sendNotification({
             userId: partner_id,
+            recipientRole: "delivery_partner",
+            appType: "partner",
             title: "Payout Successful ✓",
             message: notifMsg,
             type: "payout",

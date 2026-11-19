@@ -593,19 +593,25 @@ const registerFcmTokenHandler = async (req, res) => {
         const token = rawToken.trim();
         const platform = req.body.platform || 'android';
         const partnerId = req.partner?.partner_id || req.body.partner_id || req.body.user_id || 'delivery_partner';
+        const deviceId = req.body.device_id || req.body.deviceId || null;
 
-        // 1. Update database
+        // 1. Update database with strict partner role and app_type
         try {
             await pool.query(
-                `INSERT INTO device_tokens (token, device_type, user_id, role, is_active, updated_at)
-                 VALUES ($1, $2, $3, 'partner', true, CURRENT_TIMESTAMP)
+                `INSERT INTO device_tokens (token, device_type, user_id, role, app_type, device_id, is_active, updated_at)
+                 VALUES ($1, $2, $3, 'delivery_partner', 'partner', $4, true, CURRENT_TIMESTAMP)
                  ON CONFLICT (token) DO UPDATE
-                 SET user_id = EXCLUDED.user_id, role = 'partner', is_active = true, updated_at = CURRENT_TIMESTAMP`,
-                [token, platform, partnerId]
+                 SET user_id = EXCLUDED.user_id,
+                     role = 'delivery_partner',
+                     app_type = 'partner',
+                     device_id = COALESCE(EXCLUDED.device_id, device_tokens.device_id),
+                     is_active = true,
+                     updated_at = CURRENT_TIMESTAMP`,
+                [token, platform, partnerId ? partnerId.toString() : null, deviceId]
             );
             await pool.query(
                 `UPDATE delivery_partners SET fcm_token = $1, updated_at = NOW() WHERE partner_id = $2`,
-                [token, partnerId]
+                [token, partnerId ? partnerId.toString() : null]
             );
         } catch (dbErr) {
             // Non-blocking database update
@@ -615,8 +621,10 @@ const registerFcmTokenHandler = async (req, res) => {
         addDeviceToken({
             token,
             platform,
-            user_id: partnerId,
-            role: 'partner'
+            user_id: partnerId ? partnerId.toString() : null,
+            role: 'delivery_partner',
+            app_type: 'partner',
+            device_id: deviceId
         });
 
         // 3. Update disk partner record if exists

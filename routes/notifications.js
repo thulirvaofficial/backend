@@ -1,8 +1,8 @@
 const express = require("express");
 const { pool } = require("../config/database");
 const { authenticateToken, adminOnly } = require("../middleware/auth");
-const { IN_APP_NOTIFICATIONS, sendNotification } = require("../services/notificationService");
-const { DEVICE_TOKENS, addDeviceToken, getDeviceTokens } = require("../services/tokenStore");
+const { IN_APP_NOTIFICATIONS, sendNotification, NOTIFICATION_DISPATCH_LOGS } = require("../services/notificationService");
+const { DEVICE_TOKENS, addDeviceToken, getDeviceTokens, normalizeRoleAndAppType } = require("../services/tokenStore");
 
 const router = express.Router();
 
@@ -107,31 +107,55 @@ router.put("/user/:identifier/read-all", async (req, res) => {
 
 /* REGISTER FCM / APNS DEVICE TOKEN */
 router.post("/register-token", async (req, res) => {
-    const { token, platform, user_id, role } = req.body;
+    const { token, platform, user_id, role, app_type, appType, device_id, deviceId } = req.body;
     if (!token) {
         return res.status(400).json({ success: false, message: "Token is required" });
     }
 
+    const norm = normalizeRoleAndAppType(role, app_type || appType, user_id);
+    const resolvedDeviceId = device_id || deviceId || null;
+
     try {
+        await pool.query(
+            `INSERT INTO device_tokens (token, device_type, user_id, role, app_type, device_id, is_active, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, true, CURRENT_TIMESTAMP)
+             ON CONFLICT (token) DO UPDATE
+             SET user_id = EXCLUDED.user_id,
+                 role = EXCLUDED.role,
+                 app_type = EXCLUDED.app_type,
+                 device_id = COALESCE(EXCLUDED.device_id, device_tokens.device_id),
+                 is_active = true,
+                 updated_at = CURRENT_TIMESTAMP`,
+            [token, platform || 'android', user_id ? user_id.toString() : null, norm.role, norm.app_type, resolvedDeviceId]
+        );
+    } catch (dbErr) {
+        // Fallback for minimal schema
         await pool.query(
             `INSERT INTO device_tokens (token, device_type, user_id, role, is_active, updated_at)
              VALUES ($1, $2, $3, $4, true, CURRENT_TIMESTAMP)
              ON CONFLICT (token) DO UPDATE
              SET user_id = EXCLUDED.user_id, role = EXCLUDED.role, is_active = true, updated_at = CURRENT_TIMESTAMP`,
-            [token, platform || 'android', user_id || null, role || 'customer']
-        );
-    } catch {}
+            [token, platform || 'android', user_id ? user_id.toString() : null, norm.role]
+        ).catch(() => {});
+    }
 
     // Synchronize to shared token store
     addDeviceToken({
         token,
         platform: platform || "android",
-        user_id: user_id || null,
-        role: role || "customer"
+        user_id: user_id ? user_id.toString() : null,
+        role: norm.role,
+        app_type: norm.app_type,
+        device_id: resolvedDeviceId
     });
 
-    console.log(`✓ [TOKEN REGISTERED] Device push token saved for ${role || 'customer'} (user_id: ${user_id || 'guest'})`);
-    res.json({ success: true, message: "Device push token registered successfully" });
+    console.log(`✓ [TOKEN REGISTERED] Device push token saved for ${norm.role} [${norm.app_type}] (user_id: ${user_id || 'guest'})`);
+    res.json({
+        success: true,
+        message: "Device push token registered successfully",
+        role: norm.role,
+        app_type: norm.app_type
+    });
 });
 
 /* UPDATE NOTIFICATION PREFERENCE (PUSH / MORNING REMINDER) */
@@ -371,8 +395,8 @@ router.post("/deactivate-token", async (req, res) => {
     res.json({ success: true, message: "Token deactivated successfully" });
 });
 
-/* NOTIFICATION DIAGNOSTIC ENDPOINT (REQUIREMENT 9) */
-router.get("/diagnostic", authenticateToken, adminOnly, async (req, res) => {
+/* NOTIFICATION DIAGNOSTIC & STATS ENDPOINT (REQUIREMENT 9) */
+const diagnosticHandler = async (req, res) => {
     const fs = require("fs");
     const path = require("path");
     const defaultPath = path.join(__dirname, "..", "config", "firebase-service-account.json");
@@ -414,22 +438,24 @@ router.get("/diagnostic", authenticateToken, adminOnly, async (req, res) => {
         } catch (_) {}
     }
 
-    let tokenStats = { totalActive: 0, adminActive: 0, customerActive: 0, recentTokens: [] };
+    let tokenStats = { totalActive: 0, adminActive: 0, customerActive: 0, partnerActive: 0, recentTokens: [] };
     try {
         const statsRes = await pool.query(`
             SELECT 
                 COUNT(*) as total,
                 COUNT(*) FILTER (WHERE role = 'admin' AND is_active = true) as admin_count,
-                COUNT(*) FILTER (WHERE role != 'admin' AND is_active = true) as customer_count
+                COUNT(*) FILTER (WHERE (role IN ('partner', 'delivery_partner') OR app_type = 'partner') AND is_active = true) as partner_count,
+                COUNT(*) FILTER (WHERE role = 'customer' AND (app_type = 'customer' OR app_type IS NULL) AND is_active = true) as customer_count
             FROM device_tokens
         `);
         if (statsRes.rows.length) {
             tokenStats.totalActive = parseInt(statsRes.rows[0].total || 0);
             tokenStats.adminActive = parseInt(statsRes.rows[0].admin_count || 0);
+            tokenStats.partnerActive = parseInt(statsRes.rows[0].partner_count || 0);
             tokenStats.customerActive = parseInt(statsRes.rows[0].customer_count || 0);
         }
         const recentRes = await pool.query(`
-            SELECT id, user_id, role, device_type, is_active, SUBSTRING(token, 1, 15) as token_prefix, updated_at
+            SELECT id, user_id, role, app_type, device_type, is_active, SUBSTRING(token, 1, 15) as token_prefix, updated_at
             FROM device_tokens ORDER BY updated_at DESC LIMIT 10
         `);
         tokenStats.recentTokens = recentRes.rows;
@@ -437,7 +463,8 @@ router.get("/diagnostic", authenticateToken, adminOnly, async (req, res) => {
         tokenStats.error = err.message;
         tokenStats.inMemoryCount = DEVICE_TOKENS.length;
         tokenStats.inMemoryAdmin = DEVICE_TOKENS.filter(t => t.role === 'admin' && t.is_active).length;
-        tokenStats.inMemoryCustomer = DEVICE_TOKENS.filter(t => t.role !== 'admin' && t.is_active).length;
+        tokenStats.inMemoryPartner = DEVICE_TOKENS.filter(t => (t.role === 'delivery_partner' || t.role === 'partner' || t.app_type === 'partner') && t.is_active).length;
+        tokenStats.inMemoryCustomer = DEVICE_TOKENS.filter(t => (t.role === 'customer' || t.app_type === 'customer') && t.role !== 'partner' && t.role !== 'delivery_partner' && t.role !== 'admin' && t.is_active).length;
     }
 
     const { NOTIFICATION_DISPATCH_LOGS } = require("../services/notificationService");
@@ -460,7 +487,9 @@ router.get("/diagnostic", authenticateToken, adminOnly, async (req, res) => {
         tokens: tokenStats,
         recentDispatches: (NOTIFICATION_DISPATCH_LOGS || []).slice(0, 30)
     });
-});
+};
+router.get("/diagnostic", authenticateToken, adminOnly, diagnosticHandler);
+router.get("/stats", authenticateToken, adminOnly, diagnosticHandler);
 
 /* INSTALL / UPDATE FIREBASE SERVICE ACCOUNT KEY ENDPOINT */
 router.post("/install-key", authenticateToken, adminOnly, async (req, res) => {

@@ -306,5 +306,115 @@
     },
     "shelf_life": "18 Months",
     "certification": "FSSAI Certified • 100% Raw Forest Harvest"
+  },
+  "11": {
+    "product_id": 11,
+    "short_description": "Pure A2 Gir Cow raw whole milk fresh from pasture.",
+    "feature_badges": [
+      {
+        "icon": "🌿",
+        "text": "100% Raw A2 Vedic",
+        "enabled": true
+      },
+      {
+        "icon": "🛡️",
+        "text": "Preservative Free",
+        "enabled": false
+      },
+      {
+        "icon": "🐄",
+        "text": "Free Grazing Gir Cows",
+        "enabled": true
+      },
+      {
+        "icon": "❄️",
+        "text": "Chilled within 15 mins",
+        "enabled": true
+      },
+      {
+        "icon": "🥛",
+        "text": "Naturally Sweet Taste",
+        "enabled": true
+      }
+    ],
+    "highlights": [
+      {
+        "icon": "✓",
+        "text": "Natural golden cream layer with high Beta-Casein A2 protein"
+      },
+      {
+        "icon": "✓",
+        "text": "Zero adulteration, certified antibiotic & chemical free"
+      },
+      {
+        "icon": "✓",
+        "text": "Doorstep morning chilled delivery in glass packaging"
+      }
+    ],
+    "ingredients": [
+      {
+        "name": "Pure Raw Whole A2 Desi Cow Milk",
+        "note": "100% natural single origin"
+      }
+    ],
+    "storage_instructions": "Keep chilled between 2°C and 4°C. Consume within 48 hours.",
+    "usage_instructions": "Boil gently before consumption. Perfect for traditional filter coffee and curd.",
+    "seo_title": "Pure A2 Vedic Desi Gir Cow Milk | THULIRVA Farms",
+    "seo_description": "Order farm fresh pure raw A2 Desi Gir cow milk delivered daily morning before 7 AM across Chennai and Kanchipuram."
+  },
+  "12": {
+    "product_id": 12,
+    "short_description": "Pure A2 Gir Cow raw whole milk fresh from pasture.",
+    "feature_badges": [
+      {
+        "icon": "🌿",
+        "text": "100% Raw A2 Vedic",
+        "enabled": true
+      },
+      {
+        "icon": "🛡️",
+        "text": "Preservative Free",
+        "enabled": false
+      },
+      {
+        "icon": "🐄",
+        "text": "Free Grazing Gir Cows",
+        "enabled": true
+      },
+      {
+        "icon": "❄️",
+        "text": "Chilled within 15 mins",
+        "enabled": true
+      },
+      {
+        "icon": "🥛",
+        "text": "Naturally Sweet Taste",
+        "enabled": true
+      }
+    ],
+    "highlights": [
+      {
+        "icon": "✓",
+        "text": "Natural golden cream layer with high Beta-Casein A2 protein"
+      },
+      {
+        "icon": "✓",
+        "text": "Zero adulteration, certified antibiotic & chemical free"
+      },
+      {
+        "icon": "✓",
+        "text": "Doorstep morning chilled delivery in glass packaging"
+      }
+    ],
+    "ingredients": [
+      {
+        "name": "Pure Raw Whole A2 Desi Cow Milk",
+        "note": "100% natural single origin"
+      }
+    ],
+    "storage_instructions": "Keep chilled between 2°C and 4°C. Consume within 48 hours.",
+    "usage_instructions": "Boil gently before consumption. Perfect for traditional filter coffee and curd.",
+    "seo_title": "Pure A2 Vedic Desi Gir Cow Milk | THULIRVA Farms",
+    "seo_description": "Order farm fresh pure raw A2 Desi Gir cow milk delivered daily morning before 7 AM across Chennai and Kanchipuram."
   }
 }

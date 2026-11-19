@@ -1,5 +1,139 @@
 [
   {
+    "id": 12,
+    "name": "A2 Vedic Desi Gir Cow Milk",
+    "description": "Ethically milked at dawn from indigenous Gir cows grazing on organic green pastures in Kanchipuram. Zero hormones, cold-chain preserved.",
+    "short_description": "Pure A2 Gir Cow raw whole milk fresh from pasture.",
+    "category": "Milk",
+    "category_name": "Milk",
+    "category_id": 1,
+    "price": 92,
+    "compare_price": 105,
+    "weight": "1 Litre",
+    "stock": 80,
+    "image": "/assets/images/products/fresh_cow_milk.jpg",
+    "badge": "Purity Gold",
+    "status": "active",
+    "feature_badges": [
+      {
+        "icon": "🌿",
+        "text": "100% Raw A2 Vedic",
+        "enabled": true
+      },
+      {
+        "icon": "🛡️",
+        "text": "Preservative Free",
+        "enabled": false
+      },
+      {
+        "icon": "🐄",
+        "text": "Free Grazing Gir Cows",
+        "enabled": true
+      },
+      {
+        "icon": "❄️",
+        "text": "Chilled within 15 mins",
+        "enabled": true
+      },
+      {
+        "icon": "🥛",
+        "text": "Naturally Sweet Taste",
+        "enabled": true
+      }
+    ],
+    "highlights": [
+      {
+        "icon": "✓",
+        "text": "Natural golden cream layer with high Beta-Casein A2 protein"
+      },
+      {
+        "icon": "✓",
+        "text": "Zero adulteration, certified antibiotic & chemical free"
+      },
+      {
+        "icon": "✓",
+        "text": "Doorstep morning chilled delivery in glass packaging"
+      }
+    ],
+    "ingredients": [
+      {
+        "name": "Pure Raw Whole A2 Desi Cow Milk",
+        "note": "100% natural single origin"
+      }
+    ],
+    "storage_instructions": "Keep chilled between 2°C and 4°C. Consume within 48 hours.",
+    "usage_instructions": "Boil gently before consumption. Perfect for traditional filter coffee and curd.",
+    "seo_title": "Pure A2 Vedic Desi Gir Cow Milk | THULIRVA Farms",
+    "seo_description": "Order farm fresh pure raw A2 Desi Gir cow milk delivered daily morning before 7 AM across Chennai and Kanchipuram."
+  },
+  {
+    "id": 11,
+    "name": "A2 Vedic Desi Gir Cow Milk",
+    "description": "Ethically milked at dawn from indigenous Gir cows grazing on organic green pastures in Kanchipuram. Zero hormones, cold-chain preserved.",
+    "short_description": "Pure A2 Gir Cow raw whole milk fresh from pasture.",
+    "category": "Milk",
+    "category_name": "Milk",
+    "category_id": 1,
+    "price": 92,
+    "compare_price": 105,
+    "weight": "1 Litre",
+    "stock": 80,
+    "image": "/assets/images/products/fresh_cow_milk.jpg",
+    "badge": "Purity Gold",
+    "status": "active",
+    "feature_badges": [
+      {
+        "icon": "🌿",
+        "text": "100% Raw A2 Vedic",
+        "enabled": true
+      },
+      {
+        "icon": "🛡️",
+        "text": "Preservative Free",
+        "enabled": false
+      },
+      {
+        "icon": "🐄",
+        "text": "Free Grazing Gir Cows",
+        "enabled": true
+      },
+      {
+        "icon": "❄️",
+        "text": "Chilled within 15 mins",
+        "enabled": true
+      },
+      {
+        "icon": "🥛",
+        "text": "Naturally Sweet Taste",
+        "enabled": true
+      }
+    ],
+    "highlights": [
+      {
+        "icon": "✓",
+        "text": "Natural golden cream layer with high Beta-Casein A2 protein"
+      },
+      {
+        "icon": "✓",
+        "text": "Zero adulteration, certified antibiotic & chemical free"
+      },
+      {
+        "icon": "✓",
+        "text": "Doorstep morning chilled delivery in glass packaging"
+      }
+    ],
+    "ingredients": [
+      {
+        "name": "Pure Raw Whole A2 Desi Cow Milk",
+        "note": "100% natural single origin"
+      }
+    ],
+    "storage_instructions": "Keep chilled between 2°C and 4°C. Consume within 48 hours.",
+    "usage_instructions": "Boil gently before consumption. Perfect for traditional filter coffee and curd.",
+    "seo_title": "Pure A2 Vedic Desi Gir Cow Milk | THULIRVA Farms",
+    "seo_description": "Order farm fresh pure raw A2 Desi Gir cow milk delivered daily morning before 7 AM across Chennai and Kanchipuram."
+  },
+  {
     "id": 1,
     "name": "Farm Fresh A2 Desi Cow Milk",
     "description": "100% pure raw chilled A2 cow milk directly from pasture-fed cows in Kanchipuram. Delivered cold to your doorstep by 7:00 AM.",

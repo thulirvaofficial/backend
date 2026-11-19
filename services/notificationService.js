@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { pool } = require("../config/database");
 const { initFirebaseAdmin, admin, isFirebaseInitialized, getMessaging } = require("./firebaseAdmin");
-const { getDeviceTokens, deactivateToken } = require("./tokenStore");
+const { getDeviceTokens, deactivateToken, isDeliveryPartnerToken, isAdminToken, normalizeRoleAndAppType } = require("./tokenStore");
 
 // Initialize Firebase Admin on startup (safe, non-blocking)
 initFirebaseAdmin();
@@ -61,8 +61,16 @@ function markAllNotificationsAsRead(userId = null) {
     return true;
 }
 
+function maskToken(token) {
+    if (!token || typeof token !== "string") return "";
+    const clean = token.trim();
+    if (clean.length <= 12) return "***" + clean.slice(-4);
+    return clean.slice(0, 6) + "..." + clean.slice(-6);
+}
+
 /**
- * Send and log a notification to a specific user or all admins
+ * Send and log a notification to a specific user, partner, or admins
+ * with strict role-partitioning, anti-leak checks, and audit logging.
  */
 async function sendNotification({
     userId = null,
@@ -71,11 +79,37 @@ async function sendNotification({
     type = "order",
     targetId = null,
     forAdmin = false,
+    role = null,
+    recipientRole = null,
+    appType = null,
     token = null,
     tokens: directTokens = null,
     channelId = null,
     data = null
 }) {
+    // 1. Resolve strict recipient role & app type
+    let resolvedRole = 'customer';
+    let resolvedAppType = 'customer';
+
+    if (forAdmin || role === 'admin' || recipientRole === 'admin' || appType === 'admin') {
+        resolvedRole = 'admin';
+        resolvedAppType = 'admin';
+        forAdmin = true;
+    } else if (
+        role === 'partner' || role === 'delivery_partner' ||
+        recipientRole === 'partner' || recipientRole === 'delivery_partner' ||
+        appType === 'partner' ||
+        (userId && (userId.toString().startsWith('THU-DP') || userId.toString().startsWith('DP-') || userId.toString().toLowerCase().includes('partner')))
+    ) {
+        resolvedRole = 'delivery_partner';
+        resolvedAppType = 'partner';
+        forAdmin = false;
+    } else {
+        resolvedRole = 'customer';
+        resolvedAppType = 'customer';
+        forAdmin = false;
+    }
+
     const payload = {
         id: "NOTIF-" + Date.now() + "-" + Math.floor(Math.random() * 1000),
         user_id: userId,
@@ -85,6 +119,8 @@ async function sendNotification({
         target_id: targetId ? targetId.toString() : null,
         is_read: false,
         for_admin: forAdmin,
+        recipient_role: resolvedRole,
+        app_type: resolvedAppType,
         created_at: new Date().toISOString()
     };
 
@@ -92,7 +128,7 @@ async function sendNotification({
     if (IN_APP_NOTIFICATIONS.length > 300) IN_APP_NOTIFICATIONS.pop();
     saveNotificationsToDisk(IN_APP_NOTIFICATIONS);
 
-    // 1. Persist notification to database for in-app history
+    // Persist notification to database for in-app history
     try {
         await pool.query(
             `INSERT INTO notifications (user_id, title, message, type, target_id, is_read)
@@ -103,7 +139,6 @@ async function sendNotification({
         // Fallback already in memory
     }
 
-    // 2. Fetch active device push tokens
     const logEntry = {
         id: payload.id,
         timestamp: new Date().toISOString(),
@@ -113,14 +148,75 @@ async function sendNotification({
         target_id: targetId ? targetId.toString() : null,
         for_admin: forAdmin,
         user_id: userId,
+        recipient_role: resolvedRole,
+        app_type: resolvedAppType,
         tokens_targeted: 0,
+        tokens_masked: [],
         success_count: 0,
         failure_count: 0,
         status: "pending",
+        rejection_reason: null,
         errors: [],
         fcm_response: null
     };
 
+    const typeNormalized = (type || "").toLowerCase().trim();
+
+    // 2. ANTI-LEAK: Prohibit customer-only events from EVER targeting delivery partners
+    const CUSTOMER_ONLY_EVENTS = [
+        'payment', 'payment_pending', 'payment_verification', 'payment_verified', 'payment_rejected',
+        'subscription', 'subscription_created', 'subscription_activated', 'subscription_paused',
+        'subscription_resumed', 'subscription_cancelled', 'subscription_expiring', 'subscription_renewed',
+        'new_subscription', 'order_status', 'customer_account', 'otp', 'cart_reminder'
+    ];
+
+    if (resolvedRole === 'delivery_partner') {
+        const isPartnerLegitEvent =
+            typeNormalized.includes('earn') ||
+            typeNormalized.includes('payout') ||
+            typeNormalized.includes('tip') ||
+            typeNormalized.includes('cod_remittance') ||
+            typeNormalized.includes('settle') ||
+            typeNormalized.includes('new_order') ||
+            typeNormalized.includes('offer') ||
+            typeNormalized.includes('assign') ||
+            typeNormalized.includes('sub_delivery') ||
+            typeNormalized.includes('subscription_delivery') ||
+            typeNormalized.includes('delivery') ||
+            typeNormalized.includes('emergency') ||
+            typeNormalized.includes('partner');
+
+        const isForbiddenEvent = CUSTOMER_ONLY_EVENTS.some(ce => typeNormalized === ce || typeNormalized.startsWith(ce + '_'));
+
+        if (isForbiddenEvent && !isPartnerLegitEvent) {
+            console.warn(`🛡️ [SECURITY AUDIT] Rejected notification of type "${type}" to Delivery Partner (${userId}). Reason: INVALID_RECIPIENT_TYPE`);
+            logEntry.status = "rejected";
+            logEntry.rejection_reason = "INVALID_RECIPIENT_TYPE: customer/admin payment & subscription events cannot be delivered to delivery partners";
+            NOTIFICATION_DISPATCH_LOGS.unshift(logEntry);
+            if (NOTIFICATION_DISPATCH_LOGS.length > 200) NOTIFICATION_DISPATCH_LOGS.pop();
+            return { ...payload, status: "rejected", reason: logEntry.rejection_reason };
+        }
+    }
+
+    // 3. ANTI-BROADCAST SAFEGUARD: Never broadcast customer transaction/subscription updates
+    const SENSITIVE_TRANSACTION_TYPES = [
+        'payment', 'payment_pending', 'payment_verification', 'payment_verified', 'payment_rejected',
+        'subscription', 'subscription_payment', 'subscription_activated', 'subscription_paused',
+        'subscription_resumed', 'subscription_cancelled', 'order_status'
+    ];
+
+    if (resolvedRole === 'customer' && !userId && !token && (!directTokens || directTokens.length === 0)) {
+        if (SENSITIVE_TRANSACTION_TYPES.some(st => typeNormalized.includes(st))) {
+            console.warn(`🛡️ [SECURITY AUDIT] Push dispatch skipped for customer transaction "${type}" because userId is null (broadcasting prohibited for financial/subscription events).`);
+            logEntry.status = "skipped";
+            logEntry.rejection_reason = "BROADCAST_PROHIBITED_FOR_SENSITIVE_TRANSACTION";
+            NOTIFICATION_DISPATCH_LOGS.unshift(logEntry);
+            if (NOTIFICATION_DISPATCH_LOGS.length > 200) NOTIFICATION_DISPATCH_LOGS.pop();
+            return { ...payload, status: "skipped", reason: logEntry.rejection_reason };
+        }
+    }
+
+    // 4. Fetch active device push tokens according to strict role partition
     try {
         let tokens = [];
         if (token) {
@@ -129,48 +225,89 @@ async function sendNotification({
             tokens = [...directTokens];
         } else {
             try {
-                if (forAdmin) {
+                if (resolvedRole === 'admin') {
                     const res = await pool.query(
                         "SELECT token FROM device_tokens WHERE role = 'admin' AND is_active = true"
                     );
                     tokens = res.rows.map(r => r.token);
-                } else if (userId) {
-                    const res = await pool.query(
-                        "SELECT token FROM device_tokens " +
-                        "WHERE (user_id::text = $1::text " +
-                        "       OR user_id IN (SELECT id::text FROM users WHERE phone = $1::text OR email = $1::text OR id::text = $1::text) " +
-                        "       OR user_id IN (SELECT partner_id FROM delivery_partners WHERE partner_id = $1::text OR phone = $1::text OR email = $1::text) " +
-                        "       OR user_id IN (SELECT phone FROM delivery_partners WHERE partner_id = $1::text OR phone = $1::text OR email = $1::text)) " +
-                        "  AND is_active = true",
-                        [userId.toString()]
-                    );
-                    tokens = res.rows.map(r => r.token);
+                } else if (resolvedRole === 'delivery_partner') {
+                    if (userId && userId !== 'all' && userId !== 'delivery_partners') {
+                        const res = await pool.query(
+                            "SELECT token FROM device_tokens " +
+                            "WHERE (role IN ('partner', 'delivery_partner') OR app_type = 'partner') " +
+                            "  AND (user_id::text = $1::text " +
+                            "       OR user_id IN (SELECT partner_id FROM delivery_partners WHERE partner_id = $1::text OR phone = $1::text OR email = $1::text)) " +
+                            "  AND is_active = true",
+                            [userId.toString()]
+                        );
+                        tokens = res.rows.map(r => r.token);
+                    } else {
+                        const res = await pool.query(
+                            "SELECT token FROM device_tokens WHERE (role IN ('partner', 'delivery_partner') OR app_type = 'partner') AND is_active = true"
+                        );
+                        tokens = res.rows.map(r => r.token);
+                    }
                 } else {
-                    // Broadcast to all active customer devices
-                    const res = await pool.query(
-                        "SELECT token FROM device_tokens WHERE is_active = true AND role != 'admin' LIMIT 500"
-                    );
-                    tokens = res.rows.map(r => r.token);
+                    // Customer ONLY query - STRICTLY EXCLUDES delivery partners and admins
+                    if (userId) {
+                        const res = await pool.query(
+                            "SELECT token FROM device_tokens " +
+                            "WHERE (role = 'customer' OR app_type = 'customer' OR app_type IS NULL) " +
+                            "  AND role NOT IN ('partner', 'delivery_partner', 'admin') " +
+                            "  AND (app_type IS NULL OR app_type NOT IN ('partner', 'admin')) " +
+                            "  AND (user_id::text = $1::text " +
+                            "       OR user_id IN (SELECT id::text FROM users WHERE id::text = $1::text OR phone = $1::text OR email = $1::text)) " +
+                            "  AND is_active = true",
+                            [userId.toString()]
+                        );
+                        tokens = res.rows.map(r => r.token);
+                    } else {
+                        // General broadcast to customers ONLY (e.g. general farm announcements)
+                        const res = await pool.query(
+                            "SELECT token FROM device_tokens " +
+                            "WHERE (role = 'customer' OR app_type = 'customer') " +
+                            "  AND role NOT IN ('partner', 'delivery_partner', 'admin') " +
+                            "  AND (app_type IS NULL OR app_type NOT IN ('partner', 'admin')) " +
+                            "  AND is_active = true LIMIT 500"
+                        );
+                        tokens = res.rows.map(r => r.token);
+                    }
                 }
             } catch (dbErr) {
                 console.warn("[NOTIFICATION SERVICE] Token query warning:", dbErr.message);
             }
             if (!tokens || tokens.length === 0) {
-                tokens = getDeviceTokens({ forAdmin, userId });
+                tokens = getDeviceTokens({
+                    forAdmin: resolvedRole === 'admin',
+                    userId,
+                    role: resolvedRole,
+                    appType: resolvedAppType
+                });
             }
+        }
+
+        // 5. Final Cross-Role Sanitization Filter
+        if (resolvedRole === 'customer' || resolvedRole === 'admin') {
+            const initialCount = tokens.length;
+            tokens = tokens.filter(t => !isDeliveryPartnerToken(t));
+            if (tokens.length < initialCount) {
+                console.warn(`🛡️ [SECURITY FILTER] Purged ${initialCount - tokens.length} partner tokens from ${resolvedRole} notification dispatch.`);
+            }
+        } else if (resolvedRole === 'delivery_partner') {
+            tokens = tokens.filter(t => !isAdminToken(t));
         }
 
         // Deduplicate tokens
         tokens = [...new Set(tokens.filter(t => t && t.trim().length > 10))];
         logEntry.tokens_targeted = tokens.length;
+        logEntry.tokens_masked = tokens.map(maskToken);
 
         const messaging = typeof getMessaging === "function" ? getMessaging() : null;
         const isReady = (typeof isFirebaseInitialized === "function" ? isFirebaseInitialized() : (admin && admin.apps && admin.apps.length > 0)) || (messaging !== null);
 
         if (tokens.length > 0 && messaging && isReady) {
             let targetChannelId = channelId;
-            const isPartnerTarget = (userId && (userId.toString().startsWith("THU-DP") || userId.toString().startsWith("DP-") || userId.toString().startsWith("partner"))) ||
-                type.includes("delivery") || type.includes("offer") || type.includes("assignment") || type.includes("NEW_ORDER");
+            const isPartnerTarget = resolvedRole === 'delivery_partner';
 
             if (!targetChannelId) {
                 if (forAdmin) {
@@ -191,7 +328,7 @@ async function sendNotification({
                     else targetChannelId = "thulirva_general_channel_v2";
                 }
             }
-            console.log(`[FCM DISPATCH] Sending to ${tokens.length} devices [${forAdmin ? 'ADMIN' : 'USER'}] via channel "${targetChannelId}": "${title}" - "${message}"`);
+            console.log(`[FCM DISPATCH] Sending to ${tokens.length} devices [${resolvedRole.toUpperCase()}] via channel "${targetChannelId}": "${title}" - "${message}"`);
 
             const fcmPayload = {
                 notification: {
@@ -212,8 +349,11 @@ async function sendNotification({
                     total: (data?.total || data?.order_amount || "").toString(),
                     expires_at: (data?.expires_at || "").toString(),
                     timeout_seconds: (data?.timeout_seconds || "180").toString(),
-                    actions: "accept_order,reject_order",
+                    actions: isPartnerTarget ? "accept_order,reject_order" : "",
                     type: type || "order",
+                    recipient_role: resolvedRole,
+                    app_type: resolvedAppType,
+                    for_admin: forAdmin ? "true" : "false",
                     title: title,
                     body: message,
                     timestamp: new Date().toISOString(),
@@ -287,11 +427,13 @@ async function sendNotification({
 
     try {
         await pool.query(
-            `INSERT INTO notification_logs (event, user_id, for_admin, title, message, target_id, tokens_count, success_count, failure_count, error_message)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            `INSERT INTO notification_logs (event, user_id, recipient_role, app_type, for_admin, title, message, target_id, tokens_count, success_count, failure_count, rejection_reason, error_message)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
             [
                 logEntry.event,
                 logEntry.user_id ? logEntry.user_id.toString() : null,
+                logEntry.recipient_role,
+                logEntry.app_type,
                 logEntry.for_admin,
                 logEntry.title,
                 logEntry.message,
@@ -299,12 +441,11 @@ async function sendNotification({
                 logEntry.tokens_targeted,
                 logEntry.success_count,
                 logEntry.failure_count,
+                logEntry.rejection_reason,
                 logEntry.errors.length ? JSON.stringify(logEntry.errors) : (logEntry.failure_count > 0 ? "FCM failure" : null)
             ]
         ).catch(() => { });
     } catch (_) { }
-
-    return payload;
 
     return payload;
 }
@@ -366,7 +507,9 @@ async function notifyOrderStatusChange(order, newStatus) {
         message,
         type: "order_status",
         targetId: order.id,
-        forAdmin: false
+        forAdmin: false,
+        recipientRole: "customer",
+        appType: "customer"
     });
 }
 
@@ -398,7 +541,9 @@ async function notifyAdminNewOrder(order) {
         message: `New ${typeLabel} #${order.id} received from ${order.customer_name || 'Customer'} worth ₹${amount}.`,
         type: isPickup ? "pickup_order" : "new_order",
         targetId: order.id,
-        forAdmin: true
+        forAdmin: true,
+        recipientRole: "admin",
+        appType: "admin"
     });
 }
 
@@ -424,7 +569,9 @@ async function sendSubscriptionNotification({ subscription, event }) {
                 message: `New subscriber ${subscription.customer_name || 'Customer'} (${subscription.customer_phone || ''}) enrolled in ${planName}.`,
                 type: "new_subscription",
                 targetId: subId,
-                forAdmin: true
+                forAdmin: true,
+                recipientRole: "admin",
+                appType: "admin"
             }).catch(() => { });
             break;
         case "paused":
@@ -435,7 +582,9 @@ async function sendSubscriptionNotification({ subscription, event }) {
                 message: `Subscriber ${subscription.customer_name || 'Customer'} paused subscription #${subId}.`,
                 type: "subscription_paused",
                 targetId: subId,
-                forAdmin: true
+                forAdmin: true,
+                recipientRole: "admin",
+                appType: "admin"
             }).catch(() => { });
             break;
         case "resumed":
@@ -446,7 +595,9 @@ async function sendSubscriptionNotification({ subscription, event }) {
                 message: `Subscriber ${subscription.customer_name || 'Customer'} resumed subscription #${subId}.`,
                 type: "subscription_resumed",
                 targetId: subId,
-                forAdmin: true
+                forAdmin: true,
+                recipientRole: "admin",
+                appType: "admin"
             }).catch(() => { });
             break;
         case "cancelled":
@@ -457,7 +608,9 @@ async function sendSubscriptionNotification({ subscription, event }) {
                 message: `Subscription #${subId} (${subscription.customer_name || 'Customer'}) was cancelled.`,
                 type: "subscription_cancelled",
                 targetId: subId,
-                forAdmin: true
+                forAdmin: true,
+                recipientRole: "admin",
+                appType: "admin"
             }).catch(() => { });
             break;
         case "expiring":
@@ -477,12 +630,16 @@ async function sendSubscriptionNotification({ subscription, event }) {
         message,
         type: "subscription",
         targetId: subId,
-        forAdmin: false
+        forAdmin: false,
+        recipientRole: "customer",
+        appType: "customer"
     });
 }
 
 /**
  * Standardized Module 8 helper: sendPaymentNotification
+ * STRICT: Customer payment notifications are delivered ONLY to customer and admin.
+ * Delivery Partners will NEVER receive these notifications.
  */
 async function sendPaymentNotification({ orderOrSub, status, amount, forAdmin = false, reason = "" }) {
     const id = orderOrSub?.id || "";
@@ -498,15 +655,19 @@ async function sendPaymentNotification({ orderOrSub, status, amount, forAdmin = 
                 message: `Payment proof uploaded for ${itemType} #${id} (₹${amt}). Please verify in Admin panel.`,
                 type: "payment_verification",
                 targetId: id,
-                forAdmin: true
+                forAdmin: true,
+                recipientRole: "admin",
+                appType: "admin"
             });
         } else {
             return sendNotification({
                 title: "Payment Received 💰",
                 message: `Payment of ₹${amt} confirmed for ${itemType} #${id}.`,
-                type: "payment",
+                type: "payment_received",
                 targetId: id,
-                forAdmin: true
+                forAdmin: true,
+                recipientRole: "admin",
+                appType: "admin"
             });
         }
     } else {
@@ -515,27 +676,33 @@ async function sendPaymentNotification({ orderOrSub, status, amount, forAdmin = 
                 userId,
                 title: "Payment Verified! ✓",
                 message: `Your payment of ₹${amt} for ${itemType} #${id} has been verified and confirmed.`,
-                type: "payment",
+                type: "payment_verified",
                 targetId: id,
-                forAdmin: false
+                forAdmin: false,
+                recipientRole: "customer",
+                appType: "customer"
             });
         } else if (status === "rejected" || status === "failed") {
             return sendNotification({
                 userId,
                 title: "Payment Verification Failed ❌",
                 message: `Payment proof for ${itemType} #${id} could not be verified: ${reason || 'Invalid reference'}.`,
-                type: "payment",
+                type: "payment_rejected",
                 targetId: id,
-                forAdmin: false
+                forAdmin: false,
+                recipientRole: "customer",
+                appType: "customer"
             });
         } else {
             return sendNotification({
                 userId,
                 title: "Payment Pending ⏳",
                 message: `Payment proof for ${itemType} #${id} is undergoing verification.`,
-                type: "payment",
+                type: "payment_pending",
                 targetId: id,
-                forAdmin: false
+                forAdmin: false,
+                recipientRole: "customer",
+                appType: "customer"
             });
         }
     }
@@ -554,7 +721,9 @@ async function sendPickupNotification({ order, event, forAdmin = false }) {
             message: `Pickup Order #${order.id} placed for ${store} (${slot}) by ${order.customer_name || 'Customer'}.`,
             type: "pickup_order",
             targetId: order.id,
-            forAdmin: true
+            forAdmin: true,
+            recipientRole: "admin",
+            appType: "admin"
         });
     } else {
         return sendNotification({
@@ -563,7 +732,9 @@ async function sendPickupNotification({ order, event, forAdmin = false }) {
             message: `Your order #${order.id} is ready for collection at ${store} during slot ${slot}.`,
             type: "order_status",
             targetId: order.id,
-            forAdmin: false
+            forAdmin: false,
+            recipientRole: "customer",
+            appType: "customer"
         });
     }
 }

@@ -116,6 +116,22 @@ async function initializeDatabase() {
             );
         `);
 
+        // Ensure rich product content columns exist on products table
+        const productCols = [
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS short_description TEXT",
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS feature_badges JSONB DEFAULT '[]'::jsonb",
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS highlights JSONB DEFAULT '[]'::jsonb",
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS ingredients JSONB DEFAULT '[]'::jsonb",
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS storage_instructions TEXT",
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS usage_instructions TEXT",
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS seo_title VARCHAR(255)",
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS seo_description TEXT",
+            "ALTER TABLE products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ];
+        for (const sql of productCols) {
+            await pool.query(sql).catch(e => console.warn("Product migration warn:", e.message));
+        }
+
         await pool.query(`
             CREATE TABLE IF NOT EXISTS addresses (
                 id SERIAL PRIMARY KEY,
@@ -239,6 +255,35 @@ async function initializeDatabase() {
             );
         `);
 
+        // Dynamic Configuration Migrations for Subscription Plans
+        const planCols = [
+            "ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true",
+            "ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false",
+            "ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS quantity_config JSONB",
+            "ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS delivery_slot_config JSONB",
+            "ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS start_date_config JSONB",
+            "ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS schedule_config JSONB",
+            "ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS pricing_config JSONB",
+            "ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS delivery_instructions TEXT",
+            "ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ];
+        for (const sql of planCols) {
+            await pool.query(sql).catch(e => console.warn("Plan migration warn:", e.message));
+        }
+
+        // Backfill default dynamic configurations for any existing plans missing them
+        await pool.query(`
+            UPDATE subscription_plans
+            SET quantity_config = COALESCE(quantity_config, '{"enabled": true, "minimum": 1, "maximum": 5, "unit": "Packet", "options": [{"value": 1, "label": "1 Packet"}, {"value": 2, "label": "2 Packets"}, {"value": 3, "label": "3 Packets"}, {"value": 4, "label": "4 Packets"}], "default_quantity": 1, "custom_increments": false}'::jsonb),
+                delivery_slot_config = COALESCE(delivery_slot_config, '{"enabled": true, "allow_multiple_slots": false, "default_slot": "Morning: 6:00 AM - 7:00 AM", "slots": [{"id": 1, "name": "Morning: 5:30 AM - 6:30 AM", "type": "morning", "start_time": "05:30 AM", "end_time": "06:30 AM", "is_enabled": true, "max_orders": 150}, {"id": 2, "name": "Morning: 6:00 AM - 7:00 AM", "type": "morning", "start_time": "06:00 AM", "end_time": "07:00 AM", "is_enabled": true, "max_orders": 150}, {"id": 3, "name": "Morning: 7:00 AM - 8:00 AM", "type": "morning", "start_time": "07:00 AM", "end_time": "08:00 AM", "is_enabled": true, "max_orders": 100}, {"id": 4, "name": "Evening: 5:00 PM - 6:00 PM", "type": "evening", "start_time": "05:00 PM", "end_time": "06:00 PM", "is_enabled": true, "max_orders": 100}, {"id": 5, "name": "Evening: 6:00 PM - 7:00 PM", "type": "evening", "start_time": "06:00 PM", "end_time": "07:00 PM", "is_enabled": true, "max_orders": 100}]}'::jsonb),
+                start_date_config = COALESCE(start_date_config, '{"enabled": true, "allow_immediate_start": false, "allow_future_dates": true, "minimum_advance_notice_hours": 12, "maximum_advance_days": 30, "blocked_dates": []}'::jsonb),
+                schedule_config = COALESCE(schedule_config, '{"enabled_schedules": ["Daily", "Alternate Days", "Twice Weekly", "Three Times Weekly", "Weekly", "Monthly"], "custom_schedule": ""}'::jsonb),
+                pricing_config = COALESCE(pricing_config, jsonb_build_object('base_price', price, 'original_price', COALESCE(original_price, price), 'discount_percent', COALESCE(discount_percent, 0), 'deliveries_count', duration_days)),
+                is_active = COALESCE(is_active, true),
+                is_archived = COALESCE(is_archived, false)
+            WHERE quantity_config IS NULL OR delivery_slot_config IS NULL;
+        `).catch(() => {});
+
         await pool.query(`
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id VARCHAR(50) PRIMARY KEY,
@@ -311,6 +356,7 @@ async function initializeDatabase() {
             "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS partner_name VARCHAR(150)",
             "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS partner_phone VARCHAR(30)",
             "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+            "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS terms_snapshot JSONB",
             "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
         ];
         for (const sql of subCols) {
@@ -781,20 +827,54 @@ async function initializeDatabase() {
         }
 
         // ============================================================
-        // PUSH NOTIFICATIONS & DEVICE TOKENS
+        // PUSH NOTIFICATIONS & DEVICE TOKENS (STRICT PARTITIONING)
         // ============================================================
         await pool.query(`
             CREATE TABLE IF NOT EXISTS device_tokens (
                 id SERIAL PRIMARY KEY,
-                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                user_id VARCHAR(100),
                 token TEXT NOT NULL UNIQUE,
                 device_type VARCHAR(20) DEFAULT 'android',
-                role VARCHAR(30) DEFAULT 'customer',
+                role VARCHAR(50) DEFAULT 'customer',
+                app_type VARCHAR(50) DEFAULT 'customer',
+                device_id VARCHAR(100),
                 is_active BOOLEAN DEFAULT true,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
+
+        // Migrate device_tokens to decouple user_id foreign key & ensure app_type exists
+        await pool.query(`
+            ALTER TABLE device_tokens DROP CONSTRAINT IF EXISTS device_tokens_user_id_fkey;
+            ALTER TABLE device_tokens ALTER COLUMN user_id TYPE VARCHAR(100);
+            ALTER TABLE device_tokens ADD COLUMN IF NOT EXISTS app_type VARCHAR(50) DEFAULT 'customer';
+            ALTER TABLE device_tokens ADD COLUMN IF NOT EXISTS device_id VARCHAR(100);
+            CREATE INDEX IF NOT EXISTS idx_device_tokens_role_active ON device_tokens(role, is_active);
+            CREATE INDEX IF NOT EXISTS idx_device_tokens_app_type ON device_tokens(app_type);
+        `).catch(e => console.warn("device_tokens migration warn:", e.message));
+
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS notification_logs (
+                id SERIAL PRIMARY KEY,
+                event VARCHAR(100),
+                user_id VARCHAR(100),
+                recipient_role VARCHAR(50),
+                app_type VARCHAR(50),
+                for_admin BOOLEAN DEFAULT false,
+                title VARCHAR(255),
+                message TEXT,
+                target_id VARCHAR(100),
+                tokens_count INTEGER DEFAULT 0,
+                success_count INTEGER DEFAULT 0,
+                failure_count INTEGER DEFAULT 0,
+                rejection_reason TEXT,
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_notification_logs_event ON notification_logs(event);
+            CREATE INDEX IF NOT EXISTS idx_notification_logs_role ON notification_logs(recipient_role);
+        `).catch(e => console.warn("notification_logs migration warn:", e.message));
 
         await pool.query(`
             CREATE TABLE IF NOT EXISTS notifications (

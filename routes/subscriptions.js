@@ -170,18 +170,146 @@ function generateSubscriptionId() {
    1. SUBSCRIPTION PLANS (CATALOG)
 ============================================================ */
 
-/* GET ALL PLANS */
+/* ============================================================
+   1. SUBSCRIPTION PLANS (CATALOG & DYNAMIC CONFIGURATION)
+============================================================ */
+
+function enrichPlanWithConfigs(plan) {
+    if (!plan) return plan;
+    const basePrice = Number(plan.price) || 1320;
+    const origPrice = Number(plan.original_price) || Math.round(basePrice * 1.15);
+
+    const defaultQuantityConfig = {
+        enabled: true,
+        minimum: 1,
+        maximum: 5,
+        unit: "Packet",
+        options: [
+            { value: 1, label: "1 Packet" },
+            { value: 2, label: "2 Packets" },
+            { value: 3, label: "3 Packets" },
+            { value: 4, label: "4 Packets" }
+        ],
+        default_quantity: 1,
+        custom_increments: false
+    };
+
+    const defaultDeliverySlotConfig = {
+        enabled: true,
+        allow_multiple_slots: false,
+        default_slot: "Morning: 6:00 AM - 7:00 AM",
+        slots: [
+            { id: 1, name: "Morning: 5:30 AM - 6:30 AM", type: "morning", start_time: "05:30 AM", end_time: "06:30 AM", is_enabled: true, max_orders: 150 },
+            { id: 2, name: "Morning: 6:00 AM - 7:00 AM", type: "morning", start_time: "06:00 AM", end_time: "07:00 AM", is_enabled: true, max_orders: 150 },
+            { id: 3, name: "Morning: 7:00 AM - 8:00 AM", type: "morning", start_time: "07:00 AM", end_time: "08:00 AM", is_enabled: true, max_orders: 100 },
+            { id: 4, name: "Evening: 5:00 PM - 6:00 PM", type: "evening", start_time: "05:00 PM", end_time: "06:00 PM", is_enabled: true, max_orders: 100 },
+            { id: 5, name: "Evening: 6:00 PM - 7:00 PM", type: "evening", start_time: "06:00 PM", end_time: "07:00 PM", is_enabled: true, max_orders: 100 }
+        ]
+    };
+
+    const defaultStartDateConfig = {
+        enabled: true,
+        allow_immediate_start: false,
+        allow_future_dates: true,
+        minimum_advance_notice_hours: 12,
+        maximum_advance_days: 30,
+        blocked_dates: []
+    };
+
+    const defaultScheduleConfig = {
+        enabled_schedules: ["Daily", "Alternate Days", "Twice Weekly", "Three Times Weekly", "Weekly", "Monthly"],
+        custom_schedule: ""
+    };
+
+    const defaultPricingConfig = {
+        base_price: basePrice,
+        original_price: origPrice,
+        discount_percent: Number(plan.discount_percent) || 0,
+        quantity_pricing: {},
+        frequency_pricing: {},
+        deliveries_count: Number(plan.duration_days) || 30
+    };
+
+    const parseJson = (val, def) => {
+        if (!val) return def;
+        if (typeof val === 'object') return val;
+        try { return JSON.parse(val); } catch { return def; }
+    };
+
+    return {
+        ...plan,
+        is_active: plan.is_active !== false && plan.status !== 'inactive',
+        is_archived: Boolean(plan.is_archived),
+        quantity_config: parseJson(plan.quantity_config, defaultQuantityConfig),
+        delivery_slot_config: parseJson(plan.delivery_slot_config, defaultDeliverySlotConfig),
+        start_date_config: parseJson(plan.start_date_config, defaultStartDateConfig),
+        schedule_config: parseJson(plan.schedule_config, defaultScheduleConfig),
+        pricing_config: parseJson(plan.pricing_config, defaultPricingConfig)
+    };
+}
+
+/* GET ALL PLANS (STOREFRONT) */
 router.get("/plans", async (req, res) => {
     try {
-        const result = await pool.query(
-            "SELECT * FROM subscription_plans ORDER BY id ASC"
-        );
-        if (result.rows.length > 0) {
-            return res.json({ success: true, plans: result.rows });
+        let plans = [];
+        try {
+            const result = await pool.query(
+                "SELECT * FROM subscription_plans WHERE is_archived = false AND (status = 'active' OR is_active = true) ORDER BY id ASC"
+            );
+            plans = result.rows;
+        } catch (_) {}
+
+        if (plans.length === 0) {
+            plans = MOCK_PLANS.filter(p => !p.is_archived && p.status !== 'inactive');
         }
-        res.json({ success: true, plans: MOCK_PLANS });
+
+        return res.json({
+            success: true,
+            plans: plans.map(enrichPlanWithConfigs)
+        });
     } catch {
-        res.json({ success: true, plans: MOCK_PLANS });
+        return res.json({
+            success: true,
+            plans: MOCK_PLANS.filter(p => !p.is_archived && p.status !== 'inactive').map(enrichPlanWithConfigs)
+        });
+    }
+});
+
+/* GET ALL PLANS FOR ADMIN (WITH SUBSCRIBER COUNTS) */
+router.get("/plans/admin/all", authenticateToken, adminOnly, async (req, res) => {
+    try {
+        let plans = [];
+        try {
+            const result = await pool.query(`
+                SELECT p.*,
+                       COALESCE((
+                           SELECT COUNT(*)
+                           FROM subscriptions s
+                           WHERE s.plan_id = p.id
+                             AND LOWER(COALESCE(s.status, '')) IN ('active', 'approved')
+                       ), 0) AS active_subscribers
+                FROM subscription_plans p
+                ORDER BY p.is_archived ASC, p.id ASC
+            `);
+            plans = result.rows;
+        } catch (_) {}
+
+        if (plans.length === 0) {
+            plans = MOCK_PLANS.map(p => ({
+                ...p,
+                active_subscribers: (MOCK_SUBSCRIPTIONS || []).filter(s => s.plan_id == p.id && (s.status || '').toLowerCase() === 'active').length
+            }));
+        }
+
+        return res.json({
+            success: true,
+            plans: plans.map(p => ({
+                ...enrichPlanWithConfigs(p),
+                active_subscribers: Number(p.active_subscribers || 0)
+            }))
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 });
 
@@ -189,15 +317,16 @@ router.get("/plans", async (req, res) => {
 router.get("/plans/:id", async (req, res) => {
     const id = parseInt(req.params.id);
     try {
-        const result = await pool.query("SELECT * FROM subscription_plans WHERE id=$1", [id]);
-        if (result.rows.length > 0) {
-            return res.json({ success: true, plan: result.rows[0] });
-        }
-        const plan = MOCK_PLANS.find(p => p.id === id) || MOCK_PLANS[0];
-        res.json({ success: true, plan });
+        let plan = null;
+        try {
+            const result = await pool.query("SELECT * FROM subscription_plans WHERE id=$1", [id]);
+            if (result.rows.length > 0) plan = result.rows[0];
+        } catch (_) {}
+        if (!plan) plan = MOCK_PLANS.find(p => p.id === id) || MOCK_PLANS[0];
+        return res.json({ success: true, plan: enrichPlanWithConfigs(plan) });
     } catch {
         const plan = MOCK_PLANS.find(p => p.id === id) || MOCK_PLANS[0];
-        res.json({ success: true, plan });
+        res.json({ success: true, plan: enrichPlanWithConfigs(plan) });
     }
 });
 
@@ -216,58 +345,91 @@ router.post("/plans", authenticateToken, adminOnly, async (req, res) => {
             discount_percent,
             description,
             badge,
-            status
+            status,
+            is_active,
+            is_archived,
+            quantity_config,
+            delivery_slot_config,
+            start_date_config,
+            schedule_config,
+            pricing_config,
+            delivery_instructions
         } = req.body;
 
-        if (!product_name || !time_period || !price) {
-            return res.status(400).json({ success: false, message: "Product name, time period, and price are required." });
+        if (!product_name || !price) {
+            return res.status(400).json({ success: false, message: "Product name and price are required." });
         }
 
         const savedImage = saveBase64Image(product_image) || "/assets/images/products/fresh_cow_milk.jpg";
 
+        const enriched = enrichPlanWithConfigs({
+            product_id: product_id ? Number(product_id) : null,
+            product_name,
+            product_image: savedImage,
+            time_period: time_period || "Daily Morning (30 Days)",
+            frequency: frequency || "Daily",
+            duration_days: duration_days ? Number(duration_days) : 30,
+            price: Number(price),
+            original_price: original_price ? Number(original_price) : null,
+            discount_percent: discount_percent ? Number(discount_percent) : 0,
+            description: description || "",
+            badge: badge || "Popular",
+            status: status || "active",
+            is_active: is_active !== false,
+            is_archived: Boolean(is_archived),
+            quantity_config,
+            delivery_slot_config,
+            start_date_config,
+            schedule_config,
+            pricing_config,
+            delivery_instructions
+        });
+
+        let newPlan = null;
         try {
             const result = await pool.query(`
                 INSERT INTO subscription_plans (
                     product_id, product_name, product_image, time_period,
                     frequency, duration_days, price, original_price,
-                    discount_percent, description, badge, status
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                    discount_percent, description, badge, status,
+                    is_active, is_archived, quantity_config, delivery_slot_config,
+                    start_date_config, schedule_config, pricing_config, delivery_instructions
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
                 RETURNING *
             `, [
-                product_id || null,
-                product_name,
-                savedImage,
-                time_period,
-                frequency || "Daily",
-                duration_days || 30,
-                Number(price) || 0,
-                original_price ? Number(original_price) : null,
-                discount_percent ? Number(discount_percent) : 0,
-                description || "",
-                badge || "Popular",
-                status || "active"
+                enriched.product_id,
+                enriched.product_name,
+                enriched.product_image,
+                enriched.time_period,
+                enriched.frequency,
+                enriched.duration_days,
+                enriched.price,
+                enriched.original_price,
+                enriched.discount_percent,
+                enriched.description,
+                enriched.badge,
+                enriched.status,
+                enriched.is_active,
+                enriched.is_archived,
+                JSON.stringify(enriched.quantity_config),
+                JSON.stringify(enriched.delivery_slot_config),
+                JSON.stringify(enriched.start_date_config),
+                JSON.stringify(enriched.schedule_config),
+                JSON.stringify(enriched.pricing_config),
+                enriched.delivery_instructions || null
             ]);
-            return res.json({ success: true, plan: result.rows[0], message: "Subscription plan created successfully" });
-        } catch {
-            const newId = MOCK_PLANS.length ? Math.max(...MOCK_PLANS.map(p => p.id)) + 1 : 1;
-            const newPlan = {
-                id: newId,
-                product_id: product_id || null,
-                product_name,
-                product_image: savedImage,
-                time_period,
-                frequency: frequency || "Daily",
-                duration_days: duration_days || 30,
-                price: Number(price) || 0,
-                original_price: original_price ? Number(original_price) : null,
-                discount_percent: discount_percent ? Number(discount_percent) : 0,
-                description: description || "",
-                badge: badge || "Popular",
-                status: status || "active"
-            };
-            MOCK_PLANS.unshift(newPlan);
-            return res.json({ success: true, plan: newPlan, message: "Subscription plan created successfully" });
+            newPlan = result.rows[0];
+        } catch (dbErr) {
+            console.warn("[CREATE PLAN DB WARN]:", dbErr.message);
         }
+
+        const nextId = newPlan?.id || (MOCK_PLANS.length ? Math.max(...MOCK_PLANS.map(p => p.id || 0)) + 1 : 1);
+        if (!newPlan) {
+            newPlan = { id: nextId, ...enriched };
+        }
+        MOCK_PLANS.unshift(newPlan);
+
+        return res.json({ success: true, plan: enrichPlanWithConfigs(newPlan), message: "Subscription plan created successfully" });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
@@ -289,11 +451,20 @@ router.put("/plans/:id", authenticateToken, adminOnly, async (req, res) => {
             discount_percent,
             description,
             badge,
-            status
+            status,
+            is_active,
+            is_archived,
+            quantity_config,
+            delivery_slot_config,
+            start_date_config,
+            schedule_config,
+            pricing_config,
+            delivery_instructions
         } = req.body;
 
         const savedImage = saveBase64Image(product_image);
 
+        let updatedPlan = null;
         try {
             const result = await pool.query(`
                 UPDATE subscription_plans
@@ -308,67 +479,185 @@ router.put("/plans/:id", authenticateToken, adminOnly, async (req, res) => {
                     discount_percent = COALESCE($9, discount_percent),
                     description = COALESCE($10, description),
                     badge = COALESCE($11, badge),
-                    status = COALESCE($12, status)
-                WHERE id = $13
+                    status = COALESCE($12, status),
+                    is_active = COALESCE($13, is_active),
+                    is_archived = COALESCE($14, is_archived),
+                    quantity_config = COALESCE($15::jsonb, quantity_config),
+                    delivery_slot_config = COALESCE($16::jsonb, delivery_slot_config),
+                    start_date_config = COALESCE($17::jsonb, start_date_config),
+                    schedule_config = COALESCE($18::jsonb, schedule_config),
+                    pricing_config = COALESCE($19::jsonb, pricing_config),
+                    delivery_instructions = COALESCE($20, delivery_instructions),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $21
                 RETURNING *
             `, [
-                product_id,
+                product_id ? Number(product_id) : null,
                 product_name,
                 savedImage,
                 time_period,
                 frequency,
-                duration_days,
-                price !== undefined ? Number(price) : undefined,
-                original_price !== undefined ? Number(original_price) : undefined,
-                discount_percent !== undefined ? Number(discount_percent) : undefined,
+                duration_days ? Number(duration_days) : null,
+                price !== undefined ? Number(price) : null,
+                original_price !== undefined ? Number(original_price) : null,
+                discount_percent !== undefined ? Number(discount_percent) : null,
                 description,
                 badge,
                 status,
+                is_active,
+                is_archived,
+                quantity_config !== undefined ? JSON.stringify(quantity_config) : null,
+                delivery_slot_config !== undefined ? JSON.stringify(delivery_slot_config) : null,
+                start_date_config !== undefined ? JSON.stringify(start_date_config) : null,
+                schedule_config !== undefined ? JSON.stringify(schedule_config) : null,
+                pricing_config !== undefined ? JSON.stringify(pricing_config) : null,
+                delivery_instructions,
                 id
             ]);
-            if (result.rows.length > 0) {
-                return res.json({ success: true, plan: result.rows[0], message: "Plan updated successfully" });
-            }
-        } catch {
-            // fallback
+            if (result.rows.length > 0) updatedPlan = result.rows[0];
+        } catch (dbErr) {
+            console.warn("[UPDATE PLAN DB WARN]:", dbErr.message);
         }
 
         const idx = MOCK_PLANS.findIndex(p => p.id === id);
         if (idx !== -1) {
-            MOCK_PLANS[idx] = {
+            MOCK_PLANS[idx] = enrichPlanWithConfigs({
                 ...MOCK_PLANS[idx],
-                product_id: product_id !== undefined ? product_id : MOCK_PLANS[idx].product_id,
-                product_name: product_name !== undefined ? product_name : MOCK_PLANS[idx].product_name,
-                product_image: savedImage !== undefined ? savedImage : MOCK_PLANS[idx].product_image,
-                time_period: time_period !== undefined ? time_period : MOCK_PLANS[idx].time_period,
-                frequency: frequency !== undefined ? frequency : MOCK_PLANS[idx].frequency,
-                duration_days: duration_days !== undefined ? duration_days : MOCK_PLANS[idx].duration_days,
-                price: price !== undefined ? Number(price) : MOCK_PLANS[idx].price,
-                original_price: original_price !== undefined ? Number(original_price) : MOCK_PLANS[idx].original_price,
-                discount_percent: discount_percent !== undefined ? Number(discount_percent) : MOCK_PLANS[idx].discount_percent,
-                description: description !== undefined ? description : MOCK_PLANS[idx].description,
-                badge: badge !== undefined ? badge : MOCK_PLANS[idx].badge,
-                status: status !== undefined ? status : MOCK_PLANS[idx].status
-            };
-            return res.json({ success: true, plan: MOCK_PLANS[idx], message: "Plan updated successfully" });
+                ...req.body,
+                id: id
+            });
+            updatedPlan = updatedPlan || MOCK_PLANS[idx];
         }
 
-        res.json({ success: true, message: "Subscription plan updated" });
+        return res.json({ success: true, plan: enrichPlanWithConfigs(updatedPlan || req.body), message: "Plan updated successfully" });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 });
 
-/* DELETE PLAN (Admin) */
-router.delete("/plans/:id", authenticateToken, adminOnly, async (req, res) => {
-    const id = parseInt(req.params.id);
+/* DUPLICATE PLAN (Admin) */
+router.post("/plans/:id/duplicate", authenticateToken, adminOnly, async (req, res) => {
     try {
-        await pool.query("DELETE FROM subscription_plans WHERE id=$1", [id]);
-    } catch {
-        // fallback
+        const id = parseInt(req.params.id);
+        let src = null;
+        try {
+            const resDb = await pool.query("SELECT * FROM subscription_plans WHERE id = $1", [id]);
+            if (resDb.rows.length) src = resDb.rows[0];
+        } catch (_) {}
+        src = src || MOCK_PLANS.find(p => p.id === id);
+        if (!src) return res.status(404).json({ success: false, message: "Source plan not found" });
+
+        const enriched = enrichPlanWithConfigs(src);
+        const dupName = `${enriched.product_name} (Copy)`;
+
+        let newPlan = null;
+        try {
+            const result = await pool.query(`
+                INSERT INTO subscription_plans (
+                    product_id, product_name, product_image, time_period,
+                    frequency, duration_days, price, original_price,
+                    discount_percent, description, badge, status,
+                    is_active, is_archived, quantity_config, delivery_slot_config,
+                    start_date_config, schedule_config, pricing_config, delivery_instructions
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+                RETURNING *
+            `, [
+                enriched.product_id, dupName, enriched.product_image, enriched.time_period,
+                enriched.frequency, enriched.duration_days, enriched.price, enriched.original_price,
+                enriched.discount_percent, enriched.description, enriched.badge, 'active',
+                true, false,
+                JSON.stringify(enriched.quantity_config),
+                JSON.stringify(enriched.delivery_slot_config),
+                JSON.stringify(enriched.start_date_config),
+                JSON.stringify(enriched.schedule_config),
+                JSON.stringify(enriched.pricing_config),
+                enriched.delivery_instructions
+            ]);
+            newPlan = result.rows[0];
+        } catch (_) {}
+
+        const nextId = newPlan?.id || (MOCK_PLANS.length ? Math.max(...MOCK_PLANS.map(p => p.id || 0)) + 1 : 1);
+        if (!newPlan) {
+            newPlan = { ...enriched, id: nextId, product_name: dupName };
+        }
+        MOCK_PLANS.unshift(newPlan);
+
+        return res.json({ success: true, plan: enrichPlanWithConfigs(newPlan), message: `Plan duplicated as '${dupName}'` });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
-    MOCK_PLANS = MOCK_PLANS.filter(p => p.id !== id);
-    res.json({ success: true, message: "Subscription plan deleted successfully" });
+});
+
+/* ARCHIVE PLAN (Admin) */
+router.put("/plans/:id/archive", authenticateToken, adminOnly, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        try {
+            await pool.query("UPDATE subscription_plans SET is_archived = true, is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1", [id]);
+        } catch (_) {}
+        const p = MOCK_PLANS.find(x => x.id === id);
+        if (p) { p.is_archived = true; p.is_active = false; }
+        return res.json({ success: true, message: "Subscription plan archived successfully" });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/* DELETE PLAN (Admin with Subscriber Protection) */
+router.delete("/plans/:id", authenticateToken, adminOnly, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+
+        let activeSubsCount = 0;
+        try {
+            const countRes = await pool.query(
+                "SELECT COUNT(*) FROM subscriptions WHERE plan_id = $1 AND LOWER(COALESCE(status, '')) NOT IN ('cancelled', 'completed', 'rejected', 'expired')",
+                [id]
+            );
+            activeSubsCount = Number(countRes.rows[0].count);
+        } catch (_) {
+            activeSubsCount = (MOCK_SUBSCRIPTIONS || []).filter(s => s.plan_id == id && !['cancelled', 'completed', 'rejected', 'expired'].includes((s.status || '').toLowerCase())).length;
+        }
+
+        if (activeSubsCount > 0) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot delete plan with ${activeSubsCount} active subscriber(s). Please archive the plan instead to protect customer subscription terms.`
+            });
+        }
+
+        try {
+            await pool.query("DELETE FROM subscription_plans WHERE id = $1", [id]);
+        } catch (_) {}
+        MOCK_PLANS = MOCK_PLANS.filter(p => p.id !== id);
+
+        return res.json({ success: true, message: "Subscription plan deleted successfully" });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/* GET PLAN ACTIVE SUBSCRIBERS (Admin) */
+router.get("/plans/:id/subscribers", authenticateToken, adminOnly, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        let subscribers = [];
+        try {
+            const result = await pool.query(
+                "SELECT * FROM subscriptions WHERE plan_id = $1 ORDER BY created_at DESC",
+                [id]
+            );
+            subscribers = result.rows;
+        } catch (_) {}
+
+        if (subscribers.length === 0) {
+            subscribers = (MOCK_SUBSCRIPTIONS || []).filter(s => s.plan_id == id);
+        }
+
+        return res.json({ success: true, subscribers, count: subscribers.length });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
 });
 
 /* ============================================================
@@ -402,13 +691,13 @@ function saveDeliverySlotsToDisk(slots) {
     }
 }
 
-function calculateSubscriptionPricing({ plan_id, quantity, frequency, duration_days, slot_type }) {
+function calculateSubscriptionPricing({ plan_id, quantity, frequency, duration_days, slot_type, planOverride }) {
     const qty = Math.max(1, parseInt(quantity) || 1);
     const planIdNum = parseInt(plan_id);
-    const plan = MOCK_PLANS.find(p => p.id === planIdNum) || MOCK_PLANS[0];
+    const plan = planOverride || MOCK_PLANS.find(p => p.id === planIdNum) || MOCK_PLANS[0];
 
     const effectiveFrequency = (frequency || plan?.frequency || "Daily").trim();
-    const effectiveDuration = parseInt(duration_days) || plan?.duration_days || 30;
+    const effectiveDuration = parseInt(duration_days) || plan?.duration_days || plan?.deliveries_count || 30;
     const effectiveSlotType = (slot_type || "morning").toLowerCase().trim();
 
     // Determine baseline deliveries for frequency
@@ -433,26 +722,29 @@ function calculateSubscriptionPricing({ plan_id, quantity, frequency, duration_d
     }
 
     // Determine per-delivery unit price
-    let planDeliveries = 30;
+    let planDeliveries = plan?.deliveries_count || plan?.duration_days || 30;
     const pFreqLower = (plan?.frequency || "Daily").toLowerCase();
-    if (pFreqLower.includes("alternate")) planDeliveries = 15;
-    else if (pFreqLower.includes("twice")) planDeliveries = 8;
-    else if (pFreqLower.includes("monthly")) planDeliveries = 1;
-    else if (pFreqLower.includes("weekly")) planDeliveries = 4;
-    else planDeliveries = plan?.duration_days || 30;
+    if (pFreqLower.includes("alternate")) planDeliveries = Math.ceil(planDeliveries / 2);
+    else if (pFreqLower.includes("twice")) planDeliveries = Math.floor(planDeliveries / 7) * 2;
+    else if (pFreqLower.includes("monthly")) planDeliveries = Math.max(1, Math.floor(planDeliveries / 30));
+    else if (pFreqLower.includes("weekly")) planDeliveries = Math.max(1, Math.floor(planDeliveries / 7));
 
-    const basePlanPrice = Number(plan?.price) || 1320;
-    const unitPrice = parseFloat((basePlanPrice / planDeliveries).toFixed(2));
+    const baseUnitConfig = Number(plan?.pricing_config?.base_price_per_delivery);
+    const unitPrice = !isNaN(baseUnitConfig) && baseUnitConfig > 0 
+        ? baseUnitConfig 
+        : parseFloat(((Number(plan?.price) || 1320) / planDeliveries).toFixed(2));
 
-    // Quantity-Based Tier Discounts (0%, 3%, 6%, 9%, 12%)
-    let tierDiscountPercent = 0;
-    if (qty === 2) tierDiscountPercent = 3;
-    else if (qty === 3) tierDiscountPercent = 6;
-    else if (qty === 4) tierDiscountPercent = 9;
-    else if (qty >= 5) tierDiscountPercent = 12;
+    const configDiscount = Number(plan?.pricing_config?.discount_percent);
+    let discountPercent = !isNaN(configDiscount) ? configDiscount : 0;
+    if (discountPercent === 0) {
+        if (qty === 2) discountPercent = 3;
+        else if (qty === 3) discountPercent = 6;
+        else if (qty === 4) discountPercent = 9;
+        else if (qty >= 5) discountPercent = 12;
+    }
 
     const grossTotal = Math.round(unitPrice * deliveries * qty);
-    const discountAmount = Math.round(grossTotal * (tierDiscountPercent / 100));
+    const discountAmount = Math.round(grossTotal * (discountPercent / 100));
     const totalPrice = grossTotal - discountAmount;
     const pricePerDelivery = deliveries > 0 ? parseFloat((totalPrice / deliveries).toFixed(2)) : totalPrice;
 
@@ -466,7 +758,7 @@ function calculateSubscriptionPricing({ plan_id, quantity, frequency, duration_d
         total_deliveries: deliveries,
         base_unit_price: unitPrice,
         gross_total: grossTotal,
-        tier_discount_percent: tierDiscountPercent,
+        tier_discount_percent: discountPercent,
         discount_amount: discountAmount,
         total_price: totalPrice,
         price_per_delivery: pricePerDelivery
@@ -476,11 +768,35 @@ function calculateSubscriptionPricing({ plan_id, quantity, frequency, duration_d
 router.calculatePricing = calculateSubscriptionPricing;
 
 /* POST /api/subscriptions/calculate-price */
-router.post("/calculate-price", (req, res) => {
+router.post("/calculate-price", async (req, res) => {
     try {
-        const { plan_id, quantity, frequency, duration_days, slot_type } = req.body || {};
-        const result = calculateSubscriptionPricing({ plan_id, quantity, frequency, duration_days, slot_type });
-        return res.json({ success: true, data: result });
+        const { plan_id, quantity, frequency, duration_days, slot_type, delivery_slot } = req.body || {};
+        let plan = null;
+        if (plan_id) {
+            const pIdNum = parseInt(plan_id);
+            try {
+                const dbRes = await pool.query("SELECT * FROM subscription_plans WHERE id = $1", [pIdNum]);
+                if (dbRes.rows.length) plan = enrichPlanWithConfigs(dbRes.rows[0]);
+            } catch (_) {}
+            if (!plan) plan = MOCK_PLANS.find(p => p.id === pIdNum);
+        }
+        if (!plan) plan = enrichPlanWithConfigs(MOCK_PLANS[0]);
+
+        const effSlot = (delivery_slot || slot_type || "morning");
+        const result = calculateSubscriptionPricing({
+            plan_id: plan.id,
+            quantity,
+            frequency,
+            duration_days,
+            slot_type: effSlot.toLowerCase().includes("both") ? "both" : (effSlot.toLowerCase().includes("evening") ? "evening" : "morning"),
+            planOverride: plan
+        });
+        return res.json({
+            success: true,
+            total_price: result.total_price,
+            price_per_delivery: result.price_per_delivery,
+            data: result
+        });
     } catch (err) {
         return res.status(400).json({ success: false, message: err.message });
     }
@@ -731,9 +1047,109 @@ async function createSubscriptionInternal(inputData) {
         return existingRecent;
     }
 
-    const duration_days = Number(inputData.duration_days || inputData.durationDays) || (time_period.includes("15") ? 15 : 30);
-    const start_date = inputData.start_date || inputData.startDate || new Date().toISOString().split("T")[0];
-    const startDateObj = new Date(start_date);
+    // Fetch and validate against target plan
+    let plan = null;
+    if (inputData.plan_id) {
+        const pId = parseInt(inputData.plan_id);
+        try {
+            const pRes = await pool.query("SELECT * FROM subscription_plans WHERE id = $1", [pId]);
+            if (pRes.rows.length) plan = pRes.rows[0];
+        } catch (_) {}
+        if (!plan) plan = MOCK_PLANS.find(p => p.id === pId);
+    }
+    if (!plan && MOCK_PLANS.length) plan = MOCK_PLANS[0];
+
+    const enrichedPlan = enrichPlanWithConfigs(plan);
+
+    // Rule 1: Check plan active status
+    if (enrichedPlan && (enrichedPlan.is_active === false || enrichedPlan.is_archived === true || enrichedPlan.status === 'inactive')) {
+        throw new Error("The selected subscription plan is currently inactive or archived and not accepting new subscriptions.");
+    }
+
+    // Rule 2: Quantity Configuration Validation
+    const qConfig = enrichedPlan?.quantity_config || { enabled: true, minimum: 1, maximum: 5, default_quantity: 1 };
+    let reqQty = parseInt(inputData.quantity) || qConfig.default_quantity || 1;
+    if (qConfig.enabled === false) {
+        reqQty = qConfig.default_quantity || 1;
+    } else {
+        if (reqQty < (qConfig.minimum || 1) || reqQty > (qConfig.maximum || 10)) {
+            throw new Error(`Quantity ${reqQty} is outside allowable range (${qConfig.minimum || 1} to ${qConfig.maximum || 10}) for this plan.`);
+        }
+        if (Array.isArray(qConfig.options) && qConfig.options.length > 0) {
+            const allowedValues = qConfig.options.map(o => {
+                if (typeof o === 'object' && o !== null) {
+                    return Number(o.quantity !== undefined ? o.quantity : (o.value !== undefined ? o.value : 1));
+                }
+                return Number(o);
+            }).filter(v => !isNaN(v));
+            if (allowedValues.length > 0 && !allowedValues.includes(reqQty)) {
+                const err = new Error(`Selected quantity (${reqQty}) is not an enabled option for this plan.`);
+                err.statusCode = 400;
+                throw err;
+            }
+        }
+    }
+
+    // Rule 3: Delivery Slot Configuration Validation
+    const slotConfig = enrichedPlan?.delivery_slot_config || { enabled: true, allow_multiple_slots: false };
+    let reqSlot = (inputData.delivery_slot || inputData.deliverySlot || slotConfig.default_slot || "Morning: 6:00 AM - 7:00 AM").trim();
+    if (slotConfig.enabled === false) {
+        reqSlot = slotConfig.default_slot || "Morning: 6:00 AM - 7:00 AM";
+    } else {
+        const isBoth = reqSlot.toLowerCase().includes("both") || reqSlot.toLowerCase().includes("twice");
+        if (isBoth && !slotConfig.allow_multiple_slots) {
+            const err = new Error("Both Morning & Evening delivery is disabled for this plan.");
+            err.statusCode = 400;
+            throw err;
+        }
+        if (Array.isArray(slotConfig.slots) && slotConfig.slots.length > 0) {
+            const enabledSlotNames = slotConfig.slots
+                .filter(s => s.enabled !== false && s.is_enabled !== false)
+                .map(s => (s.name || '').toLowerCase().trim());
+            const matched = enabledSlotNames.some(sn => sn && (reqSlot.toLowerCase().includes(sn) || sn.includes(reqSlot.toLowerCase())));
+            if (!matched && !isBoth) {
+                const err = new Error(`Selected delivery slot '${reqSlot}' is currently disabled or unavailable.`);
+                err.statusCode = 400;
+                throw err;
+            }
+        }
+    }
+
+    // Rule 4: Start Date Configuration Validation
+    const dateConfig = enrichedPlan?.start_date_config || { enabled: true, maximum_advance_days: 30 };
+    let reqStartDate = inputData.start_date || inputData.startDate;
+    const tomorrowStr = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    if (dateConfig.enabled === false || !reqStartDate) {
+        reqStartDate = tomorrowStr;
+    } else {
+        const todayStr = new Date().toISOString().split("T")[0];
+        if (reqStartDate === todayStr && !dateConfig.allow_immediate_start) {
+            const err = new Error("Immediate same-day start is not permitted. Subscriptions must start tomorrow or later.");
+            err.statusCode = 400;
+            throw err;
+        }
+        const blocked = Array.isArray(dateConfig.blocked_dates)
+            ? dateConfig.blocked_dates
+            : (typeof dateConfig.blocked_dates === 'string' ? dateConfig.blocked_dates.split(',').map(s => s.trim()) : []);
+        if (blocked.includes(reqStartDate)) {
+            const err = new Error(`Selected start date '${reqStartDate}' is blocked for deliveries.`);
+            err.statusCode = 400;
+            throw err;
+        }
+    }
+
+    // Rule 5: Schedule Configuration Validation
+    const schedConfig = enrichedPlan?.schedule_config || { enabled_schedules: ["Daily", "Alternate Days", "Twice Weekly", "Three Times Weekly", "Weekly", "Monthly"] };
+    const reqFrequency = (inputData.frequency || enrichedPlan?.frequency || "Daily").trim();
+    if (Array.isArray(schedConfig.enabled_schedules) && schedConfig.enabled_schedules.length > 0) {
+        const isFreqAllowed = schedConfig.enabled_schedules.some(s => s.toLowerCase() === reqFrequency.toLowerCase());
+        if (!isFreqAllowed) {
+            throw new Error(`Selected delivery schedule '${reqFrequency}' is not enabled for this plan.`);
+        }
+    }
+
+    const duration_days = Number(inputData.duration_days || inputData.durationDays) || enrichedPlan?.duration_days || (time_period.includes("15") ? 15 : 30);
+    const startDateObj = new Date(reqStartDate);
     const expiryDateObj = new Date(startDateObj.getTime() + duration_days * 24 * 60 * 60 * 1000);
     const expiry_date = inputData.expiry_date || inputData.expiryDate || expiryDateObj.toISOString().split("T")[0];
 
@@ -743,26 +1159,37 @@ async function createSubscriptionInternal(inputData) {
     const payment_status = inputData.payment_status || (transaction_id ? "Verification Pending" : "Pending");
     const status = inputData.status || (transaction_id ? "Pending Approval" : "Pending");
 
-    // Server-side Price Tampering Protection & Dynamic Tier Calculation (Module 9)
-    let verifiedTotalPrice = total_price;
-    let verifiedPricePerDelivery = Number(inputData.price_per_delivery) || 44;
-    if (inputData.plan_id) {
-        const calculated = calculateSubscriptionPricing({
-            plan_id: inputData.plan_id,
-            quantity: inputData.quantity || 1,
-            frequency: inputData.frequency || "Daily",
-            duration_days: duration_days,
-            slot_type: inputData.slot_type || (inputData.delivery_slot && inputData.delivery_slot.toLowerCase().includes("evening") ? "evening" : "morning")
-        });
-        if (total_price < calculated.total_price * 0.90) {
-            console.warn(`[SECURITY PRICE TAMPER DETECTED] Subscription for customer '${customer_name}' submitted price ₹${total_price} but server calculated ₹${calculated.total_price}. Enforcing server verified price.`);
-            verifiedTotalPrice = calculated.total_price;
-            verifiedPricePerDelivery = calculated.price_per_delivery;
-        } else {
-            verifiedTotalPrice = total_price;
-            verifiedPricePerDelivery = calculated.price_per_delivery;
-        }
-    }
+    // Dynamic Server Price Calculation
+    const calculatedPricing = calculateSubscriptionPricing({
+        plan_id: enrichedPlan?.id || inputData.plan_id,
+        quantity: reqQty,
+        frequency: reqFrequency,
+        duration_days: duration_days,
+        slot_type: reqSlot.toLowerCase().includes("evening") ? "evening" : (reqSlot.toLowerCase().includes("both") ? "both" : "morning")
+    });
+
+    const verifiedTotalPrice = calculatedPricing.total_price;
+    const verifiedPricePerDelivery = calculatedPricing.price_per_delivery;
+
+    // Snapshot of terms to protect existing subscriptions
+    const termsSnapshot = {
+        plan_id: enrichedPlan?.id,
+        plan_name: enrichedPlan?.product_name || product_name,
+        quantity: reqQty,
+        quantity_unit: qConfig.unit || "Packet",
+        unit_price: calculatedPricing.base_unit_price || enrichedPlan?.price_per_delivery || 92,
+        delivery_slot: reqSlot,
+        start_date: reqStartDate,
+        expiry_date: expiry_date,
+        frequency: reqFrequency,
+        duration_days: duration_days,
+        total_deliveries: calculatedPricing.total_deliveries,
+        price_per_delivery: verifiedPricePerDelivery,
+        total_price: verifiedTotalPrice,
+        original_price: calculatedPricing.gross_total,
+        discount_amount: calculatedPricing.discount_amount,
+        snapshot_created_at: new Date().toISOString()
+    };
 
     const subData = {
         id: subId,
@@ -774,26 +1201,26 @@ async function createSubscriptionInternal(inputData) {
         customerPhone: customer_phone,
         customer_email: customer_email,
         customerEmail: customer_email,
-        plan_id: inputData.plan_id || null,
-        product_id: inputData.product_id || null,
-        product_name: product_name,
-        productName: product_name,
-        product_image: inputData.product_image || inputData.productImage || "/assets/images/products/fresh_cow_milk.jpg",
-        productImage: inputData.product_image || inputData.productImage || "/assets/images/products/fresh_cow_milk.jpg",
-        time_period: time_period,
-        timePeriod: time_period,
-        frequency: inputData.frequency || "Daily",
+        plan_id: enrichedPlan?.id || inputData.plan_id || null,
+        product_id: inputData.product_id || enrichedPlan?.product_id || null,
+        product_name: enrichedPlan?.product_name || product_name,
+        productName: enrichedPlan?.product_name || product_name,
+        product_image: inputData.product_image || inputData.productImage || enrichedPlan?.product_image || "/assets/images/products/fresh_cow_milk.jpg",
+        productImage: inputData.product_image || inputData.productImage || enrichedPlan?.product_image || "/assets/images/products/fresh_cow_milk.jpg",
+        time_period: enrichedPlan?.time_period || time_period,
+        timePeriod: enrichedPlan?.time_period || time_period,
+        frequency: reqFrequency,
         duration_days: duration_days,
         durationDays: duration_days,
-        quantity: Number(inputData.quantity) || 1,
-        delivery_slot: inputData.delivery_slot || inputData.deliverySlot || "6:00 AM - 7:00 AM",
-        deliverySlot: inputData.delivery_slot || inputData.deliverySlot || "6:00 AM - 7:00 AM",
+        quantity: reqQty,
+        delivery_slot: reqSlot,
+        deliverySlot: reqSlot,
         price_per_delivery: verifiedPricePerDelivery,
         total_price: verifiedTotalPrice,
         totalPrice: verifiedTotalPrice,
         total: verifiedTotalPrice,
-        start_date: start_date,
-        startDate: start_date,
+        start_date: reqStartDate,
+        startDate: reqStartDate,
         expiry_date: expiry_date,
         expiryDate: expiry_date,
         address: inputData.address || "Doorstep Address, Kanchipuram",
@@ -811,6 +1238,7 @@ async function createSubscriptionInternal(inputData) {
         payment_proof: savedProof || "",
         paymentProof: savedProof || "",
         status: status,
+        terms_snapshot: termsSnapshot,
         created_at: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
     };
 
@@ -839,14 +1267,16 @@ async function createSubscriptionInternal(inputData) {
                 plan_id, product_id, product_name, product_image, time_period,
                 frequency, quantity, delivery_slot, price_per_delivery, total_price,
                 start_date, expiry_date, duration_days, address, city, pincode,
-                payment_method, payment_status, status, transaction_id, payment_proof
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
+                payment_method, payment_status, status, transaction_id, payment_proof,
+                terms_snapshot
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
         `, [
             subData.id, validUserId, subData.customer_name, subData.customer_phone, subData.customer_email,
             validPlanId, validProductId, subData.product_name, subData.product_image, subData.time_period,
             subData.frequency, subData.quantity, subData.delivery_slot, subData.price_per_delivery, subData.total_price,
             subData.start_date, subData.expiry_date, subData.duration_days, subData.address, subData.city, subData.pincode,
-            subData.payment_method, subData.payment_status, subData.status, subData.transaction_id, subData.payment_proof
+            subData.payment_method, subData.payment_status, subData.status, subData.transaction_id, subData.payment_proof,
+            JSON.stringify(subData.terms_snapshot)
         ]);
         console.log(`✓ [SUBSCRIPTION SAVED TO DB] ID: ${subData.id}`);
     } catch (dbErr) {
@@ -916,7 +1346,7 @@ router.post("/", async (req, res) => {
             message: "Subscription created successfully! Pending admin approval."
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(error.statusCode || 400).json({ success: false, message: error.message });
     }
 });
 
@@ -1094,6 +1524,8 @@ const verifyPaymentHandler = async (req, res) => {
     // Send push notification to customer with sound
     sendNotification({
         userId: sub.user_id || sub.userId,
+        recipientRole: "customer",
+        appType: "customer",
         title: "Subscription Payment Approved! 🥛",
         message: `Your payment for ${sub.product_name || 'milk subscription'} has been verified! Daily morning deliveries are now active.`,
         type: "subscription_activated",
@@ -1143,6 +1575,8 @@ const rejectPaymentHandler = async (req, res) => {
     // Send push notification to customer
     sendNotification({
         userId: sub.user_id || sub.userId,
+        recipientRole: "customer",
+        appType: "customer",
         title: "Subscription Payment Rejected ⚠️",
         message: `Payment for subscription #${id} could not be verified: ${rejectionReason}. Please contact support or update payment.`,
         type: "subscription_payment_rejected",
@@ -1170,6 +1604,27 @@ router.post("/:id/reject-payment", authenticateToken, adminOnly, rejectPaymentHa
 router.put("/:id/reject-payment", authenticateToken, adminOnly, rejectPaymentHandler);
 router.patch("/:id/status", updateSubStatusHandler);
 router.put("/:id/status", updateSubStatusHandler);
+
+/* GET SINGLE SUBSCRIPTION BY ID */
+router.get("/:id", async (req, res) => {
+    const id = req.params.id;
+    try {
+        let sub = null;
+        try {
+            const result = await pool.query("SELECT * FROM subscriptions WHERE id::text = $1 LIMIT 1", [id]);
+            if (result.rows.length) sub = result.rows[0];
+        } catch (_) {}
+        if (!sub) {
+            sub = (MOCK_SUBSCRIPTIONS || []).find(s => String(s.id) === String(id));
+        }
+        if (!sub) {
+            return res.status(404).json({ success: false, message: "Subscription not found" });
+        }
+        return res.json({ success: true, subscription: sub });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
 
 /* GET USER SUBSCRIPTIONS (Strict Customer Isolation) */
 router.get("/user/:identifier", async (req, res) => {

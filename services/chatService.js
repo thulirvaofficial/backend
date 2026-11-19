@@ -128,25 +128,33 @@ async function saveChatMessage(orderId, { sender = "customer", sender_name, text
     // 2. Push Notification to recipient
     try {
         if (senderType === "customer") {
-            // Notify partner
+            // Notify assigned delivery partner
             const partnerId = order?.partner_id;
-            sendNotification({
-                title: `💬 New Message from ${sender_name || 'Customer'}`,
-                message: text.trim(),
-                type: "chat_message",
-                targetId: idKey,
-                forAdmin: false
-            }).catch(() => {});
+            if (partnerId) {
+                sendNotification({
+                    userId: partnerId,
+                    recipientRole: "delivery_partner",
+                    appType: "partner",
+                    title: `💬 New Message from ${sender_name || 'Customer'}`,
+                    message: text.trim(),
+                    type: "partner_chat",
+                    targetId: idKey,
+                    forAdmin: false
+                }).catch(() => {});
+            }
         } else if (senderType === "partner") {
             // Notify customer
             const customerUserId = order?.user_id;
             if (customerUserId) {
                 sendNotification({
                     userId: customerUserId,
+                    recipientRole: "customer",
+                    appType: "customer",
                     title: `💬 New Message from Delivery Partner`,
                     message: text.trim(),
-                    type: "chat_message",
-                    targetId: idKey
+                    type: "customer_chat",
+                    targetId: idKey,
+                    forAdmin: false
                 }).catch(() => {});
             }
         }

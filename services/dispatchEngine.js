@@ -228,6 +228,8 @@ async function offerOrderToPartner(order, partner) {
         // Send FCM High-Priority Emergency Alert to Delivery Partner
         sendNotification({
             userId: partnerId,
+            recipientRole: "delivery_partner",
+            appType: "partner",
             title: `🚨 New Thulirva Order #${order.order_number || orderId}`,
             message: `New delivery order (₹${order.total || 0}, ${itemsCount} items) at ${customerArea}. Tap to accept within 3 minutes!`,
             type: "NEW_ORDER_ASSIGNED",
@@ -319,6 +321,8 @@ async function offerOrderToPartner(order, partner) {
         // Send FCM High-Priority Emergency Alert to Delivery Partner
         sendNotification({
             userId: partnerId,
+            recipientRole: "delivery_partner",
+            appType: "partner",
             title: `🚨 New Thulirva Order #${order.order_number || orderId}`,
             message: `New delivery order (₹${order.total || 0}, ${itemsCount} items) at ${customerArea}. Tap to accept within 3 minutes!`,
             type: "NEW_ORDER_ASSIGNED",
