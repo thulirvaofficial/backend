@@ -339,13 +339,18 @@ router.post("/maintenance/reset-production-data", async (req, res) => {
     try {
         console.log("[MAINTENANCE RESET]: Starting production data cleanup and reseed...");
 
-        // 1. POSTGRESQL DATABASE WIPE & RESEED (IF CONNECTED)
-        let client = null;
+        // 1. POSTGRESQL DATABASE WIPE & RESEED (SAFE EXECUTION)
+        let dbErrors = [];
         try {
-            client = await pool.connect();
-            await client.query("BEGIN");
+            const tableCheck = await pool.query(`
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public'
+            `);
+            const existingTables = new Set(tableCheck.rows.map(r => r.table_name.toLowerCase()));
+            console.log("[MAINTENANCE RESET]: Found public tables:", Array.from(existingTables));
 
-            // Tables to truncate
+            // Truncate tables in dependency order
             const tablesToTruncate = [
                 "order_items",
                 "delivery_proofs",
@@ -376,226 +381,251 @@ router.post("/maintenance/reset-production-data", async (req, res) => {
             ];
 
             for (const tbl of tablesToTruncate) {
-                try {
-                    await client.query(`TRUNCATE TABLE ${tbl} CASCADE;`);
-                } catch (truncErr) {
-                    console.log(`[TRUNCATE ${tbl} NOTICE]:`, truncErr.message);
+                if (existingTables.has(tbl.toLowerCase())) {
+                    try {
+                        await pool.query(`TRUNCATE TABLE ${tbl} CASCADE;`);
+                        console.log(`[TRUNCATE SUCCESS]: ${tbl}`);
+                    } catch (tErr) {
+                        console.warn(`[TRUNCATE ${tbl} WARN]:`, tErr.message);
+                        dbErrors.push(`truncate ${tbl}: ${tErr.message}`);
+                    }
                 }
             }
 
             // Delete non-admin users
-            try {
-                await client.query(`
-                    DELETE FROM users 
-                    WHERE LOWER(email) != 'admin@thulirva.com' 
-                      AND role NOT IN ('super_admin', 'super admin', 'admin');
-                `);
-            } catch (userDelErr) {
-                console.log("[DELETE USERS WARN]:", userDelErr.message);
+            if (existingTables.has("users")) {
+                try {
+                    await pool.query(`
+                        DELETE FROM users 
+                        WHERE LOWER(email) != 'admin@thulirva.com' 
+                          AND role NOT IN ('super_admin', 'super admin', 'admin');
+                    `);
+                    console.log("[DELETE USERS SUCCESS]: non-admin users removed");
+                } catch (uErr) {
+                    console.warn("[DELETE USERS WARN]:", uErr.message);
+                    dbErrors.push(`delete users: ${uErr.message}`);
+                }
             }
 
             // Ensure Super Admin user exists
-            try {
-                const adminCheck = await client.query("SELECT id, email FROM users WHERE LOWER(email) = 'admin@thulirva.com'");
-                if (adminCheck.rows.length === 0) {
-                    const hash = await bcrypt.hash("admin123", 10);
-                    await client.query(
-                        "INSERT INTO users (name, email, password, role) VALUES ($1, $2, $3, $4)",
-                        ["Super Admin", "admin@thulirva.com", hash, "super_admin"]
-                    );
+            if (existingTables.has("users")) {
+                try {
+                    const adminCheck = await pool.query("SELECT id, email FROM users WHERE LOWER(email) = 'admin@thulirva.com'");
+                    if (adminCheck.rows.length === 0) {
+                        const hash = await bcrypt.hash("admin123", 10);
+                        await pool.query(
+                            "INSERT INTO users (name, email, password, role) VALUES ($1, $2, $3, $4)",
+                            ["Super Admin", "admin@thulirva.com", hash, "super_admin"]
+                        );
+                        console.log("[ADMIN SEED SUCCESS]: Super Admin created");
+                    }
+                } catch (aErr) {
+                    console.warn("[ADMIN SEED WARN]:", aErr.message);
+                    dbErrors.push(`admin seed: ${aErr.message}`);
                 }
-            } catch (adminUpsertErr) {
-                console.log("[ADMIN UPSERT WARN]:", adminUpsertErr.message);
             }
 
             // Ensure categories exist
-            const catCheck = await client.query("SELECT COUNT(*) FROM categories");
-            if (Number(catCheck.rows[0].count) === 0) {
-                const defaultCats = [
-                    ["Milk", "Fresh Cow Milk", "🥛", "Farm fresh A2 raw & chilled cow milk bottled within hours of morning milking.", "/assets/images/products/fresh_cow_milk.jpg"],
-                    ["Ghee", "Ghee & Butter", "🧈", "Traditional hand-churned Bilona cow ghee and fresh cultured farm butter.", "/assets/images/products/pure_cow_ghee.jpg"],
-                    ["Paneer", "Paneer & Tofu", "🧀", "Soft, melt-in-mouth cottage cheese and non-GMO organic artisanal tofu.", "/assets/images/products/fresh_paneer.jpg"],
-                    ["Curd", "Natural Set Curd", "🫙", "Naturally cultured probiotic thick set curd made with pure wholesome cow milk.", "/assets/images/products/product_lineup.jpg"],
-                    ["Oils", "Cold-Pressed Oils", "🫗", "Traditional wooden chekku cold-pressed groundnut and gingelly oils.", "/assets/images/products/product_lineup.jpg"],
-                    ["Masalas", "Pure Spices & Masalas", "🌶️", "Single-origin Salem turmeric powder and aromatic farm-ground spice blends.", "/assets/images/products/product_lineup.jpg"],
-                    ["Vegan", "Vegan & Plant-Based", "🌱", "Plant-based oat & almond milk, organic soy tofu, and raw wild honey.", "/assets/images/products/fresh_paneer.jpg"]
-                ];
-                for (const [name, display_name, emoji, desc, img] of defaultCats) {
-                    await client.query(
-                        "INSERT INTO categories (name, display_name, emoji, description, image) VALUES ($1,$2,$3,$4,$5)",
-                        [name, display_name, emoji, desc, img]
-                    );
+            if (existingTables.has("categories")) {
+                try {
+                    const catCheck = await pool.query("SELECT COUNT(*) FROM categories");
+                    if (Number(catCheck.rows[0].count) === 0) {
+                        const defaultCats = [
+                            ["Milk", "Fresh Cow Milk", "🥛", "Farm fresh A2 raw & chilled cow milk bottled within hours of morning milking.", "/assets/images/products/fresh_cow_milk.jpg"],
+                            ["Ghee", "Ghee & Butter", "🧈", "Traditional hand-churned Bilona cow ghee and fresh cultured farm butter.", "/assets/images/products/pure_cow_ghee.jpg"],
+                            ["Paneer", "Paneer & Tofu", "🧀", "Soft, melt-in-mouth cottage cheese and non-GMO organic artisanal tofu.", "/assets/images/products/fresh_paneer.jpg"],
+                            ["Curd", "Natural Set Curd", "🫙", "Naturally cultured probiotic thick set curd made with pure wholesome cow milk.", "/assets/images/products/product_lineup.jpg"],
+                            ["Oils", "Cold-Pressed Oils", "🫗", "Traditional wooden chekku cold-pressed groundnut and gingelly oils.", "/assets/images/products/product_lineup.jpg"],
+                            ["Masalas", "Pure Spices & Masalas", "🌶️", "Single-origin Salem turmeric powder and aromatic farm-ground spice blends.", "/assets/images/products/product_lineup.jpg"],
+                            ["Vegan", "Vegan & Plant-Based", "🌱", "Plant-based oat & almond milk, organic soy tofu, and raw wild honey.", "/assets/images/products/fresh_paneer.jpg"]
+                        ];
+                        for (const [name, display_name, emoji, desc, img] of defaultCats) {
+                            await pool.query(
+                                "INSERT INTO categories (name, display_name, emoji, description, image) VALUES ($1,$2,$3,$4,$5)",
+                                [name, display_name, emoji, desc, img]
+                            );
+                        }
+                    }
+                } catch (cErr) {
+                    console.warn("[CATEGORIES SEED WARN]:", cErr.message);
                 }
-            }
-
-            const catMap = {};
-            const catRows = await client.query("SELECT id, name FROM categories");
-            for (const c of catRows.rows) {
-                catMap[(c.name || "").toLowerCase()] = c.id;
             }
 
             // Seed 10 production sample products into PostgreSQL
-            const sampleProductsList = [
-                {
-                    id: 1,
-                    name: "Farm Fresh A2 Desi Cow Milk",
-                    description: "100% pure raw chilled A2 cow milk directly from pasture-fed cows in Kanchipuram. Delivered cold to your doorstep by 7:00 AM.",
-                    category: "Milk",
-                    price: 44,
-                    compare_price: 50,
-                    weight: "500 ml",
-                    stock: 120,
-                    image: "/assets/images/products/fresh_cow_milk.jpg",
-                    badge: "Farm Fresh",
-                    status: "active"
-                },
-                {
-                    id: 2,
-                    name: "Farm Fresh A2 Desi Cow Milk (1L Family)",
-                    description: "1 Litre family glass bottle of pure unadulterated chilled cow milk, delivered fresh every morning before 7:00 AM.",
-                    category: "Milk",
-                    price: 82,
-                    compare_price: 95,
-                    weight: "1 Litre",
-                    stock: 150,
-                    image: "/assets/images/products/fresh_cow_milk.jpg",
-                    badge: "Family Pack",
-                    status: "active"
-                },
-                {
-                    id: 3,
-                    name: "Pure Hand-Churned Bilona Cow Ghee",
-                    description: "Crafted using the ancient Vedic Bilona method from curd churned bi-directionally. Golden granular texture with divine farm aroma.",
-                    category: "Ghee",
-                    price: 499,
-                    compare_price: 600,
-                    weight: "500 ml",
-                    stock: 45,
-                    image: "/assets/images/products/pure_cow_ghee.jpg",
-                    badge: "Bestseller",
-                    status: "active"
-                },
-                {
-                    id: 4,
-                    name: "Fresh Farm Artisanal Paneer",
-                    description: "Ultra-soft melt-in-mouth cottage cheese made exclusively from fresh whole cow milk. Zero preservatives or chemicals.",
-                    category: "Paneer",
-                    price: 82,
-                    compare_price: 95,
-                    weight: "200 g",
-                    stock: 60,
-                    image: "/assets/images/products/fresh_paneer.jpg",
-                    badge: "Fresh Batch",
-                    status: "active"
-                },
-                {
-                    id: 5,
-                    name: "Natural Probiotic Thick Set Curd",
-                    description: "Naturally fermented probiotic thick clay-pot style set curd crafted with pure farm milk. Perfect for digestion and cooling.",
-                    category: "Curd",
-                    price: 48,
-                    compare_price: 55,
-                    weight: "500 g",
-                    stock: 80,
-                    image: "/assets/images/products/product_lineup.jpg",
-                    badge: "Daily Essential",
-                    status: "active"
-                },
-                {
-                    id: 6,
-                    name: "Wood-Pressed Traditional Groundnut Oil",
-                    description: "Cold-pressed in artisanal wooden chekku at low temperatures to retain natural antioxidants, aroma, and essential fatty acids.",
-                    category: "Oils",
-                    price: 280,
-                    compare_price: 320,
-                    weight: "1 Litre",
-                    stock: 40,
-                    image: "/assets/images/products/product_lineup.jpg",
-                    badge: "Cold Pressed",
-                    status: "active"
-                },
-                {
-                    id: 7,
-                    name: "Wood-Pressed Pure Gingelly / Sesame Oil",
-                    description: "Slow wood-pressed black sesame seeds blended with palm jaggery in traditional stone mortar. Rich golden color and intense flavor.",
-                    category: "Oils",
-                    price: 340,
-                    compare_price: 390,
-                    weight: "1 Litre",
-                    stock: 35,
-                    image: "/assets/images/products/product_lineup.jpg",
-                    badge: "Cold Pressed",
-                    status: "active"
-                },
-                {
-                    id: 8,
-                    name: "Single-Origin Salem Farm Turmeric Powder",
-                    description: "Sun-dried natural Salem turmeric roots finely ground with high natural curcumin content. Natural healing antiseptic spice.",
-                    category: "Masalas",
-                    price: 120,
-                    compare_price: 145,
-                    weight: "250 g",
-                    stock: 50,
-                    image: "/assets/images/products/product_lineup.jpg",
-                    badge: "Pure Spice",
-                    status: "active"
-                },
-                {
-                    id: 9,
-                    name: "Free-Range Pasture Farm Eggs (Pack of 6)",
-                    description: "Nutritious brown eggs laid by cruelty-free country chickens foraging freely in natural green pastures. High protein and omega-3.",
-                    category: "Dairy",
-                    price: 65,
-                    compare_price: 75,
-                    weight: "6 Eggs",
-                    stock: 90,
-                    image: "/assets/images/products/fresh_paneer.jpg",
-                    badge: "Free Range",
-                    status: "active"
-                },
-                {
-                    id: 10,
-                    name: "Raw Unprocessed Wild Forest Honey",
-                    description: "100% pure raw unheated wildflower honey harvested ethically from Eastern Ghats forest apiaries. Naturally rich in enzymes.",
-                    category: "Vegan",
-                    price: 280,
-                    compare_price: 320,
-                    weight: "500 ml",
-                    stock: 30,
-                    image: "/assets/images/products/product_lineup.jpg",
-                    badge: "Wild Harvest",
-                    status: "active"
+            if (existingTables.has("products")) {
+                const catMap = {};
+                if (existingTables.has("categories")) {
+                    try {
+                        const catRows = await pool.query("SELECT id, name FROM categories");
+                        for (const c of catRows.rows) {
+                            catMap[(c.name || "").toLowerCase()] = c.id;
+                        }
+                    } catch (_) {}
                 }
-            ];
 
-            for (const p of sampleProductsList) {
-                const catId = catMap[(p.category || "").toLowerCase()] || 1;
-                await client.query(`
-                    INSERT INTO products (id, name, description, category_id, price, compare_price, weight, stock, image, badge, status)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-                    ON CONFLICT (id) DO UPDATE SET
-                        name = EXCLUDED.name,
-                        description = EXCLUDED.description,
-                        category_id = EXCLUDED.category_id,
-                        price = EXCLUDED.price,
-                        compare_price = EXCLUDED.compare_price,
-                        weight = EXCLUDED.weight,
-                        stock = EXCLUDED.stock,
-                        image = EXCLUDED.image,
-                        badge = EXCLUDED.badge,
-                        status = EXCLUDED.status;
-                `, [p.id, p.name, p.description, catId, p.price, p.compare_price, p.weight, p.stock, p.image, p.badge, p.status]);
+                const sampleProductsList = [
+                    {
+                        id: 1,
+                        name: "Farm Fresh A2 Desi Cow Milk",
+                        description: "100% pure raw chilled A2 cow milk directly from pasture-fed cows in Kanchipuram. Delivered cold to your doorstep by 7:00 AM.",
+                        category: "Milk",
+                        price: 44,
+                        compare_price: 50,
+                        weight: "500 ml",
+                        stock: 120,
+                        image: "/assets/images/products/fresh_cow_milk.jpg",
+                        badge: "Farm Fresh",
+                        status: "active"
+                    },
+                    {
+                        id: 2,
+                        name: "Farm Fresh A2 Desi Cow Milk (1L Family)",
+                        description: "1 Litre family glass bottle of pure unadulterated chilled cow milk, delivered fresh every morning before 7:00 AM.",
+                        category: "Milk",
+                        price: 82,
+                        compare_price: 95,
+                        weight: "1 Litre",
+                        stock: 150,
+                        image: "/assets/images/products/fresh_cow_milk.jpg",
+                        badge: "Family Pack",
+                        status: "active"
+                    },
+                    {
+                        id: 3,
+                        name: "Pure Hand-Churned Bilona Cow Ghee",
+                        description: "Crafted using the ancient Vedic Bilona method from curd churned bi-directionally. Golden granular texture with divine farm aroma.",
+                        category: "Ghee",
+                        price: 499,
+                        compare_price: 600,
+                        weight: "500 ml",
+                        stock: 45,
+                        image: "/assets/images/products/pure_cow_ghee.jpg",
+                        badge: "Bestseller",
+                        status: "active"
+                    },
+                    {
+                        id: 4,
+                        name: "Fresh Farm Artisanal Paneer",
+                        description: "Ultra-soft melt-in-mouth cottage cheese made exclusively from fresh whole cow milk. Zero preservatives or chemicals.",
+                        category: "Paneer",
+                        price: 82,
+                        compare_price: 95,
+                        weight: "200 g",
+                        stock: 60,
+                        image: "/assets/images/products/fresh_paneer.jpg",
+                        badge: "Fresh Batch",
+                        status: "active"
+                    },
+                    {
+                        id: 5,
+                        name: "Natural Probiotic Thick Set Curd",
+                        description: "Naturally fermented probiotic thick clay-pot style set curd crafted with pure farm milk. Perfect for digestion and cooling.",
+                        category: "Curd",
+                        price: 48,
+                        compare_price: 55,
+                        weight: "500 g",
+                        stock: 80,
+                        image: "/assets/images/products/product_lineup.jpg",
+                        badge: "Daily Essential",
+                        status: "active"
+                    },
+                    {
+                        id: 6,
+                        name: "Wood-Pressed Traditional Groundnut Oil",
+                        description: "Cold-pressed in artisanal wooden chekku at low temperatures to retain natural antioxidants, aroma, and essential fatty acids.",
+                        category: "Oils",
+                        price: 280,
+                        compare_price: 320,
+                        weight: "1 Litre",
+                        stock: 40,
+                        image: "/assets/images/products/product_lineup.jpg",
+                        badge: "Cold Pressed",
+                        status: "active"
+                    },
+                    {
+                        id: 7,
+                        name: "Wood-Pressed Pure Gingelly / Sesame Oil",
+                        description: "Slow wood-pressed black sesame seeds blended with palm jaggery in traditional stone mortar. Rich golden color and intense flavor.",
+                        category: "Oils",
+                        price: 340,
+                        compare_price: 390,
+                        weight: "1 Litre",
+                        stock: 35,
+                        image: "/assets/images/products/product_lineup.jpg",
+                        badge: "Cold Pressed",
+                        status: "active"
+                    },
+                    {
+                        id: 8,
+                        name: "Single-Origin Salem Farm Turmeric Powder",
+                        description: "Sun-dried natural Salem turmeric roots finely ground with high natural curcumin content. Natural healing antiseptic spice.",
+                        category: "Masalas",
+                        price: 120,
+                        compare_price: 145,
+                        weight: "250 g",
+                        stock: 50,
+                        image: "/assets/images/products/product_lineup.jpg",
+                        badge: "Pure Spice",
+                        status: "active"
+                    },
+                    {
+                        id: 9,
+                        name: "Free-Range Pasture Farm Eggs (Pack of 6)",
+                        description: "Nutritious brown eggs laid by cruelty-free country chickens foraging freely in natural green pastures. High protein and omega-3.",
+                        category: "Dairy",
+                        price: 65,
+                        compare_price: 75,
+                        weight: "6 Eggs",
+                        stock: 90,
+                        image: "/assets/images/products/fresh_paneer.jpg",
+                        badge: "Free Range",
+                        status: "active"
+                    },
+                    {
+                        id: 10,
+                        name: "Raw Unprocessed Wild Forest Honey",
+                        description: "100% pure raw unheated wildflower honey harvested ethically from Eastern Ghats forest apiaries. Naturally rich in enzymes.",
+                        category: "Vegan",
+                        price: 280,
+                        compare_price: 320,
+                        weight: "500 ml",
+                        stock: 30,
+                        image: "/assets/images/products/product_lineup.jpg",
+                        badge: "Wild Harvest",
+                        status: "active"
+                    }
+                ];
+
+                for (const p of sampleProductsList) {
+                    const catId = catMap[(p.category || "").toLowerCase()] || 1;
+                    try {
+                        await pool.query(`
+                            INSERT INTO products (id, name, description, category_id, price, compare_price, weight, stock, image, badge, status)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                            ON CONFLICT (id) DO UPDATE SET
+                                name = EXCLUDED.name,
+                                description = EXCLUDED.description,
+                                category_id = EXCLUDED.category_id,
+                                price = EXCLUDED.price,
+                                compare_price = EXCLUDED.compare_price,
+                                weight = EXCLUDED.weight,
+                                stock = EXCLUDED.stock,
+                                image = EXCLUDED.image,
+                                badge = EXCLUDED.badge,
+                                status = EXCLUDED.status;
+                        `, [p.id, p.name, p.description, catId, p.price, p.compare_price, p.weight, p.stock, p.image, p.badge, p.status]);
+                    } catch (pErr) {
+                        console.warn(`[PRODUCT SEED ERROR #${p.id}]:`, pErr.message);
+                        dbErrors.push(`product #${p.id}: ${pErr.message}`);
+                    }
+                }
+
+                await pool.query("SELECT setval('products_id_seq', (SELECT COALESCE(MAX(id), 1) FROM products));").catch(() => {});
+                console.log("[PRODUCT SEED SUCCESS]: 10 sample products seeded into PostgreSQL");
             }
-
-            await client.query("SELECT setval('products_id_seq', (SELECT COALESCE(MAX(id), 1) FROM products));").catch(() => {});
-
-            await client.query("COMMIT");
-            console.log("[MAINTENANCE RESET]: PostgreSQL transaction committed successfully");
         } catch (dbErr) {
-            if (client) await client.query("ROLLBACK").catch(() => {});
             console.error("[MAINTENANCE RESET DB ERROR]:", dbErr.message);
-        } finally {
-            if (client) client.release();
+            dbErrors.push(`general db: ${dbErr.message}`);
         }
 
         // 2. DISK FILESYSTEM RESET (JSON PERSISTENCE & CACHES)
@@ -700,7 +730,8 @@ router.post("/maintenance/reset-production-data", async (req, res) => {
                 customers: custCount,
                 delivery_partners: partnerCount,
                 products: prodCount
-            }
+            },
+            db_errors: dbErrors
         });
     } catch (err) {
         console.error("[MAINTENANCE RESET FATAL]:", err);
