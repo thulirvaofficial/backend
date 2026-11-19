@@ -6,6 +6,36 @@ const { authenticateToken, adminOnly } = require("../middleware/auth");
 
 const router = express.Router();
 
+const CATEGORIES_FILE = path.resolve(__dirname, "..", "data", "categories.json");
+
+function ensureDirectoryExists() {
+    const dir = path.dirname(CATEGORIES_FILE);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+}
+
+function loadLocalCategories() {
+    ensureDirectoryExists();
+    try {
+        if (fs.existsSync(CATEGORIES_FILE)) {
+            const raw = fs.readFileSync(CATEGORIES_FILE, "utf-8");
+            const data = JSON.parse(raw);
+            if (Array.isArray(data)) return data;
+        }
+    } catch (_) {}
+    return [];
+}
+
+function saveLocalCategories(cats) {
+    ensureDirectoryExists();
+    try {
+        fs.writeFileSync(CATEGORIES_FILE, JSON.stringify(cats, null, 2), "utf-8");
+    } catch (err) {
+        console.error("[CATEGORIES] Error writing to disk:", err);
+    }
+}
+
 function saveBase64Image(image, prefix = "cat") {
     if (!image || typeof image !== "string") return image;
     if (image.startsWith("data:image/")) {
@@ -14,14 +44,14 @@ function saveBase64Image(image, prefix = "cat") {
             if (matches) {
                 const ext = matches[1].includes("jpeg") ? "jpg" : (matches[1].includes("png") ? "png" : "jpg");
                 const buffer = Buffer.from(matches[2], "base64");
-                const uploadsDir = path.resolve(__dirname, "..", "..", "website", "website", "assets", "images", "uploads");
+                const uploadsDir = path.resolve(__dirname, "..", "public", "uploads", "categories");
                 if (!fs.existsSync(uploadsDir)) {
                     fs.mkdirSync(uploadsDir, { recursive: true });
                 }
                 const fileName = `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1000)}.${ext}`;
                 const filePath = path.join(uploadsDir, fileName);
                 fs.writeFileSync(filePath, buffer);
-                return `/assets/images/uploads/${fileName}`;
+                return `/uploads/categories/${fileName}`;
             }
         } catch (err) {
             console.error("Error saving uploaded image:", err);
@@ -30,323 +60,328 @@ function saveBase64Image(image, prefix = "cat") {
     return image;
 }
 
-let MOCK_CATEGORIES = [
-    {
-        id: 1,
-        name: "Milk",
-        displayName: "Fresh Cow Milk",
-        slug: "milk",
-        description: "Farm fresh A2 raw & chilled cow milk bottled within hours of morning milking.",
-        image: "/assets/images/products/fresh_cow_milk.jpg",
-        website_image: "/assets/images/products/fresh_cow_milk.jpg",
-        mobile_image: "/assets/images/products/fresh_cow_milk.jpg",
-        appImage: "/assets/images/products/fresh_cow_milk.jpg",
-        is_active: true,
-        display_order: 1,
-        emoji: "🥛",
-        itemCount: 2
-    },
-    {
-        id: 2,
-        name: "Ghee",
-        displayName: "Ghee & Butter",
-        slug: "ghee",
-        description: "Traditional hand-churned Bilona cow ghee and fresh cultured farm butter.",
-        image: "/assets/images/products/pure_cow_ghee.jpg",
-        website_image: "/assets/images/products/pure_cow_ghee.jpg",
-        mobile_image: "/assets/images/products/pure_cow_ghee.jpg",
-        appImage: "/assets/images/products/pure_cow_ghee.jpg",
-        is_active: true,
-        display_order: 2,
-        emoji: "🧈",
-        itemCount: 2
-    },
-    {
-        id: 3,
-        name: "Paneer",
-        displayName: "Paneer & Tofu",
-        slug: "paneer",
-        description: "Soft, melt-in-mouth cottage cheese and non-GMO organic artisanal tofu.",
-        image: "/assets/images/products/fresh_paneer.jpg",
-        website_image: "/assets/images/products/fresh_paneer.jpg",
-        mobile_image: "/assets/images/products/fresh_paneer.jpg",
-        appImage: "/assets/images/products/fresh_paneer.jpg",
-        is_active: true,
-        display_order: 3,
-        emoji: "🧀",
-        itemCount: 2
-    },
-    {
-        id: 4,
-        name: "Curd",
-        displayName: "Natural Set Curd",
-        slug: "curd",
-        description: "Naturally cultured probiotic thick set curd made with pure wholesome cow milk.",
-        image: "/assets/images/products/product_lineup.jpg",
-        website_image: "/assets/images/products/product_lineup.jpg",
-        mobile_image: "/assets/images/products/product_lineup.jpg",
-        appImage: "/assets/images/products/product_lineup.jpg",
-        is_active: true,
-        display_order: 4,
-        emoji: "🫙",
-        itemCount: 1
-    },
-    {
-        id: 5,
-        name: "Oils",
-        displayName: "Cold-Pressed Oils",
-        slug: "oils",
-        description: "Traditional wooden chekku cold-pressed groundnut and gingelly oils.",
-        image: "/assets/images/products/product_lineup.jpg",
-        website_image: "/assets/images/products/product_lineup.jpg",
-        mobile_image: "/assets/images/products/product_lineup.jpg",
-        appImage: "/assets/images/products/product_lineup.jpg",
-        is_active: true,
-        display_order: 5,
-        emoji: "🫗",
-        itemCount: 2
-    },
-    {
-        id: 6,
-        name: "Masalas",
-        displayName: "Pure Spices & Masalas",
-        slug: "masalas",
-        description: "Single-origin Salem turmeric powder and aromatic farm-ground spice blends.",
-        image: "/assets/images/products/product_lineup.jpg",
-        website_image: "/assets/images/products/product_lineup.jpg",
-        mobile_image: "/assets/images/products/product_lineup.jpg",
-        appImage: "/assets/images/products/product_lineup.jpg",
-        is_active: true,
-        display_order: 6,
-        emoji: "🌶️",
-        itemCount: 1
-    },
-    {
-        id: 7,
-        name: "Vegan",
-        displayName: "Vegan & Plant-Based",
-        slug: "vegan",
-        description: "Plant-based oat & almond milk, organic soy tofu, and raw wild honey.",
-        image: "/assets/images/products/fresh_paneer.jpg",
-        website_image: "/assets/images/products/fresh_paneer.jpg",
-        mobile_image: "/assets/images/products/fresh_paneer.jpg",
-        appImage: "/assets/images/products/fresh_paneer.jpg",
-        is_active: true,
-        display_order: 7,
-        emoji: "🌱",
-        itemCount: 3
-    }
-];
-
 function normalizeCategory(r) {
-    const webImg = r.website_image || r.image || "/assets/images/products/fresh_cow_milk.jpg";
-    const mobImg = r.mobile_image || r.app_image || r.appImage || webImg;
+    const catId = Number(r.category_id || r.id);
+    const catName = (r.category_name || r.name || r.displayName || r.display_name || "").trim();
+    const dispName = (r.display_name || r.displayName || catName).trim();
+    const catKey = (r.category_key || r.slug || catName.toLowerCase().replace(/[^a-z0-9]/g, "_")).trim();
+    
+    // Description must be exactly what is stored, or null if empty/deleted
+    let desc = r.category_description !== undefined ? r.category_description : r.description;
+    if (desc !== null && desc !== undefined) {
+        desc = desc.toString().trim();
+        if (desc.length === 0) desc = null;
+    } else {
+        desc = null;
+    }
+
+    const webImg = r.category_image || r.website_image || r.image || "/assets/images/products/fresh_cow_milk.jpg";
+    const mobImg = r.mobile_image || r.app_image || r.appImage || r.category_image || webImg;
+    const catIcon = r.category_icon || r.emoji || "🥛";
+    const isActive = r.is_active !== undefined ? Boolean(r.is_active) : (r.status !== 'inactive');
+    const displayOrder = Number(r.display_order ?? r.id ?? 1);
+    const updatedAt = r.updated_at || new Date().toISOString();
+    const itemCount = Number(r.itemCount || r.item_count || 0);
+
     return {
-        ...r,
-        displayName: r.display_name || r.displayName || r.name,
-        display_name: r.display_name || r.displayName || r.name,
+        id: catId,
+        category_id: catId,
+        category_key: catKey,
+        name: catName,
+        category_name: catName,
+        displayName: dispName,
+        display_name: dispName,
+        slug: catKey,
+        description: desc,
+        category_description: desc,
         image: webImg,
+        category_image: mobImg,
         website_image: webImg,
         mobile_image: mobImg,
         appImage: mobImg,
-        is_active: r.is_active !== undefined ? Boolean(r.is_active) : (r.status !== 'inactive'),
-        display_order: Number(r.display_order || r.id || 1)
+        emoji: catIcon,
+        category_icon: catIcon,
+        is_active: isActive,
+        display_order: displayOrder,
+        updated_at: updatedAt,
+        itemCount: itemCount
     };
 }
 
-/* GET ALL CATEGORIES */
-router.get("/", async (req, res) => {
+/* =========================================================================
+   PUBLIC / CUSTOMER CATEGORIES APIs
+========================================================================= */
+
+// GET ALL CATEGORIES
+router.get(["/", "/all", "/list"], async (req, res) => {
+    res.set("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
+
     try {
-        const result = await pool.query(
-            "SELECT * FROM categories ORDER BY COALESCE(display_order, id) ASC, id ASC"
-        );
-        if (result.rows.length > 0) {
-            const mapped = result.rows.map(normalizeCategory);
-            return res.json({
-                success: true,
-                categories: mapped
-            });
+        let categories = [];
+        try {
+            const dbResult = await pool.query(
+                "SELECT * FROM categories ORDER BY COALESCE(display_order, id) ASC, id ASC"
+            );
+            if (dbResult.rows && dbResult.rows.length > 0) {
+                categories = dbResult.rows.map(normalizeCategory);
+            }
+        } catch (_) {}
+
+        if (!categories.length) {
+            categories = loadLocalCategories().map(normalizeCategory);
         }
-        res.json({
+
+        // Public filter: only return active categories unless explicitly requested with ?all=true
+        const includeInactive = req.query.all === "true" || req.query.include_inactive === "true";
+        const filtered = includeInactive ? categories : categories.filter(c => c.is_active !== false);
+
+        // Ensure sorted by display_order ASC
+        filtered.sort((a, b) => a.display_order - b.display_order || a.id - b.id);
+
+        return res.json({
             success: true,
-            categories: MOCK_CATEGORIES.map(normalizeCategory)
+            total: filtered.length,
+            categories: filtered
         });
-    } catch (error) {
-        res.json({
-            success: true,
-            categories: MOCK_CATEGORIES.map(normalizeCategory)
-        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 });
 
-/* GET SINGLE CATEGORY */
+// GET SINGLE CATEGORY
 router.get("/:id", async (req, res) => {
-    const id = parseInt(req.params.id);
+    res.set("Cache-Control", "no-cache, no-store, must-revalidate");
+    const id = parseInt(req.params.id, 10);
+    const key = req.params.id.toString().trim();
+
     try {
-        const result = await pool.query("SELECT * FROM categories WHERE id=$1", [id]);
-        if (result.rows.length > 0) {
-            return res.json({ success: true, category: normalizeCategory(result.rows[0]) });
+        let category = null;
+        try {
+            const result = await pool.query(
+                "SELECT * FROM categories WHERE id=$1 OR slug=$2 OR name ILIKE $2 LIMIT 1",
+                [isNaN(id) ? -1 : id, key]
+            );
+            if (result.rows.length > 0) {
+                category = normalizeCategory(result.rows[0]);
+            }
+        } catch (_) {}
+
+        if (!category) {
+            const local = loadLocalCategories();
+            const found = local.find(c => c.id === id || c.category_id === id || c.category_key === key || c.name === key);
+            if (found) category = normalizeCategory(found);
         }
-        const fallback = MOCK_CATEGORIES.find(c => c.id === id) || MOCK_CATEGORIES[0];
-        res.json({ success: true, category: normalizeCategory(fallback) });
-    } catch {
-        const fallback = MOCK_CATEGORIES.find(c => c.id === id) || MOCK_CATEGORIES[0];
-        res.json({ success: true, category: normalizeCategory(fallback) });
+
+        if (category) {
+            return res.json({ success: true, category });
+        }
+        return res.status(404).json({ success: false, message: `Category not found for '${req.params.id}'` });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 });
 
-/* CREATE CATEGORY (Admin Only) */
-router.post("/", authenticateToken, adminOnly, async (req, res) => {
+/* =========================================================================
+   ADMIN CATEGORY MANAGEMENT APIs (Create, Update, Delete)
+========================================================================= */
+
+// CREATE CATEGORY (Admin Only)
+router.post(["/", "/create"], authenticateToken, adminOnly, async (req, res) => {
     try {
-        const { name, displayName, description, image, website_image, mobile_image, appImage, emoji, is_active, display_order } = req.body;
+        const body = req.body || {};
+        const name = (body.name || body.category_name || body.displayName || body.display_name || "").trim();
         if (!name) {
             return res.status(400).json({ success: false, message: "Category name is required" });
         }
 
-        const savedWebImg = saveBase64Image(website_image || image, "cat_web") || "/assets/images/products/fresh_cow_milk.jpg";
-        const savedMobImg = saveBase64Image(mobile_image || appImage, "cat_mob") || savedWebImg;
-        const active = is_active !== undefined ? Boolean(is_active) : true;
-        const orderNum = parseInt(display_order, 10) || 1;
-        const slug = name.toLowerCase().replace(/[^a-z0-9]/g, "-");
+        const displayName = (body.displayName || body.display_name || name).trim();
+        const categoryKey = (body.category_key || body.slug || name.toLowerCase().replace(/[^a-z0-9]/g, "_")).trim();
+        const description = (body.category_description !== undefined ? body.category_description : body.description)?.toString().trim() || null;
+        const icon = body.category_icon || body.emoji || "🏷️";
+        const orderNum = parseInt(body.display_order, 10) || 1;
+        const active = body.is_active !== undefined ? Boolean(body.is_active) : true;
+        const now = new Date().toISOString();
 
+        const savedWebImg = saveBase64Image(body.website_image || body.category_image || body.image, "cat_web") || "/assets/images/products/fresh_cow_milk.jpg";
+        const savedMobImg = saveBase64Image(body.mobile_image || body.appImage || body.category_image, "cat_mob") || savedWebImg;
+
+        let createdCategory = null;
+
+        // 1. Try DB insertion
         try {
-            const result = await pool.query(
-                `INSERT INTO categories (name, display_name, description, image, website_image, mobile_image, is_active, display_order, emoji)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            const dbRes = await pool.query(
+                `INSERT INTO categories (name, display_name, description, slug, image, website_image, mobile_image, emoji, display_order, is_active, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
                  RETURNING *`,
-                [displayName || name, displayName || name, description || "", savedWebImg, savedWebImg, savedMobImg, active, orderNum, emoji || "🏷️"]
+                [name, displayName, description, categoryKey, savedWebImg, savedWebImg, savedMobImg, icon, orderNum, active]
             );
-            return res.json({
-                success: true,
-                category: normalizeCategory(result.rows[0]),
-                message: "Category created successfully"
-            });
-        } catch {
-            // Fallback in-memory
-            const newId = MOCK_CATEGORIES.length ? Math.max(...MOCK_CATEGORIES.map(c => c.id)) + 1 : 1;
-            const newCategory = normalizeCategory({
-                id: newId,
-                name: name,
-                displayName: displayName || name,
-                display_name: displayName || name,
-                slug,
-                description: description || "Fresh farm quality category.",
+            if (dbRes.rows && dbRes.rows.length > 0) {
+                createdCategory = normalizeCategory(dbRes.rows[0]);
+            }
+        } catch (_) {}
+
+        // 2. Persist to disk categories.json
+        const local = loadLocalCategories();
+        const nextId = createdCategory ? createdCategory.id : (local.length ? Math.max(...local.map(c => Number(c.id || 0))) + 1 : 1);
+
+        if (!createdCategory) {
+            createdCategory = normalizeCategory({
+                id: nextId,
+                category_id: nextId,
+                category_key: categoryKey,
+                name,
+                category_name: name,
+                displayName,
+                display_name: displayName,
+                slug: categoryKey,
+                description,
+                category_description: description,
                 image: savedWebImg,
+                category_image: savedMobImg,
                 website_image: savedWebImg,
                 mobile_image: savedMobImg,
                 appImage: savedMobImg,
-                is_active: active,
+                emoji: icon,
+                category_icon: icon,
                 display_order: orderNum,
-                emoji: emoji || "🏷️",
+                is_active: active,
+                updated_at: now,
                 itemCount: 0
             });
-            MOCK_CATEGORIES.push(newCategory);
-            return res.json({
-                success: true,
-                category: newCategory,
-                message: "Category created successfully"
-            });
         }
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+
+        local.push(createdCategory);
+        local.sort((a, b) => a.display_order - b.display_order || a.id - b.id);
+        saveLocalCategories(local);
+
+        return res.json({
+            success: true,
+            message: "Category created successfully",
+            category: createdCategory
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 });
 
-/* UPDATE CATEGORY (Admin Only) */
-router.put("/:id", authenticateToken, adminOnly, async (req, res) => {
+// UPDATE CATEGORY (Admin Only)
+router.put(["/:id", "/update/:id"], authenticateToken, adminOnly, async (req, res) => {
     try {
-        const id = parseInt(req.params.id);
-        const { name, displayName, description, image, website_image, mobile_image, appImage, emoji, is_active, display_order } = req.body;
-        const savedWebImg = website_image !== undefined || image !== undefined ? saveBase64Image(website_image || image, "cat_web") : undefined;
-        const savedMobImg = mobile_image !== undefined || appImage !== undefined ? saveBase64Image(mobile_image || appImage, "cat_mob") : undefined;
-        const active = is_active !== undefined ? Boolean(is_active) : undefined;
-        const orderNum = display_order !== undefined ? parseInt(display_order, 10) : undefined;
+        const id = parseInt(req.params.id, 10);
+        const body = req.body || {};
+        const now = new Date().toISOString();
 
+        const local = loadLocalCategories();
+        const idx = local.findIndex(c => Number(c.id) === id || Number(c.category_id) === id);
+
+        if (idx === -1) {
+            return res.status(404).json({ success: false, message: `Category #${id} not found.` });
+        }
+
+        const existing = local[idx];
+
+        // Process fields explicitly so empty string ("") properly clears the description
+        let updatedDescription = existing.description;
+        if (body.category_description !== undefined) {
+            const raw = body.category_description;
+            updatedDescription = (raw !== null && raw !== undefined && raw.toString().trim().length > 0) ? raw.toString().trim() : null;
+        } else if (body.description !== undefined) {
+            const raw = body.description;
+            updatedDescription = (raw !== null && raw !== undefined && raw.toString().trim().length > 0) ? raw.toString().trim() : null;
+        }
+
+        const updatedName = (body.name || body.category_name || existing.name).trim();
+        const updatedDisplayName = (body.displayName || body.display_name || body.name || existing.displayName || existing.name).trim();
+        const updatedKey = (body.category_key || body.slug || existing.category_key || existing.slug || updatedName.toLowerCase().replace(/[^a-z0-9]/g, "_")).trim();
+        const updatedOrder = body.display_order !== undefined ? parseInt(body.display_order, 10) : existing.display_order;
+        const updatedActive = body.is_active !== undefined ? Boolean(body.is_active) : existing.is_active;
+        const updatedIcon = body.category_icon || body.emoji || existing.category_icon || existing.emoji || "🥛";
+
+        let savedWebImg = existing.website_image || existing.image;
+        if (body.website_image !== undefined || body.category_image !== undefined || body.image !== undefined) {
+            savedWebImg = saveBase64Image(body.website_image || body.category_image || body.image, "cat_web");
+        }
+        let savedMobImg = existing.mobile_image || existing.appImage || savedWebImg;
+        if (body.mobile_image !== undefined || body.appImage !== undefined || body.category_image !== undefined) {
+            savedMobImg = saveBase64Image(body.mobile_image || body.appImage || body.category_image, "cat_mob");
+        }
+
+        // 1. Try DB update
         try {
-            const result = await pool.query(
+            await pool.query(
                 `UPDATE categories
-                 SET name = COALESCE($1, name),
-                     display_name = COALESCE($2, display_name, name),
-                     description = COALESCE($3, description),
-                     image = COALESCE($4, image),
-                     website_image = COALESCE($4, website_image, image),
-                     mobile_image = COALESCE($5, mobile_image, $4, image),
-                     is_active = COALESCE($6, is_active),
-                     display_order = COALESCE($7, display_order),
-                     emoji = COALESCE($8, emoji)
-                 WHERE id = $9
-                 RETURNING *`,
-                [displayName || name, displayName || name, description, savedWebImg, savedMobImg, active, orderNum, emoji, id]
+                 SET name = $1,
+                     display_name = $2,
+                     description = $3,
+                     slug = $4,
+                     image = $5,
+                     website_image = $5,
+                     mobile_image = $6,
+                     emoji = $7,
+                     display_order = $8,
+                     is_active = $9,
+                     updated_at = NOW()
+                 WHERE id = $10`,
+                [updatedName, updatedDisplayName, updatedDescription, updatedKey, savedWebImg, savedMobImg, updatedIcon, updatedOrder, updatedActive, id]
             );
-            if (result.rows.length > 0) {
-                return res.json({
-                    success: true,
-                    category: normalizeCategory(result.rows[0]),
-                    message: "Category updated successfully"
-                });
-            }
-        } catch {
-            // Fallback in-memory
-            const idx = MOCK_CATEGORIES.findIndex(c => c.id === id);
-            if (idx !== -1) {
-                MOCK_CATEGORIES[idx] = normalizeCategory({
-                    ...MOCK_CATEGORIES[idx],
-                    name: name !== undefined ? name : MOCK_CATEGORIES[idx].name,
-                    displayName: displayName !== undefined ? displayName : (name || MOCK_CATEGORIES[idx].displayName),
-                    description: description !== undefined ? description : MOCK_CATEGORIES[idx].description,
-                    website_image: savedWebImg !== undefined ? savedWebImg : MOCK_CATEGORIES[idx].website_image,
-                    mobile_image: savedMobImg !== undefined ? savedMobImg : MOCK_CATEGORIES[idx].mobile_image,
-                    appImage: savedMobImg !== undefined ? savedMobImg : MOCK_CATEGORIES[idx].mobile_image,
-                    is_active: active !== undefined ? active : MOCK_CATEGORIES[idx].is_active,
-                    display_order: orderNum !== undefined ? orderNum : MOCK_CATEGORIES[idx].display_order,
-                    emoji: emoji !== undefined ? emoji : MOCK_CATEGORIES[idx].emoji
-                });
-                return res.json({
-                    success: true,
-                    category: MOCK_CATEGORIES[idx],
-                    message: "Category updated successfully"
-                });
-            }
-        }
+        } catch (_) {}
 
-        // Check in-memory fallback
-        const idx = MOCK_CATEGORIES.findIndex(c => c.id === id);
-        if (idx !== -1) {
-            MOCK_CATEGORIES[idx] = normalizeCategory({
-                ...MOCK_CATEGORIES[idx],
-                name: name !== undefined ? name : MOCK_CATEGORIES[idx].name,
-                displayName: displayName !== undefined ? displayName : (name || MOCK_CATEGORIES[idx].displayName),
-                description: description !== undefined ? description : MOCK_CATEGORIES[idx].description,
-                website_image: savedWebImg !== undefined ? savedWebImg : MOCK_CATEGORIES[idx].website_image,
-                mobile_image: savedMobImg !== undefined ? savedMobImg : MOCK_CATEGORIES[idx].mobile_image,
-                appImage: savedMobImg !== undefined ? savedMobImg : MOCK_CATEGORIES[idx].mobile_image,
-                is_active: active !== undefined ? active : MOCK_CATEGORIES[idx].is_active,
-                display_order: orderNum !== undefined ? orderNum : MOCK_CATEGORIES[idx].display_order,
-                emoji: emoji !== undefined ? emoji : MOCK_CATEGORIES[idx].emoji
-            });
-            return res.json({
-                success: true,
-                category: MOCK_CATEGORIES[idx],
-                message: "Category updated successfully"
-            });
-        }
+        // 2. Persist to disk
+        local[idx] = normalizeCategory({
+            ...existing,
+            id,
+            category_id: id,
+            name: updatedName,
+            category_name: updatedName,
+            displayName: updatedDisplayName,
+            display_name: updatedDisplayName,
+            category_key: updatedKey,
+            slug: updatedKey,
+            description: updatedDescription,
+            category_description: updatedDescription,
+            image: savedWebImg,
+            category_image: savedMobImg,
+            website_image: savedWebImg,
+            mobile_image: savedMobImg,
+            appImage: savedMobImg,
+            emoji: updatedIcon,
+            category_icon: updatedIcon,
+            display_order: updatedOrder,
+            is_active: updatedActive,
+            updated_at: now
+        });
 
-        res.json({ success: true, message: "Category updated" });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        local.sort((a, b) => a.display_order - b.display_order || a.id - b.id);
+        saveLocalCategories(local);
+
+        return res.json({
+            success: true,
+            message: "Category updated successfully",
+            category: local[idx]
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 });
 
-/* DELETE CATEGORY (Admin Only) */
+// DELETE CATEGORY (Admin Only)
 router.delete("/:id", authenticateToken, adminOnly, async (req, res) => {
-    const id = parseInt(req.params.id);
     try {
-        await pool.query("DELETE FROM categories WHERE id=$1", [id]);
-    } catch {
-        // Fallback
+        const id = parseInt(req.params.id, 10);
+        try {
+            await pool.query("DELETE FROM categories WHERE id=$1", [id]);
+        } catch (_) {}
+
+        const local = loadLocalCategories();
+        const updated = local.filter(c => Number(c.id) !== id && Number(c.category_id) !== id);
+        saveLocalCategories(updated);
+
+        return res.json({ success: true, message: "Category deleted successfully" });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
-    MOCK_CATEGORIES = MOCK_CATEGORIES.filter(c => c.id !== id);
-    res.json({ success: true, message: "Category deleted successfully" });
 });
 
 module.exports = router;

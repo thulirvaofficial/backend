@@ -157,6 +157,11 @@ app.use(
 );
 
 app.use(
+    "/api/admin/categories",
+    categoryRoutes
+);
+
+app.use(
     "/api/orders",
     orderRoutes
 );
