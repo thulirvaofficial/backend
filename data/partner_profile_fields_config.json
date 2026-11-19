@@ -1,0 +1,116 @@
+[
+  {
+    "field_key": "name",
+    "label": "Full Name",
+    "placeholder": "Enter your full name",
+    "is_active": true,
+    "is_visible": true,
+    "is_editable": true,
+    "is_required": true,
+    "validation_rule": "name",
+    "options": null,
+    "order": 1
+  },
+  {
+    "field_key": "phone",
+    "label": "Mobile Number",
+    "placeholder": "10-digit mobile number",
+    "is_active": true,
+    "is_visible": true,
+    "is_editable": false,
+    "is_required": true,
+    "validation_rule": "phone",
+    "options": null,
+    "order": 2
+  },
+  {
+    "field_key": "email",
+    "label": "Email Address",
+    "placeholder": "Enter your email address",
+    "is_active": true,
+    "is_visible": true,
+    "is_editable": true,
+    "is_required": false,
+    "validation_rule": "email",
+    "options": null,
+    "order": 3
+  },
+  {
+    "field_key": "vehicle_type",
+    "label": "Vehicle Type",
+    "placeholder": "Select vehicle type",
+    "is_active": true,
+    "is_visible": true,
+    "is_editable": true,
+    "is_required": true,
+    "validation_rule": "vehicle_type",
+    "options": [
+      "Electric Scooter",
+      "Scooter",
+      "Motorcycle",
+      "Van",
+      "Bicycle"
+    ],
+    "order": 4
+  },
+  {
+    "field_key": "vehicle_number",
+    "label": "Vehicle Registration Number",
+    "placeholder": "TN 07 KK 1412",
+    "is_active": true,
+    "is_visible": true,
+    "is_editable": true,
+    "is_required": true,
+    "validation_rule": "vehicle_number",
+    "options": null,
+    "order": 5
+  },
+  {
+    "field_key": "address",
+    "label": "Residential Address",
+    "placeholder": "Street address / Door No.",
+    "is_active": true,
+    "is_visible": true,
+    "is_editable": true,
+    "is_required": false,
+    "validation_rule": "text",
+    "options": null,
+    "order": 6
+  },
+  {
+    "field_key": "city",
+    "label": "City",
+    "placeholder": "e.g. Chennai",
+    "is_active": true,
+    "is_visible": true,
+    "is_editable": true,
+    "is_required": false,
+    "validation_rule": "text",
+    "options": null,
+    "order": 7
+  },
+  {
+    "field_key": "pincode",
+    "label": "PIN Code",
+    "placeholder": "6-digit PIN code",
+    "is_active": true,
+    "is_visible": true,
+    "is_editable": true,
+    "is_required": false,
+    "validation_rule": "pincode",
+    "options": null,
+    "order": 8
+  },
+  {
+    "field_key": "emergency_contact",
+    "label": "Emergency Contact",
+    "placeholder": "Emergency phone number",
+    "is_active": true,
+    "is_visible": true,
+    "is_editable": true,
+    "is_required": false,
+    "validation_rule": "phone",
+    "options": null,
+    "order": 9
+  }
+]

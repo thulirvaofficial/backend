@@ -21,6 +21,10 @@ const {
     loadPartnersFromDisk,
     savePartnersToDisk
 } = require("../services/deliveryPartnerService");
+const {
+    getPartnerProfileFieldsConfig,
+    updatePartnerProfileFieldsConfig
+} = require("../services/partnerProfileConfigService");
 
 const router = express.Router();
 const { authenticateToken, adminOnly } = require("../middleware/auth");
@@ -499,11 +503,44 @@ router.get("/partners/:id/attendance", (req, res) => {
     }
 });
 
+// GET /api/admin/delivery/profile-fields-config
+router.get("/profile-fields-config", async (req, res) => {
+    try {
+        const fields = await getPartnerProfileFieldsConfig();
+        return res.json({ success: true, fields });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// PUT /api/admin/delivery/profile-fields-config & POST /api/admin/delivery/profile-fields-config
+const saveFieldsConfigHandler = async (req, res) => {
+    try {
+        const fields = Array.isArray(req.body.fields) ? req.body.fields : (Array.isArray(req.body) ? req.body : null);
+        if (!fields) {
+            return res.status(400).json({ success: false, message: "Field configuration must be an array of fields." });
+        }
+        const updated = await updatePartnerProfileFieldsConfig(fields);
+        await recordAudit(req.user ? req.user.username : "Operations Admin", "UPDATE_PARTNER_PROFILE_FIELDS_CONFIG", {
+            fieldsCount: updated.length
+        });
+        return res.json({
+            success: true,
+            message: "Delivery partner profile field configuration saved successfully.",
+            fields: updated
+        });
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message });
+    }
+};
+router.put("/profile-fields-config", saveFieldsConfigHandler);
+router.post("/profile-fields-config", saveFieldsConfigHandler);
+
 /**
  * Catch-all parameter routes for /api/admin/delivery/:id
  */
 router.get("/:id", (req, res, next) => {
-    const reserved = ["partners", "pending", "fleet-statistics", "live-tracking", "live-locations", "audit-logs", "attendance", "settings", "dispatch"];
+    const reserved = ["partners", "pending", "fleet-statistics", "live-tracking", "live-locations", "audit-logs", "attendance", "settings", "dispatch", "profile-fields-config"];
     if (reserved.includes(req.params.id)) {
         return next();
     }
@@ -511,7 +548,7 @@ router.get("/:id", (req, res, next) => {
 });
 
 router.delete("/:id", (req, res, next) => {
-    const reserved = ["partners", "pending", "fleet-statistics", "live-tracking", "live-locations", "audit-logs", "attendance", "settings", "dispatch"];
+    const reserved = ["partners", "pending", "fleet-statistics", "live-tracking", "live-locations", "audit-logs", "attendance", "settings", "dispatch", "profile-fields-config"];
     if (reserved.includes(req.params.id)) {
         return next();
     }

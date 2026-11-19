@@ -37,6 +37,12 @@ const {
     getPartnerById,
     savePartner
 } = require("../services/deliveryPartnerService");
+const {
+    getPartnerProfileFieldsConfig,
+    validateProfileSubmission,
+    isPlaceholderVehicleNumber,
+    normalizeVehicleNumber
+} = require("../services/partnerProfileConfigService");
 const { addDeviceToken } = require("../services/tokenStore");
 const { uploadDeliveryProof, uploadPartnerPhoto } = require("../middleware/uploadMiddleware");
 const { saveDeliveryProof, completeDelivery, getDeliveryDetails } = require("../services/deliveryProofService");
@@ -251,7 +257,7 @@ const registerPartnerHandler = async (req, res) => {
             pincode: pincode ? pincode.trim() : "",
             assigned_area: assigned_area.trim(),
             vehicle_type: vehicle_type.trim(),
-            vehicle_number: vehicle_number.trim().toUpperCase(),
+            vehicle_number: isPlaceholderVehicleNumber(vehicle_number) ? "" : normalizeVehicleNumber(vehicle_number.trim().toUpperCase()),
             driving_licence: driving_licence ? driving_licence.trim() : null,
             identity_documents: identity_documents ? identity_documents.trim() : null,
             emergency_contact: emergency_contact ? emergency_contact.trim() : null,
@@ -717,6 +723,19 @@ router.post("/forgot-password", async (req, res) => {
 router.post("/auth/forgot-password", (req, res) => res.redirect(307, "../forgot-password"));
 
 /**
+ * GET /api/delivery/profile-fields-config & /api/delivery/profile/fields-config
+ * Fetch dynamic delivery partner profile fields configuration
+ */
+router.get(["/profile-fields-config", "/profile/fields-config"], async (req, res) => {
+    try {
+        const fields = await getPartnerProfileFieldsConfig();
+        return res.json({ success: true, fields });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
  * GET /api/delivery/profile
  */
 router.get("/profile", authenticatePartner, async (req, res) => {
@@ -740,8 +759,17 @@ router.get("/profile", authenticatePartner, async (req, res) => {
     const completedSubs = (subsData.deliveries || []).filter(d => d.status === "delivered").length;
     const calculatedTrips = (Number(partner.total_deliveries_count) || 0) + completedOrders + completedSubs;
 
+    const fieldsConfig = await getPartnerProfileFieldsConfig();
+
+    // Ensure dummy placeholder is never returned as actual vehicle number data
+    let cleanVehicleNumber = partner.vehicle_number || "";
+    if (isPlaceholderVehicleNumber(cleanVehicleNumber)) {
+        cleanVehicleNumber = "";
+    }
+
     return res.json({
         success: true,
+        fields_config: fieldsConfig,
         partner: {
             partner_id: partner.partner_id,
             name: partner.name,
@@ -753,7 +781,7 @@ router.get("/profile", authenticatePartner, async (req, res) => {
             pincode: partner.pincode || "",
             assigned_area: partner.assigned_area,
             vehicle_type: partner.vehicle_type,
-            vehicle_number: partner.vehicle_number,
+            vehicle_number: cleanVehicleNumber,
             emergency_contact: partner.emergency_contact || null,
             current_latitude: partner.current_latitude,
             current_longitude: partner.current_longitude,
@@ -771,31 +799,30 @@ router.get("/profile", authenticatePartner, async (req, res) => {
 
 /**
  * PUT /api/delivery/profile & POST /api/delivery/profile/update
- * Update partner profile details
+ * Update partner profile details with Admin Field Controls & Strict Permissions
  */
 const updatePartnerProfileHandler = async (req, res) => {
     try {
         const partnerId = req.partner.partner_id;
-        const {
-            name, phone, email, address, city, pincode,
-            vehicle_type, vehicle_number, emergency_contact, assigned_area
-        } = req.body;
 
         let partner = await getPartnerById(partnerId);
         if (!partner) {
             return res.status(404).json({ success: false, message: "Partner profile not found." });
         }
 
-        if (name && name.trim()) partner.name = name.trim();
-        if (phone && phone.trim()) partner.phone = phone.trim();
-        if (email !== undefined) partner.email = email ? email.trim() : null;
-        if (address !== undefined) partner.address = address ? address.trim() : "";
-        if (city !== undefined) partner.city = city ? city.trim() : "Chennai";
-        if (pincode !== undefined) partner.pincode = pincode ? pincode.trim() : "";
-        if (assigned_area !== undefined && assigned_area.trim()) partner.assigned_area = assigned_area.trim();
-        if (vehicle_type !== undefined && vehicle_type.trim()) partner.vehicle_type = vehicle_type.trim();
-        if (vehicle_number !== undefined) partner.vehicle_number = (vehicle_number || "").trim().toUpperCase();
-        if (emergency_contact !== undefined) partner.emergency_contact = emergency_contact ? emergency_contact.trim() : null;
+        // Enforce Admin Profile Permissions & Data Validation
+        const validation = await validateProfileSubmission(req.body, partner);
+        if (!validation.valid) {
+            return res.status(400).json({ success: false, message: validation.message });
+        }
+
+        // Apply permitted and validated fields
+        Object.assign(partner, validation.sanitized);
+
+        if (req.body.assigned_area !== undefined && req.body.assigned_area.trim()) {
+            partner.assigned_area = req.body.assigned_area.trim();
+        }
+
         partner.updated_at = new Date().toISOString();
 
         // Save permanently across PostgreSQL (Single Source of Truth) and disk JSON mirror
@@ -803,10 +830,17 @@ const updatePartnerProfileHandler = async (req, res) => {
 
         // Fetch freshly stored database row to guarantee fidelity
         const updatedPartner = await getPartnerById(partnerId) || partner;
+        const fieldsConfig = await getPartnerProfileFieldsConfig();
+
+        let cleanVehicleNumber = updatedPartner.vehicle_number || "";
+        if (isPlaceholderVehicleNumber(cleanVehicleNumber)) {
+            cleanVehicleNumber = "";
+        }
 
         return res.json({
             success: true,
             message: "Profile updated successfully.",
+            fields_config: fieldsConfig,
             partner: {
                 partner_id: updatedPartner.partner_id,
                 name: updatedPartner.name,
@@ -818,7 +852,7 @@ const updatePartnerProfileHandler = async (req, res) => {
                 pincode: updatedPartner.pincode || "",
                 assigned_area: updatedPartner.assigned_area || "",
                 vehicle_type: updatedPartner.vehicle_type || "",
-                vehicle_number: updatedPartner.vehicle_number || "",
+                vehicle_number: cleanVehicleNumber,
                 emergency_contact: updatedPartner.emergency_contact || null,
                 is_online: Boolean(updatedPartner.is_online),
                 is_active: Boolean(updatedPartner.is_active),
