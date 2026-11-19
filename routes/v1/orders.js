@@ -154,7 +154,34 @@ const updateOrderStatusHandler = async (req, res) => {
             order.delivered_at = new Date().toISOString();
             if (order.partner_id) {
                 try {
-                    await recordProductDeliveryEarning(order.partner_id, order.id || order.order_number, 40);
+                    let partnerPayout = 35.0;
+                    let snapshot = {};
+                    if (order.financial_breakdown) {
+                        partnerPayout = Number(order.financial_breakdown.partner_delivery_earning || 35.0);
+                        snapshot = order.financial_breakdown;
+                    } else {
+                        const { calculateDeliveryCharge } = require("../../services/businessConfigService");
+                        const chargeCalc = await calculateDeliveryCharge({
+                            subtotal: order.subtotal || 0,
+                            order_type: order.order_type || "delivery",
+                            zone: order.delivery_zone || order.delivery_location || null,
+                            distance_km: order.distance_km || null
+                        });
+                        partnerPayout = Number(chargeCalc.partner_delivery_earning || 35.0);
+                        snapshot = {
+                            customer_delivery_fee: chargeCalc.delivery_fee,
+                            partner_delivery_earning: partnerPayout,
+                            company_delivery_revenue: chargeCalc.company_delivery_revenue,
+                            company_funded_delivery_expense: chargeCalc.company_funded_delivery_expense,
+                            zone: chargeCalc.zone,
+                            order_type: chargeCalc.order_type,
+                            pricing_version: chargeCalc.pricing_version
+                        };
+                        order.financial_breakdown = snapshot;
+                    }
+                    await recordProductDeliveryEarning(order.partner_id, order.id || order.order_number, partnerPayout, snapshot);
+                    order.partner_earnings_credited = true;
+                    order.partner_earning_amount = partnerPayout;
                 } catch (e) {
                     console.warn("[EARNINGS RECORD WARN]:", e.message);
                 }

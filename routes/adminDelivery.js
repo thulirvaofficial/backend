@@ -860,4 +860,65 @@ router.post("/cash-handover", async (req, res) => {
     }
 });
 
+// GET /api/admin/delivery/financial-ledger (Delivery Revenue, Partner Earnings & Company Split Ledger)
+router.get("/financial-ledger", async (req, res) => {
+    try {
+        const fs = require("fs");
+        const path = require("path");
+        const ledgerFile = path.resolve(__dirname, "..", "data", "partner_earning_ledger.json");
+        let entries = [];
+        if (fs.existsSync(ledgerFile)) {
+            entries = JSON.parse(fs.readFileSync(ledgerFile, "utf-8"));
+        }
+
+        const partnerId = req.query.partner_id;
+        const entryType = req.query.entry_type;
+        let filtered = entries;
+        if (partnerId) filtered = filtered.filter(e => e.partner_id === partnerId);
+        if (entryType) filtered = filtered.filter(e => e.entry_type === entryType);
+
+        filtered.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const startIndex = (page - 1) * limit;
+        const paginated = filtered.slice(startIndex, startIndex + limit);
+
+        const totalCustomerFees = filtered.reduce((s, e) => s + (e.financial_snapshot?.customer_delivery_fee || 0), 0);
+        const totalPartnerEarnings = filtered.reduce((s, e) => s + (e.amount_rupees || 0), 0);
+        const totalCompanyRevenue = filtered.reduce((s, e) => s + (e.financial_snapshot?.company_delivery_revenue || 0), 0);
+        const totalCompanyFundedExpense = filtered.reduce((s, e) => s + (e.financial_snapshot?.company_funded_delivery_expense || 0), 0);
+
+        return res.json({
+            success: true,
+            total: filtered.length,
+            page,
+            limit,
+            summary: {
+                total_customer_fees: Math.round(totalCustomerFees * 100) / 100,
+                total_partner_earnings: Math.round(totalPartnerEarnings * 100) / 100,
+                total_company_revenue: Math.round(totalCompanyRevenue * 100) / 100,
+                total_company_funded_expense: Math.round(totalCompanyFundedExpense * 100) / 100
+            },
+            items: paginated
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// GET /api/admin/delivery/partners/:id/ledger
+router.get("/partners/:id/ledger", async (req, res) => {
+    try {
+        const { getPartnerLedger } = require("../services/financialService");
+        const partnerId = req.params.id;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const ledger = getPartnerLedger(partnerId, { page, limit, entry_type: req.query.entry_type });
+        return res.json({ success: true, ...ledger });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 module.exports = router;

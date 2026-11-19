@@ -133,7 +133,8 @@ async function getPartnerWalletBalance(partnerId) {
         }
     } catch (_) { }
 
-    const balances = loadJson(BALANCES_FILE, []);
+    const rawBalances = loadJson(BALANCES_FILE, []);
+    const balances = Array.isArray(rawBalances) ? rawBalances : [];
     let wallet = balances.find(b => b.partner_id === partnerId);
     if (!wallet) {
         wallet = {
@@ -164,7 +165,8 @@ async function getPartnerWalletBalance(partnerId) {
 async function savePartnerWalletBalance(wallet) {
     wallet.updated_at = new Date().toISOString();
 
-    const balances = loadJson(BALANCES_FILE, []);
+    const rawBalances = loadJson(BALANCES_FILE, []);
+    const balances = Array.isArray(rawBalances) ? rawBalances : [];
     const idx = balances.findIndex(b => b.partner_id === wallet.partner_id);
     if (idx >= 0) {
         balances[idx] = {
@@ -211,6 +213,7 @@ async function recordEarningEntry({
     reference_id,
     amount_in_rupees,
     description,
+    financial_snapshot = {},
     admin_name = "System Automated"
 }) {
     if (!partner_id || !entry_type || !reference_id) {
@@ -243,6 +246,13 @@ async function recordEarningEntry({
         reference_id: reference_id.toString(),
         amount_paise: amountPaise,
         amount_rupees: Number(amount_in_rupees),
+        customer_delivery_fee: Number(financial_snapshot.customer_delivery_fee || 0),
+        partner_delivery_earning: Number(amount_in_rupees),
+        company_delivery_revenue: Number(financial_snapshot.company_delivery_revenue || 0),
+        company_funded_delivery_expense: Number(financial_snapshot.company_funded_delivery_expense || 0),
+        zone: financial_snapshot.zone || null,
+        order_type: financial_snapshot.order_type || (entry_type === "delivery_subscription" ? "subscription" : "delivery"),
+        pricing_version: Number(financial_snapshot.pricing_version || 1),
         description: description || `Earning for ${entry_type} #${reference_id}`,
         is_settled: false,
         settlement_id: null,
@@ -292,28 +302,30 @@ async function recordEarningEntry({
 }
 
 /**
- * Record Product Delivery Earning (₹40 standard)
+ * Record Product Delivery Earning
  */
-async function recordProductDeliveryEarning(partnerId, orderId, amountInRupees = 40) {
+async function recordProductDeliveryEarning(partnerId, orderId, amountInRupees = 35, financialSnapshot = {}) {
     return await recordEarningEntry({
         partner_id: partnerId,
         entry_type: "delivery_order",
         reference_id: orderId,
         amount_in_rupees: amountInRupees,
-        description: `Doorstep Product Delivery fee for Order #${orderId}`
+        description: `Doorstep Product Delivery fee for Order #${orderId}`,
+        financial_snapshot: financialSnapshot
     });
 }
 
 /**
- * Record Daily Subscription Delivery Earning (₹35 standard)
+ * Record Daily Subscription Delivery Earning
  */
-async function recordSubscriptionDeliveryEarning(partnerId, dailyId, amountInRupees = 35) {
+async function recordSubscriptionDeliveryEarning(partnerId, dailyId, amountInRupees = 30, financialSnapshot = {}) {
     return await recordEarningEntry({
         partner_id: partnerId,
         entry_type: "delivery_subscription",
         reference_id: dailyId,
         amount_in_rupees: amountInRupees,
-        description: `Daily Milk Subscription Delivery fee for Task #${dailyId}`
+        description: `Daily Milk Subscription Delivery fee for Task #${dailyId}`,
+        financial_snapshot: financialSnapshot
     });
 }
 

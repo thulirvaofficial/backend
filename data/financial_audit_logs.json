@@ -1,1 +1,26 @@
-[]
+[
+  {
+    "id": 1795082586700,
+    "action": "EARNING_CREDITED",
+    "partner_id": "partner_idem_test",
+    "admin_name": "System Automated",
+    "amount_paise": 3000,
+    "amount_rupees": 30,
+    "before_balance_paise": 3000,
+    "after_balance_paise": 6000,
+    "notes": "Credited ₹30 for delivery_order #ORD-IDEMPOTENCY-1795082586402",
+    "created_at": "2026-11-19T10:03:06.425Z"
+  },
+  {
+    "id": 1795082555606,
+    "action": "EARNING_CREDITED",
+    "partner_id": "partner_idem_test",
+    "admin_name": "System Automated",
+    "amount_paise": 3000,
+    "amount_rupees": 30,
+    "before_balance_paise": 0,
+    "after_balance_paise": 3000,
+    "notes": "Credited ₹30 for delivery_order #ORD-IDEMPOTENCY-1795082554899",
+    "created_at": "2026-11-19T10:02:34.940Z"
+  }
+]

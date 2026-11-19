@@ -1913,6 +1913,27 @@ router.put("/subscriptions/:id/status", authenticatePartner, async (req, res) =>
             return res.status(result.conflict ? 409 : 404).json(result);
         }
 
+        // Credit subscription delivery earning idempotently
+        if (status === "delivered") {
+            try {
+                const { getDeliveryConfig } = require("../services/businessConfigService");
+                const { recordSubscriptionDeliveryEarning } = require("../services/financialService");
+                const config = await getDeliveryConfig();
+                const subEarning = Number(config.partner_earnings_config?.default_subscription_earning || 30.0);
+                const snapshot = {
+                    customer_delivery_fee: 0.0,
+                    partner_delivery_earning: subEarning,
+                    company_delivery_revenue: 0.0,
+                    company_funded_delivery_expense: subEarning,
+                    order_type: "subscription",
+                    pricing_version: Number(config.pricing_config_version || 1)
+                };
+                await recordSubscriptionDeliveryEarning(partnerId, id, subEarning, snapshot);
+            } catch (subEarnErr) {
+                console.warn("[SUB DELIVERY EARNING RECORD WARN]:", subEarnErr.message);
+            }
+        }
+
         try {
             if (typeof emitToAdmin === "function") {
                 emitToAdmin("subscription_delivery_updated", {
@@ -2183,7 +2204,7 @@ const updatePartnerOrderStatusHandler = async (req, res) => {
             });
         } catch (_) {}
 
-        // If delivered, increment partner delivery count
+        // If delivered, increment partner delivery count & credit earnings
         if (normStatus === "delivered") {
             try {
                 const partner = await getPartnerById(partnerId);
@@ -2200,6 +2221,43 @@ const updatePartnerOrderStatusHandler = async (req, res) => {
                     WHERE partner_id = $1
                 `, [partnerId]);
             } catch (_) {}
+
+            // Credit Partner Earnings & Record Immutable Financial Snapshot
+            try {
+                const { calculateDeliveryCharge } = require("../services/businessConfigService");
+                const { recordProductDeliveryEarning } = require("../services/financialService");
+
+                let partnerPayout = 35.0;
+                let snapshot = {};
+                if (order.financial_breakdown) {
+                    partnerPayout = Number(order.financial_breakdown.partner_delivery_earning || 35.0);
+                    snapshot = order.financial_breakdown;
+                } else {
+                    const chargeCalc = await calculateDeliveryCharge({
+                        subtotal: order.subtotal || 0,
+                        order_type: order.order_type || "delivery",
+                        zone: order.delivery_zone || order.delivery_location || null,
+                        distance_km: order.distance_km || null
+                    });
+                    partnerPayout = Number(chargeCalc.partner_delivery_earning || 35.0);
+                    snapshot = {
+                        customer_delivery_fee: chargeCalc.delivery_fee,
+                        partner_delivery_earning: partnerPayout,
+                        company_delivery_revenue: chargeCalc.company_delivery_revenue,
+                        company_funded_delivery_expense: chargeCalc.company_funded_delivery_expense,
+                        zone: chargeCalc.zone,
+                        order_type: chargeCalc.order_type,
+                        pricing_version: chargeCalc.pricing_version
+                    };
+                    order.financial_breakdown = snapshot;
+                }
+
+                await recordProductDeliveryEarning(partnerId, order.id || id, partnerPayout, snapshot);
+                order.partner_earnings_credited = true;
+                order.partner_earning_amount = partnerPayout;
+            } catch (earnErr) {
+                console.warn("[DELIVERY EARNING RECORD WARN]:", earnErr.message);
+            }
         }
 
         saveOrders(orders);
@@ -2559,31 +2617,20 @@ router.post("/assignments/:id/timeout", authenticatePartner, timeoutOfferHandler
 
 router.get("/earnings", authenticatePartner, async (req, res) => {
     try {
-        const partnerId = req.partner.partner_id;
+        const partnerId = req.partner.partner_id || req.partner.id;
         const now = new Date();
         const todayStr = formatDateKey(now);
 
-        // 1. Subscription deliveries
-        const subsData = await getSubscriptionDeliveries(todayStr, req.partner);
-        const subDeliveredToday = (subsData.deliveries || []).filter(d => 
-            (d.partner_id === partnerId || d.assigned_partner_id === partnerId) && d.status === "delivered"
-        ).length;
-
-        // 2. Product orders
-        let orders = [];
-        try {
-            if (fs.existsSync(ORDERS_FILE)) {
-                orders = JSON.parse(fs.readFileSync(ORDERS_FILE, "utf-8"));
-            }
-        } catch {}
+        // Load partner wallet and immutable ledger
+        const { getPartnerWalletBalance, getPartnerLedger } = require("../services/financialService");
+        const wallet = await getPartnerWalletBalance(partnerId);
+        const ledgerRes = getPartnerLedger(partnerId, { page: 1, limit: 100 });
+        const ledgerItems = ledgerRes.items || [];
 
         const isToday = (dateStr) => {
             if (!dateStr) return false;
-            try {
-                return formatDateKey(new Date(dateStr)) === todayStr;
-            } catch { return false; }
+            try { return formatDateKey(new Date(dateStr)) === todayStr; } catch { return false; }
         };
-
         const isWithinDays = (dateStr, days) => {
             if (!dateStr) return false;
             try {
@@ -2592,37 +2639,61 @@ router.get("/earnings", authenticatePartner, async (req, res) => {
             } catch { return false; }
         };
 
-        const partnerOrders = orders.filter(o => {
-            const isSub = (o.order_type === "subscription" || o.delivery_type === "subscription" || (o.id && o.id.toString().startsWith("SUB-")));
-            if (isSub) return false;
-            return o.partner_id === partnerId && (o.order_status === "delivered" || o.status === "delivered");
-        });
+        const todayEntries = ledgerItems.filter(e => isToday(e.created_at));
+        const weekEntries = ledgerItems.filter(e => isWithinDays(e.created_at, 7));
+        const monthEntries = ledgerItems.filter(e => isWithinDays(e.created_at, 30));
 
-        const ordersDeliveredToday = partnerOrders.filter(o => isToday(o.delivered_at || o.updated_at || o.created_at)).length;
-        const totalDeliveredToday = subDeliveredToday + ordersDeliveredToday;
+        const earningsToday = todayEntries.reduce((sum, e) => sum + (Number(e.amount_rupees) || 0), 0);
+        const weeklyEarnings = weekEntries.reduce((sum, e) => sum + (Number(e.amount_rupees) || 0), 0);
+        const monthlyEarnings = monthEntries.reduce((sum, e) => sum + (Number(e.amount_rupees) || 0), 0);
+        const deliveriesToday = todayEntries.length;
 
-        const basePayoutToday = Math.round(ordersDeliveredToday * 40 + subDeliveredToday * 35);
-        const incentivesToday = totalDeliveredToday >= 20 ? 200 : (totalDeliveredToday >= 10 ? 100 : 0);
-        const earningsToday = basePayoutToday + incentivesToday;
+        // Delivery history list with individual delivery earnings
+        const deliveryHistory = ledgerItems.slice(0, 30).map(entry => ({
+            id: entry.id,
+            order_id: entry.reference_id,
+            delivery_date: entry.created_at,
+            partner_earning: Number(entry.amount_rupees),
+            order_type: entry.entry_type === "delivery_subscription" ? "Subscription" : "Product Order",
+            payment_status: entry.is_settled ? "Settled" : "Credited",
+            description: entry.description
+        }));
 
-        // Week and Month calculations strictly from real records
-        const ordersThisWeek = partnerOrders.filter(o => isWithinDays(o.delivered_at || o.updated_at || o.created_at, 7)).length;
-        const ordersThisMonth = partnerOrders.filter(o => isWithinDays(o.delivered_at || o.updated_at || o.created_at, 30)).length;
-
-        const weeklyEarnings = (ordersThisWeek * 40) + (subDeliveredToday * 35) + (ordersThisWeek >= 10 ? 100 : 0);
-        const monthlyEarnings = (ordersThisMonth * 40) + (subDeliveredToday * 35) + (ordersThisMonth >= 10 ? 100 : 0);
+        // Recent payouts / bank settlements
+        const settlementsFile = path.resolve(__dirname, "..", "data", "partner_settlements.json");
+        let recentPayouts = [];
+        try {
+            if (fs.existsSync(settlementsFile)) {
+                const allSettlements = JSON.parse(fs.readFileSync(settlementsFile, "utf-8"));
+                recentPayouts = allSettlements
+                    .filter(s => s.partner_id === partnerId)
+                    .slice(0, 10)
+                    .map(s => ({
+                        date: s.created_at ? s.created_at.split("T")[0] : todayStr,
+                        amount: s.net_payout_rupees || (s.net_payout_paise / 100),
+                        deliveries: s.eligible_entries_count || 1,
+                        status: s.status === "settled" ? "Deposited" : "Processing",
+                        utr: s.bank_reference_utr || null
+                    }));
+            }
+        } catch (_) {}
 
         return res.json({
             success: true,
             earnings: {
-                today: earningsToday,
-                this_week: Math.max(weeklyEarnings, earningsToday),
-                this_month: Math.max(monthlyEarnings, weeklyEarnings, earningsToday),
-                deliveries_today: totalDeliveredToday,
-                base_payout: basePayoutToday,
-                incentives: incentivesToday,
+                today: Math.round(earningsToday * 100) / 100,
+                this_week: Math.round(weeklyEarnings * 100) / 100,
+                this_month: Math.round(monthlyEarnings * 100) / 100,
+                deliveries_today: deliveriesToday,
+                base_payout: Math.round(earningsToday * 100) / 100,
+                incentives: 0,
                 tips: 0,
-                recent_payouts: []
+                total_completed_earnings: wallet.lifetime_earned_rupees,
+                pending_earnings: (wallet.pending_settlement_paise || 0) / 100,
+                paid_earnings: wallet.total_settled_rupees,
+                available_earnings: wallet.available_payable_rupees,
+                delivery_history: deliveryHistory,
+                recent_payouts: recentPayouts
             }
         });
     } catch (err) {

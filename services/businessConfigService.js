@@ -21,14 +21,105 @@ const DEFAULT_CONFIG = {
     cod_enabled: true,
     cod_holding_limit: 1000.0,
     delivery_charges_enabled: true,
-    fixed_delivery_charge: 30.0,
-    free_delivery_threshold: 299.0,
+    fixed_delivery_charge: 40.0,
+    free_delivery_threshold: 500.0,
     min_order_value_for_delivery: 150.0,
+    store_pickup_enabled: true,
+    free_delivery_enabled: true,
+    pricing_config_version: 1,
+
+    // Module 3: Delivery Fee Distribution
+    delivery_fee_distribution: {
+        distribution_mode: "fixed", // "fixed" | "percentage"
+        customer_delivery_fee: 40.0,
+        partner_share: 30.0,
+        company_share: 10.0,
+        partner_share_pct: 75.0,
+        company_share_pct: 25.0
+    },
+
+    // Module 4: Free Delivery Partner Funding Policy
+    free_delivery_funding_policy: {
+        policy: "company_funded", // "company_funded" | "rate_override" | "promotional_subsidy"
+        partner_payout_on_free_delivery: 30.0,
+        company_subsidy_amount: 30.0
+    },
+
+    // Module 5: Partner Earnings Configuration
+    partner_earnings_config: {
+        default_delivery_earning: 35.0,
+        default_regular_order_earning: 35.0,
+        default_subscription_earning: 30.0,
+        distance_bonus_enabled: true,
+        base_distance_km: 5.0,
+        bonus_per_km: 6.0,
+        min_earning_per_delivery: 25.0,
+        max_earning_per_delivery: 150.0,
+        special_incentive_enabled: true,
+        special_incentive_threshold: 10,
+        special_incentive_amount: 100.0,
+        free_delivery_earning: 30.0,
+        rules_enabled: true
+    },
+
+    // Legacy fields maintained for backward compatibility
     partner_base_payout: 35.0,
     partner_distance_bonus_per_km: 6.0,
     distance_charges_enabled: false,
     distance_base_km: 5.0,
     distance_rate_per_km: 10.0,
+
+    // Module 6: Zone-Specific Pricing & Rules
+    zones: {
+        "Padur": {
+            customer_delivery_fee: 20.0,
+            free_delivery_threshold: 300.0,
+            partner_share: 15.0,
+            company_share: 5.0,
+            partner_earning_regular: 30.0,
+            partner_earning_subscription: 25.0,
+            free_delivery_partner_payout: 25.0,
+            distance_base_km: 5.0,
+            distance_rate_per_km: 8.0,
+            enabled: true
+        },
+        "Navalur": {
+            customer_delivery_fee: 30.0,
+            free_delivery_threshold: 400.0,
+            partner_share: 22.0,
+            company_share: 8.0,
+            partner_earning_regular: 35.0,
+            partner_earning_subscription: 30.0,
+            free_delivery_partner_payout: 30.0,
+            distance_base_km: 5.0,
+            distance_rate_per_km: 10.0,
+            enabled: true
+        },
+        "Siruseri": {
+            customer_delivery_fee: 30.0,
+            free_delivery_threshold: 400.0,
+            partner_share: 22.0,
+            company_share: 8.0,
+            partner_earning_regular: 35.0,
+            partner_earning_subscription: 30.0,
+            free_delivery_partner_payout: 30.0,
+            distance_base_km: 5.0,
+            distance_rate_per_km: 10.0,
+            enabled: true
+        },
+        "Kelambakkam": {
+            customer_delivery_fee: 40.0,
+            free_delivery_threshold: 500.0,
+            partner_share: 30.0,
+            company_share: 10.0,
+            partner_earning_regular: 40.0,
+            partner_earning_subscription: 35.0,
+            free_delivery_partner_payout: 30.0,
+            distance_base_km: 5.0,
+            distance_rate_per_km: 12.0,
+            enabled: true
+        }
+    },
     zone_charges: {
         "Padur": 20.0,
         "Navalur": 30.0,
@@ -181,9 +272,28 @@ async function getDeliveryConfig() {
                 ...dbRow,
                 fixed_delivery_charge: Number(dbRow.fixed_delivery_charge ?? DEFAULT_CONFIG.fixed_delivery_charge),
                 free_delivery_threshold: Number(dbRow.free_delivery_threshold ?? DEFAULT_CONFIG.free_delivery_threshold),
+                min_order_value_for_delivery: Number(dbRow.min_order_value_for_delivery ?? DEFAULT_CONFIG.min_order_value_for_delivery),
+                free_delivery_enabled: dbRow.free_delivery_enabled !== undefined ? Boolean(dbRow.free_delivery_enabled) : DEFAULT_CONFIG.free_delivery_enabled,
+                pricing_config_version: Number(dbRow.pricing_config_version ?? DEFAULT_CONFIG.pricing_config_version),
                 distance_base_km: Number(dbRow.distance_base_km ?? DEFAULT_CONFIG.distance_base_km),
                 distance_rate_per_km: Number(dbRow.distance_rate_per_km ?? DEFAULT_CONFIG.distance_rate_per_km),
-                geofence_radius_meters: Number(dbRow.geofence_radius_meters ?? DEFAULT_CONFIG.geofence_radius_meters)
+                geofence_radius_meters: Number(dbRow.geofence_radius_meters ?? DEFAULT_CONFIG.geofence_radius_meters),
+                delivery_fee_distribution: {
+                    ...DEFAULT_CONFIG.delivery_fee_distribution,
+                    ...(dbRow.delivery_fee_distribution ? (typeof dbRow.delivery_fee_distribution === "string" ? JSON.parse(dbRow.delivery_fee_distribution) : dbRow.delivery_fee_distribution) : {})
+                },
+                free_delivery_funding_policy: {
+                    ...DEFAULT_CONFIG.free_delivery_funding_policy,
+                    ...(dbRow.free_delivery_funding_policy ? (typeof dbRow.free_delivery_funding_policy === "string" ? JSON.parse(dbRow.free_delivery_funding_policy) : dbRow.free_delivery_funding_policy) : {})
+                },
+                partner_earnings_config: {
+                    ...DEFAULT_CONFIG.partner_earnings_config,
+                    ...(dbRow.partner_earnings_config ? (typeof dbRow.partner_earnings_config === "string" ? JSON.parse(dbRow.partner_earnings_config) : dbRow.partner_earnings_config) : {})
+                },
+                zones: {
+                    ...DEFAULT_CONFIG.zones,
+                    ...(dbRow.zones ? (typeof dbRow.zones === "string" ? JSON.parse(dbRow.zones) : dbRow.zones) : {})
+                }
             };
             saveConfigToDisk(merged);
             return merged;
@@ -194,16 +304,107 @@ async function getDeliveryConfig() {
 
 async function updateDeliveryConfig(updates = {}, adminName = "Super Admin") {
     const current = await getDeliveryConfig();
+
+    // 1. Validation & Synchronization of Delivery Fee Distribution
+    let distribution = {
+        ...current.delivery_fee_distribution,
+        ...(updates.delivery_fee_distribution || {})
+    };
+
+    let fixedFee = updates.fixed_delivery_charge !== undefined
+        ? Number(updates.fixed_delivery_charge)
+        : (updates.delivery_fee_distribution?.customer_delivery_fee !== undefined
+            ? Number(updates.delivery_fee_distribution.customer_delivery_fee)
+            : Number(current.fixed_delivery_charge || 40.0));
+
+    if (fixedFee < 0) throw new Error("Customer delivery fee cannot be negative.");
+    distribution.customer_delivery_fee = fixedFee;
+
+    const distMode = updates.delivery_fee_distribution?.distribution_mode || distribution.distribution_mode || "fixed";
+    distribution.distribution_mode = distMode;
+
+    if (distMode === "percentage") {
+        let pSharePct = updates.delivery_fee_distribution?.partner_share_pct !== undefined
+            ? Number(updates.delivery_fee_distribution.partner_share_pct)
+            : distribution.partner_share_pct;
+        let cSharePct = updates.delivery_fee_distribution?.company_share_pct !== undefined
+            ? Number(updates.delivery_fee_distribution.company_share_pct)
+            : distribution.company_share_pct;
+
+        if (updates.delivery_fee_distribution?.partner_share_pct !== undefined && updates.delivery_fee_distribution?.company_share_pct === undefined) {
+            cSharePct = Math.max(0, 100 - pSharePct);
+        } else if (updates.delivery_fee_distribution?.company_share_pct !== undefined && updates.delivery_fee_distribution?.partner_share_pct === undefined) {
+            pSharePct = Math.max(0, 100 - cSharePct);
+        }
+
+        if (pSharePct < 0 || cSharePct < 0) throw new Error("Percentage share cannot be negative.");
+        if (Math.abs((pSharePct + cSharePct) - 100) > 0.01) {
+            throw new Error(`Partner share percentage (${pSharePct}%) and company share percentage (${cSharePct}%) must equal 100%.`);
+        }
+
+        distribution.partner_share_pct = pSharePct;
+        distribution.company_share_pct = cSharePct;
+        distribution.partner_share = Math.round((fixedFee * pSharePct) / 100 * 100) / 100;
+        distribution.company_share = Math.max(0, Math.round((fixedFee - distribution.partner_share) * 100) / 100);
+    } else {
+        // Fixed distribution
+        let pShare = updates.delivery_fee_distribution?.partner_share !== undefined
+            ? Number(updates.delivery_fee_distribution.partner_share)
+            : distribution.partner_share;
+        let cShare = updates.delivery_fee_distribution?.company_share !== undefined
+            ? Number(updates.delivery_fee_distribution.company_share)
+            : distribution.company_share;
+
+        if (updates.delivery_fee_distribution?.partner_share !== undefined && updates.delivery_fee_distribution?.company_share === undefined) {
+            cShare = Math.max(0, fixedFee - pShare);
+        } else if (updates.delivery_fee_distribution?.company_share !== undefined && updates.delivery_fee_distribution?.partner_share === undefined) {
+            pShare = Math.max(0, fixedFee - cShare);
+        }
+
+        if (pShare < 0 || cShare < 0) throw new Error("Partner or company share cannot be negative.");
+        if (Math.abs((pShare + cShare) - fixedFee) > 0.01) {
+            throw new Error(`Partner share (₹${pShare}) + Company share (₹${cShare}) must equal Customer delivery fee (₹${fixedFee}).`);
+        }
+
+        distribution.partner_share = pShare;
+        distribution.company_share = cShare;
+        distribution.partner_share_pct = fixedFee > 0 ? Math.round((pShare / fixedFee) * 100 * 10) / 10 : 0;
+        distribution.company_share_pct = fixedFee > 0 ? Math.round((cShare / fixedFee) * 100 * 10) / 10 : 0;
+    }
+
+    // 2. Free delivery threshold validation
+    let freeThreshold = updates.free_delivery_threshold !== undefined
+        ? Number(updates.free_delivery_threshold)
+        : Number(current.free_delivery_threshold || 500.0);
+    if (freeThreshold < 0) throw new Error("Free delivery threshold cannot be negative.");
+
+    // 3. Increment pricing configuration version
+    const nextVersion = Number(current.pricing_config_version || 1) + 1;
+
     const merged = {
         ...current,
         ...updates,
+        fixed_delivery_charge: fixedFee,
+        free_delivery_threshold: freeThreshold,
+        delivery_fee_distribution: distribution,
+        free_delivery_funding_policy: {
+            ...current.free_delivery_funding_policy,
+            ...(updates.free_delivery_funding_policy || {})
+        },
+        partner_earnings_config: {
+            ...current.partner_earnings_config,
+            ...(updates.partner_earnings_config || {})
+        },
+        zones: {
+            ...current.zones,
+            ...(updates.zones || {})
+        },
+        pricing_config_version: nextVersion,
         updated_at: new Date().toISOString(),
         updated_by: adminName
     };
 
     // Coerce numeric values
-    if (merged.fixed_delivery_charge !== undefined) merged.fixed_delivery_charge = Number(merged.fixed_delivery_charge);
-    if (merged.free_delivery_threshold !== undefined) merged.free_delivery_threshold = Number(merged.free_delivery_threshold);
     if (merged.min_order_value_for_delivery !== undefined) merged.min_order_value_for_delivery = Number(merged.min_order_value_for_delivery);
     if (merged.partner_base_payout !== undefined) merged.partner_base_payout = Number(merged.partner_base_payout);
     if (merged.partner_distance_bonus_per_km !== undefined) merged.partner_distance_bonus_per_km = Number(merged.partner_distance_bonus_per_km);
@@ -215,8 +416,22 @@ async function updateDeliveryConfig(updates = {}, adminName = "Super Admin") {
 
     try {
         await pool.query(`
+            ALTER TABLE business_configurations 
+            ADD COLUMN IF NOT EXISTS delivery_fee_distribution JSONB,
+            ADD COLUMN IF NOT EXISTS free_delivery_funding_policy JSONB,
+            ADD COLUMN IF NOT EXISTS partner_earnings_config JSONB,
+            ADD COLUMN IF NOT EXISTS zones JSONB,
+            ADD COLUMN IF NOT EXISTS free_delivery_enabled BOOLEAN DEFAULT true,
+            ADD COLUMN IF NOT EXISTS pricing_config_version INT DEFAULT 1;
+        `);
+    } catch (_) {}
+
+    try {
+        await pool.query(`
             INSERT INTO business_configurations (
                 id, delivery_charges_enabled, fixed_delivery_charge, free_delivery_threshold,
+                min_order_value_for_delivery, delivery_fee_distribution, free_delivery_funding_policy,
+                partner_earnings_config, zones, free_delivery_enabled, pricing_config_version,
                 distance_charges_enabled, distance_base_km, distance_rate_per_km, zone_charges,
                 delivery_mode, morning_start_time, morning_end_time, evening_start_time, evening_end_time,
                 holidays, closure_reason, geofence_radius_meters, geofence_notifications_enabled,
@@ -226,43 +441,37 @@ async function updateDeliveryConfig(updates = {}, adminName = "Super Admin") {
                 updated_at, updated_by
             ) VALUES (
                 'main', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-                $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, NOW(), $29
+                $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, NOW(), $36
             )
             ON CONFLICT (id) DO UPDATE SET
                 delivery_charges_enabled = EXCLUDED.delivery_charges_enabled,
                 fixed_delivery_charge = EXCLUDED.fixed_delivery_charge,
                 free_delivery_threshold = EXCLUDED.free_delivery_threshold,
+                min_order_value_for_delivery = EXCLUDED.min_order_value_for_delivery,
+                delivery_fee_distribution = EXCLUDED.delivery_fee_distribution,
+                free_delivery_funding_policy = EXCLUDED.free_delivery_funding_policy,
+                partner_earnings_config = EXCLUDED.partner_earnings_config,
+                zones = EXCLUDED.zones,
+                free_delivery_enabled = EXCLUDED.free_delivery_enabled,
+                pricing_config_version = EXCLUDED.pricing_config_version,
                 distance_charges_enabled = EXCLUDED.distance_charges_enabled,
                 distance_base_km = EXCLUDED.distance_base_km,
                 distance_rate_per_km = EXCLUDED.distance_rate_per_km,
                 zone_charges = EXCLUDED.zone_charges,
                 delivery_mode = EXCLUDED.delivery_mode,
-                morning_start_time = EXCLUDED.morning_start_time,
-                morning_end_time = EXCLUDED.morning_end_time,
-                evening_start_time = EXCLUDED.evening_start_time,
-                evening_end_time = EXCLUDED.evening_end_time,
-                holidays = EXCLUDED.holidays,
-                closure_reason = EXCLUDED.closure_reason,
-                geofence_radius_meters = EXCLUDED.geofence_radius_meters,
-                geofence_notifications_enabled = EXCLUDED.geofence_notifications_enabled,
-                geofence_alert_title = EXCLUDED.geofence_alert_title,
-                geofence_alert_message = EXCLUDED.geofence_alert_message,
-                delivery_launch_date = EXCLUDED.delivery_launch_date,
-                advance_ordering_enabled = EXCLUDED.advance_ordering_enabled,
-                first_delivery_date = EXCLUDED.first_delivery_date,
-                zone_launch_dates = EXCLUDED.zone_launch_dates,
-                launch_banner_enabled = EXCLUDED.launch_banner_enabled,
-                launch_banner_headline = EXCLUDED.launch_banner_headline,
-                launch_banner_subtitle = EXCLUDED.launch_banner_subtitle,
-                launch_banner_bg_color = EXCLUDED.launch_banner_bg_color,
-                launch_banner_image_url = EXCLUDED.launch_banner_image_url,
-                zone_banners = EXCLUDED.zone_banners,
                 updated_at = NOW(),
                 updated_by = EXCLUDED.updated_by
         `, [
             merged.delivery_charges_enabled,
             merged.fixed_delivery_charge,
             merged.free_delivery_threshold,
+            merged.min_order_value_for_delivery,
+            JSON.stringify(merged.delivery_fee_distribution),
+            JSON.stringify(merged.free_delivery_funding_policy),
+            JSON.stringify(merged.partner_earnings_config),
+            JSON.stringify(merged.zones || {}),
+            merged.free_delivery_enabled !== false,
+            merged.pricing_config_version,
             merged.distance_charges_enabled,
             merged.distance_base_km,
             merged.distance_rate_per_km,
@@ -297,7 +506,7 @@ async function updateDeliveryConfig(updates = {}, adminName = "Super Admin") {
         await pool.query(`
             INSERT INTO admin_audit_logs (admin_name, action, details)
             VALUES ($1, 'UPDATE_BUSINESS_CONFIG', $2)
-        `, [adminName, `Updated business & delivery configuration: mode=${merged.delivery_mode}, charge=₹${merged.fixed_delivery_charge}`]);
+        `, [adminName, `Updated business & delivery configuration: fee=₹${merged.fixed_delivery_charge}, threshold=₹${merged.free_delivery_threshold}, partner_share=₹${merged.delivery_fee_distribution?.partner_share}`]);
     } catch (_) {}
 
     // Real-time broadcast to connected clients
@@ -317,69 +526,265 @@ async function updateDeliveryConfig(updates = {}, adminName = "Super Admin") {
    2. DYNAMIC DELIVERY CHARGES CALCULATION (SINGLE SOURCE OF TRUTH)
 ========================================================================= */
 
-async function calculateDeliveryCharge({ subtotal = 0, order_type = "delivery", zone = null, distance_km = null }) {
+async function calculateDeliveryCharge({
+    subtotal = 0,
+    order_type = "delivery",
+    zone = null,
+    distance_km = null,
+    address = null,
+    coupon_code = null,
+    coupon_discount = 0
+}) {
     const config = await getDeliveryConfig();
+    const sub = Math.max(0, Number(subtotal) || 0);
+    const discount = Math.max(0, Number(coupon_discount) || 0);
+    const eligibleSubtotal = Math.max(0, sub - discount);
+    const orderType = (order_type || "delivery").toLowerCase();
+    const effectiveZone = zone ? zone.trim() : null;
+    const pricingVersion = Number(config.pricing_config_version || 1);
+    const timestamp = new Date().toISOString();
 
-    if (order_type === "pickup") {
+    // Check if zone has custom configuration
+    const zoneConfig = (effectiveZone && config.zones && config.zones[effectiveZone] && config.zones[effectiveZone].enabled !== false)
+        ? config.zones[effectiveZone]
+        : null;
+
+    // Determine effective customer delivery fee
+    let baseCustomerFee = Number(config.fixed_delivery_charge ?? 40.0);
+    if (zoneConfig && zoneConfig.customer_delivery_fee !== undefined) {
+        baseCustomerFee = Number(zoneConfig.customer_delivery_fee);
+    } else if (effectiveZone && config.zone_charges && config.zone_charges[effectiveZone] !== undefined) {
+        baseCustomerFee = Number(config.zone_charges[effectiveZone]);
+    }
+
+    // Determine effective free delivery threshold
+    let threshold = Number(config.free_delivery_threshold ?? 500.0);
+    if (zoneConfig && zoneConfig.free_delivery_threshold !== undefined) {
+        threshold = Number(zoneConfig.free_delivery_threshold);
+    }
+
+    // 1. Store Pickup rule: 100% Free
+    if (orderType === "pickup") {
+        const breakdown = {
+            customer_delivery_fee: 0.0,
+            partner_delivery_earning: 0.0,
+            company_delivery_revenue: 0.0,
+            company_funded_delivery_expense: 0.0,
+            zone: effectiveZone,
+            order_type: "pickup",
+            pricing_version: pricingVersion,
+            calculation_timestamp: timestamp
+        };
         return {
             delivery_charge: 0.0,
             delivery_fee: 0.0,
             is_free: true,
-            reason: "Store Pickup is always free.",
-            free_delivery_threshold: config.free_delivery_threshold,
-            amount_needed_for_free_delivery: 0.0
+            is_free_delivery: true,
+            reason: "Store Pickup is always 100% free.",
+            free_delivery_threshold: threshold,
+            amount_needed_for_free_delivery: 0.0,
+            customer_delivery_fee: 0.0,
+            partner_delivery_earning: 0.0,
+            company_delivery_revenue: 0.0,
+            company_funded_delivery_expense: 0.0,
+            breakdown,
+            financial_breakdown: breakdown,
+            zone: effectiveZone,
+            order_type: "pickup",
+            pricing_version: pricingVersion,
+            calculation_timestamp: timestamp,
+            min_order_value: Number(config.min_order_value_for_delivery || 0),
+            meets_min_order: true
         };
     }
 
-    if (!config.delivery_charges_enabled) {
+    // 2. Global delivery charges disabled check
+    if (config.delivery_charges_enabled === false) {
+        const partnerPayout = Number(
+            zoneConfig?.free_delivery_partner_payout ??
+            config.free_delivery_funding_policy?.partner_payout_on_free_delivery ??
+            config.partner_earnings_config?.default_delivery_earning ??
+            30.0
+        );
+        const breakdown = {
+            customer_delivery_fee: 0.0,
+            partner_delivery_earning: partnerPayout,
+            company_delivery_revenue: 0.0,
+            company_funded_delivery_expense: partnerPayout,
+            zone: effectiveZone,
+            order_type: orderType,
+            pricing_version: pricingVersion,
+            calculation_timestamp: timestamp
+        };
         return {
             delivery_charge: 0.0,
             delivery_fee: 0.0,
             is_free: true,
-            reason: "Delivery charges are currently waived.",
-            free_delivery_threshold: config.free_delivery_threshold,
-            amount_needed_for_free_delivery: 0.0
+            is_free_delivery: true,
+            reason: "Delivery charges are currently waived store-wide.",
+            free_delivery_threshold: threshold,
+            amount_needed_for_free_delivery: 0.0,
+            customer_delivery_fee: 0.0,
+            partner_delivery_earning: partnerPayout,
+            company_delivery_revenue: 0.0,
+            company_funded_delivery_expense: partnerPayout,
+            breakdown,
+            financial_breakdown: breakdown,
+            zone: effectiveZone,
+            order_type: orderType,
+            pricing_version: pricingVersion,
+            calculation_timestamp: timestamp,
+            min_order_value: Number(config.min_order_value_for_delivery || 0),
+            meets_min_order: sub >= Number(config.min_order_value_for_delivery || 0)
         };
     }
 
-    const sub = Number(subtotal) || 0;
-    const threshold = Number(config.free_delivery_threshold) || 299.0;
+    // 3. Free Delivery Threshold check (Uses eligibleSubtotal after coupon deductions)
+    const isFree = config.free_delivery_enabled !== false && eligibleSubtotal >= threshold;
 
-    if (sub >= threshold) {
+    if (isFree) {
+        const partnerPayout = Number(
+            zoneConfig?.free_delivery_partner_payout ??
+            config.free_delivery_funding_policy?.partner_payout_on_free_delivery ??
+            config.partner_earnings_config?.free_delivery_earning ??
+            30.0
+        );
+        const breakdown = {
+            customer_delivery_fee: 0.0,
+            partner_delivery_earning: partnerPayout,
+            company_delivery_revenue: 0.0,
+            company_funded_delivery_expense: partnerPayout,
+            zone: effectiveZone,
+            order_type: orderType,
+            pricing_version: pricingVersion,
+            calculation_timestamp: timestamp
+        };
         return {
             delivery_charge: 0.0,
             delivery_fee: 0.0,
             is_free: true,
+            is_free_delivery: true,
             reason: `Free delivery unlocked on orders above ₹${threshold.toFixed(0)}!`,
             free_delivery_threshold: threshold,
-            amount_needed_for_free_delivery: 0.0
+            amount_needed_for_free_delivery: 0.0,
+            customer_delivery_fee: 0.0,
+            partner_delivery_earning: partnerPayout,
+            company_delivery_revenue: 0.0,
+            company_funded_delivery_expense: partnerPayout,
+            breakdown,
+            financial_breakdown: breakdown,
+            zone: effectiveZone,
+            order_type: orderType,
+            pricing_version: pricingVersion,
+            calculation_timestamp: timestamp,
+            min_order_value: Number(config.min_order_value_for_delivery || 0),
+            meets_min_order: sub >= Number(config.min_order_value_for_delivery || 0)
         };
     }
 
-    let baseCharge = Number(config.fixed_delivery_charge) || 30.0;
-
-    // Check zone override if present
-    if (zone && config.zone_charges && config.zone_charges[zone] !== undefined) {
-        baseCharge = Number(config.zone_charges[zone]);
-    }
-
-    // Distance charge if enabled
+    // 4. Standard Paid Delivery
     let distanceCharge = 0.0;
-    if (config.distance_charges_enabled && distance_km && Number(distance_km) > Number(config.distance_base_km)) {
-        const extraKm = Number(distance_km) - Number(config.distance_base_km);
-        distanceCharge = extraKm * Number(config.distance_rate_per_km || 10.0);
+    const distBase = Number(zoneConfig?.distance_base_km ?? config.distance_base_km ?? 5.0);
+    const distRate = Number(zoneConfig?.distance_rate_per_km ?? config.distance_rate_per_km ?? 10.0);
+    if (config.distance_charges_enabled && distance_km && Number(distance_km) > distBase) {
+        distanceCharge = (Number(distance_km) - distBase) * distRate;
     }
 
-    const finalCharge = Math.max(0.0, Math.round((baseCharge + distanceCharge) * 100) / 100);
-    const amountNeeded = Math.max(0.0, Math.round((threshold - sub) * 100) / 100);
+    const finalCustomerFee = Math.max(0.0, Math.round((baseCustomerFee + distanceCharge) * 100) / 100);
+    const amountNeeded = Math.max(0.0, Math.round((threshold - eligibleSubtotal) * 100) / 100);
+
+    // Distribution split calculation
+    let partnerShare = 0.0;
+    let companyShare = 0.0;
+
+    const distMode = config.delivery_fee_distribution?.distribution_mode || "fixed";
+    if (zoneConfig && zoneConfig.partner_share !== undefined && zoneConfig.company_share !== undefined) {
+        partnerShare = Number(zoneConfig.partner_share);
+        companyShare = Number(zoneConfig.company_share);
+    } else if (distMode === "percentage") {
+        const partnerPct = Number(config.delivery_fee_distribution?.partner_share_pct ?? 75.0);
+        partnerShare = Math.round((finalCustomerFee * partnerPct) / 100 * 100) / 100;
+        companyShare = Math.max(0, Math.round((finalCustomerFee - partnerShare) * 100) / 100);
+    } else {
+        const configuredPartner = Number(config.delivery_fee_distribution?.partner_share ?? 30.0);
+        partnerShare = Math.min(finalCustomerFee, configuredPartner);
+        companyShare = Math.max(0, Math.round((finalCustomerFee - partnerShare) * 100) / 100);
+    }
+
+    let partnerEarning = partnerShare;
+    if (config.partner_earnings_config?.distance_bonus_enabled && distance_km && Number(distance_km) > Number(config.partner_earnings_config.base_distance_km || 5)) {
+        const extraKm = Number(distance_km) - Number(config.partner_earnings_config.base_distance_km || 5);
+        partnerEarning += extraKm * Number(config.partner_earnings_config.bonus_per_km || 6);
+    }
+
+    if (config.partner_earnings_config?.min_earning_per_delivery) {
+        partnerEarning = Math.max(partnerEarning, Number(config.partner_earnings_config.min_earning_per_delivery));
+    }
+    if (config.partner_earnings_config?.max_earning_per_delivery) {
+        partnerEarning = Math.min(partnerEarning, Number(config.partner_earnings_config.max_earning_per_delivery));
+    }
+
+    const breakdown = {
+        customer_delivery_fee: finalCustomerFee,
+        partner_delivery_earning: partnerEarning,
+        company_delivery_revenue: companyShare,
+        company_funded_delivery_expense: 0.0,
+        zone: effectiveZone,
+        order_type: orderType,
+        pricing_version: pricingVersion,
+        calculation_timestamp: timestamp
+    };
 
     return {
-        delivery_charge: finalCharge,
-        delivery_fee: finalCharge,
+        delivery_charge: finalCustomerFee,
+        delivery_fee: finalCustomerFee,
         is_free: false,
+        is_free_delivery: false,
         reason: `Standard delivery charge. Add ₹${amountNeeded.toFixed(0)} more for FREE delivery.`,
         free_delivery_threshold: threshold,
-        amount_needed_for_free_delivery: amountNeeded
+        amount_needed_for_free_delivery: amountNeeded,
+        customer_delivery_fee: finalCustomerFee,
+        partner_delivery_earning: partnerEarning,
+        company_delivery_revenue: companyShare,
+        company_funded_delivery_expense: 0.0,
+        breakdown,
+        financial_breakdown: breakdown,
+        zone: effectiveZone,
+        order_type: orderType,
+        pricing_version: pricingVersion,
+        calculation_timestamp: timestamp,
+        min_order_value: Number(config.min_order_value_for_delivery || 0),
+        meets_min_order: sub >= Number(config.min_order_value_for_delivery || 0)
+    };
+}
+
+async function simulateDeliveryFinancials({
+    zone = null,
+    distance_km = 0,
+    order_type = "delivery",
+    customer_delivery_fee = null,
+    subtotal = 350
+}) {
+    const calc = await calculateDeliveryCharge({
+        subtotal,
+        order_type,
+        zone,
+        distance_km
+    });
+
+    return {
+        customer_delivery_fee: calc.customer_delivery_fee,
+        partner_earning: calc.partner_delivery_earning,
+        company_delivery_revenue: calc.company_delivery_revenue,
+        company_funded_delivery_expense: calc.company_funded_delivery_expense,
+        total_partner_payable: calc.partner_delivery_earning,
+        is_free: calc.is_free,
+        free_delivery_threshold: calc.free_delivery_threshold,
+        amount_needed_for_free_delivery: calc.amount_needed_for_free_delivery,
+        reason: calc.reason,
+        order_type: calc.order_type,
+        zone: calc.zone,
+        pricing_version: calc.pricing_version
     };
 }
 
@@ -883,6 +1288,7 @@ module.exports = {
     getDeliveryConfig,
     updateDeliveryConfig,
     calculateDeliveryCharge,
+    simulateDeliveryFinancials,
     checkDeliveryAvailability,
     getLaunchBanner,
     verifyQrSecurityPassword,

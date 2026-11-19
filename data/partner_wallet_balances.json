@@ -1,1 +1,11 @@
-{}
+[
+  {
+    "partner_id": "partner_idem_test",
+    "lifetime_earned_paise": 6000,
+    "total_settled_paise": 0,
+    "available_payable_paise": 6000,
+    "reserved_withdrawal_paise": 0,
+    "pending_settlement_paise": 0,
+    "updated_at": "2026-11-19T10:03:06.423Z"
+  }
+]

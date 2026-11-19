@@ -60,7 +60,18 @@ router.put("/deliveries/:id/status", authenticateToken, async (req, res) => {
 
         if (status === "delivered") {
             try {
-                await recordSubscriptionDeliveryEarning(partnerId, deliveryId, 35);
+                const { getDeliveryConfig } = require("../../services/businessConfigService");
+                const config = await getDeliveryConfig();
+                const subEarning = Number(config.partner_earnings_config?.default_subscription_earning || 30.0);
+                const snapshot = {
+                    customer_delivery_fee: 0,
+                    partner_delivery_earning: subEarning,
+                    company_delivery_revenue: 0,
+                    company_funded_delivery_expense: subEarning,
+                    order_type: "subscription",
+                    pricing_version: Number(config.pricing_config_version || 1)
+                };
+                await recordSubscriptionDeliveryEarning(partnerId, deliveryId, subEarning, snapshot);
             } catch (e) {
                 console.warn("[SUB EARNING WARN]:", e.message);
             }

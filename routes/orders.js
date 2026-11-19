@@ -481,6 +481,16 @@ router.post("/", async (req, res) => {
             total,
             total_price: total,
             totalPrice: total,
+            financial_breakdown: {
+                customer_delivery_fee: chargeCalc.delivery_fee,
+                partner_delivery_earning: chargeCalc.partner_delivery_earning,
+                company_delivery_revenue: chargeCalc.company_delivery_revenue,
+                company_funded_delivery_expense: chargeCalc.company_funded_delivery_expense,
+                zone: chargeCalc.zone,
+                order_type: chargeCalc.order_type,
+                pricing_version: chargeCalc.pricing_version,
+                calculated_at: chargeCalc.calculation_timestamp || new Date().toISOString()
+            },
             payment_method: payment_method || "UPI QR (7904880944@superyes)",
             payment_status: transaction_id ? "Verification Pending" : "Awaiting Payment",
             transaction_id: transaction_id,

@@ -1,15 +1,103 @@
 {
   "id": "main",
+  "cod_enabled": true,
+  "cod_holding_limit": 1000,
   "delivery_charges_enabled": true,
-  "fixed_delivery_charge": 30,
-  "free_delivery_threshold": 299,
+  "fixed_delivery_charge": 40,
+  "free_delivery_threshold": 500,
   "min_order_value_for_delivery": 150,
+  "store_pickup_enabled": true,
+  "free_delivery_enabled": true,
+  "pricing_config_version": 29,
+  "delivery_fee_distribution": {
+    "distribution_mode": "fixed",
+    "customer_delivery_fee": 40,
+    "partner_share": 30,
+    "company_share": 10,
+    "partner_share_pct": 75,
+    "company_share_pct": 25
+  },
+  "free_delivery_funding_policy": {
+    "policy": "company_funded",
+    "partner_payout_on_free_delivery": 30,
+    "company_subsidy_amount": 30
+  },
+  "partner_earnings_config": {
+    "default_delivery_earning": 35,
+    "default_regular_order_earning": 30,
+    "default_subscription_earning": 30,
+    "distance_bonus_enabled": true,
+    "base_distance_km": 5,
+    "bonus_per_km": 6,
+    "min_earning_per_delivery": 25,
+    "max_earning_per_delivery": 150,
+    "special_incentive_enabled": true,
+    "special_incentive_threshold": 10,
+    "special_incentive_amount": 100,
+    "free_delivery_earning": 30,
+    "rules_enabled": true
+  },
   "partner_base_payout": 35,
   "partner_distance_bonus_per_km": 6,
   "distance_charges_enabled": false,
   "distance_base_km": 5,
   "distance_rate_per_km": 10,
-  "zone_charges": {},
+  "zones": {
+    "Padur": {
+      "customer_delivery_fee": 20,
+      "free_delivery_threshold": 300,
+      "partner_share": 15,
+      "company_share": 5,
+      "partner_earning_regular": 30,
+      "partner_earning_subscription": 25,
+      "free_delivery_partner_payout": 25,
+      "distance_base_km": 5,
+      "distance_rate_per_km": 8,
+      "enabled": true
+    },
+    "Navalur": {
+      "customer_delivery_fee": 30,
+      "free_delivery_threshold": 400,
+      "partner_share": 22,
+      "company_share": 8,
+      "partner_earning_regular": 35,
+      "partner_earning_subscription": 30,
+      "free_delivery_partner_payout": 30,
+      "distance_base_km": 5,
+      "distance_rate_per_km": 10,
+      "enabled": true
+    },
+    "Siruseri": {
+      "customer_delivery_fee": 30,
+      "free_delivery_threshold": 400,
+      "partner_share": 22,
+      "company_share": 8,
+      "partner_earning_regular": 35,
+      "partner_earning_subscription": 30,
+      "free_delivery_partner_payout": 30,
+      "distance_base_km": 5,
+      "distance_rate_per_km": 10,
+      "enabled": true
+    },
+    "Kelambakkam": {
+      "customer_delivery_fee": 40,
+      "free_delivery_threshold": 500,
+      "partner_share": 30,
+      "company_share": 10,
+      "partner_earning_regular": 40,
+      "partner_earning_subscription": 35,
+      "free_delivery_partner_payout": 30,
+      "distance_base_km": 5,
+      "distance_rate_per_km": 12,
+      "enabled": true
+    }
+  },
+  "zone_charges": {
+    "Padur": 20,
+    "Navalur": 30,
+    "Siruseri": 30,
+    "Kelambakkam": 40
+  },
   "delivery_mode": "morning_evening",
   "morning_start_time": "06:00 AM",
   "morning_end_time": "10:00 AM",
@@ -31,6 +119,6 @@
   "launch_banner_bg_color": "#1B4332",
   "launch_banner_image_url": "",
   "zone_banners": {},
-  "updated_at": "2026-11-17T08:53:44.048Z",
-  "updated_by": "Super Admin"
+  "updated_at": "2026-11-19T10:03:18.774Z",
+  "updated_by": "THULIRVA Super Admin"
 }

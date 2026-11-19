@@ -7,6 +7,7 @@ const {
     getDeliveryConfig,
     updateDeliveryConfig,
     calculateDeliveryCharge,
+    simulateDeliveryFinancials,
     checkDeliveryAvailability,
     getLaunchBanner,
     verifyQrSecurityPassword,
@@ -44,6 +45,9 @@ const upload = multer({
 // 1. GET /api/config/delivery - Full Delivery Configuration
 router.get(["/delivery", "/"], async (req, res) => {
     try {
+        res.set("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.set("Pragma", "no-cache");
+        res.set("Expires", "0");
         const config = await getDeliveryConfig();
         const availability = await checkDeliveryAvailability({ zone: req.query.zone });
         res.json({
@@ -59,8 +63,24 @@ router.get(["/delivery", "/"], async (req, res) => {
 // 2. POST /api/config/delivery/calculate-charge - Calculate authoritative delivery fee
 router.post(["/delivery/calculate-charge", "/calculate-charge"], async (req, res) => {
     try {
-        const { subtotal = 0, order_type = "delivery", zone = null, distance_km = null } = req.body;
-        const result = await calculateDeliveryCharge({ subtotal, order_type, zone, distance_km });
+        res.set("Cache-Control", "no-cache, no-store, must-revalidate");
+        const { subtotal = 0, order_type = "delivery", zone = null, distance_km = null, address = null, coupon_code = null, coupon_discount = 0 } = req.body || {};
+        const result = await calculateDeliveryCharge({ subtotal, order_type, zone, distance_km, address, coupon_code, coupon_discount });
+        res.json({
+            success: true,
+            ...result
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// 2b. POST /api/config/delivery/simulate - Dynamic Live Financial Simulation
+router.post(["/delivery/simulate", "/simulate", "/admin/delivery/simulate"], async (req, res) => {
+    try {
+        res.set("Cache-Control", "no-cache, no-store, must-revalidate");
+        const { subtotal = 350, order_type = "delivery", zone = null, distance_km = 0, customer_delivery_fee = null } = req.body;
+        const result = await simulateDeliveryFinancials({ subtotal, order_type, zone, distance_km, customer_delivery_fee });
         res.json({
             success: true,
             ...result
