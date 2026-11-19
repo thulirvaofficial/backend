@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { pool } = require("../config/database");
 const { authenticateToken, adminOnly } = require("../middleware/auth");
+const { uploadProductImage } = require("../middleware/uploadMiddleware");
 
 const router = express.Router();
 
@@ -212,6 +213,10 @@ function attachContentToProducts(products) {
 
 /* GET ALL PRODUCTS WITH DYNAMIC VARIANTS & RICH CONTENT */
 router.get("/", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
     try {
         let list = [];
         try {
@@ -241,6 +246,10 @@ router.get("/", async (req, res) => {
 
 /* GET SINGLE PRODUCT WITH VARIANTS & RICH CONTENT */
 router.get("/:id", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
         return res.status(400).json({ success: false, message: "Invalid product ID" });
@@ -283,6 +292,10 @@ router.get("/:id", async (req, res) => {
 
 /* ADMIN GET ALL PRODUCTS */
 router.get("/admin/all", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
     try {
         let list = [];
         try {
@@ -306,6 +319,32 @@ router.get("/admin/all", async (req, res) => {
         const fallback = loadLocalProducts();
         const enriched = attachContentToProducts(fallback);
         res.json({ success: true, products: enriched });
+    }
+});
+
+/* ============================================================
+   PRODUCT IMAGE UPLOAD (ADMIN)
+============================================================ */
+router.post(["/upload", "/upload-image"], authenticateToken, adminOnly, uploadProductImage, (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: "No image file provided. Please choose a JPG, PNG, or WEBP file (Max 5MB)."
+            });
+        }
+        const relativeUrl = `/uploads/products/${req.file.filename}`;
+        return res.json({
+            success: true,
+            message: "Product image uploaded successfully",
+            image_url: relativeUrl,
+            url: relativeUrl,
+            filename: req.file.filename,
+            size: req.file.size,
+            mimetype: req.file.mimetype
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 });
 
@@ -542,6 +581,17 @@ router.post("/", authenticateToken, adminOnly, async (req, res) => {
         };
         saveProductContent(allContent);
 
+        // Synchronize updated image with linked subscription plans
+        const finalImage = savedImage || (req.body.image && typeof req.body.image === 'string' && req.body.image.trim() ? req.body.image.trim() : (updatedProd ? updatedProd.image : null));
+        if (finalImage) {
+            try {
+                await pool.query(
+                    "UPDATE subscription_plans SET product_image = $1, updated_at = CURRENT_TIMESTAMP WHERE product_id = $2",
+                    [finalImage, id]
+                );
+            } catch (_) {}
+        }
+
         const enriched = attachContentToProducts([newProd]);
         return res.json({ success: true, product: enriched[0] });
     } catch (error) {
@@ -652,6 +702,17 @@ router.put("/:id", authenticateToken, adminOnly, async (req, res) => {
             seo_description: seo_description !== undefined ? seo_description : existingContent.seo_description
         };
         saveProductContent(allContent);
+
+        // Synchronize updated image with linked subscription plans
+        const finalImage = savedImage || (req.body.image && typeof req.body.image === 'string' && req.body.image.trim() ? req.body.image.trim() : (updatedProd ? updatedProd.image : null));
+        if (finalImage) {
+            try {
+                await pool.query(
+                    "UPDATE subscription_plans SET product_image = $1, updated_at = CURRENT_TIMESTAMP WHERE product_id = $2",
+                    [finalImage, id]
+                );
+            } catch (_) {}
+        }
 
         const enriched = attachContentToProducts([updatedProd || req.body]);
         return res.json({ success: true, product: enriched[0] });

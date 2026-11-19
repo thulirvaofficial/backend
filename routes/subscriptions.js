@@ -4,6 +4,7 @@ const path = require("path");
 const jwt = require("jsonwebtoken");
 const { pool } = require("../config/database");
 const { authenticateToken, adminOnly } = require("../middleware/auth");
+const { uploadSubscriptionImage } = require("../middleware/uploadMiddleware");
 const { notifySubscriptionActivated, notifySubscriptionRenewed, notifyAdminNewOrder, sendSubscriptionNotification, sendNotification, sendPaymentNotification } = require("../services/notificationService");
 
 const router = express.Router();
@@ -248,19 +249,72 @@ function enrichPlanWithConfigs(plan) {
     };
 }
 
+function syncMockPlanWithCatalogProduct(plan) {
+    if (!plan) return plan;
+    try {
+        const prodFile = path.resolve(__dirname, "..", "data", "products.json");
+        if (fs.existsSync(prodFile)) {
+            const raw = fs.readFileSync(prodFile, "utf-8");
+            const prods = JSON.parse(raw);
+            if (plan.product_id) {
+                const matched = prods.find(pr => Number(pr.id) === Number(plan.product_id));
+                if (matched && matched.image && (!plan.product_image || plan.product_image.startsWith('/assets/images/products/'))) {
+                    return { ...plan, product_image: matched.image };
+                }
+            }
+        }
+    } catch (_) {}
+    return plan;
+}
+
+/* ============================================================
+   SUBSCRIPTION PLAN IMAGE UPLOAD (ADMIN)
+============================================================ */
+router.post(["/upload", "/upload-image", "/plans/upload", "/plans/upload-image"], authenticateToken, adminOnly, uploadSubscriptionImage, (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: "No image file provided. Please choose a JPG, PNG, or WEBP file (Max 5MB)."
+            });
+        }
+        const relativeUrl = `/uploads/subscriptions/${req.file.filename}`;
+        return res.json({
+            success: true,
+            message: "Subscription image uploaded successfully",
+            image_url: relativeUrl,
+            url: relativeUrl,
+            filename: req.file.filename,
+            size: req.file.size,
+            mimetype: req.file.mimetype
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
 /* GET ALL PLANS (STOREFRONT) */
 router.get("/plans", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
     try {
         let plans = [];
         try {
-            const result = await pool.query(
-                "SELECT * FROM subscription_plans WHERE is_archived = false AND (status = 'active' OR is_active = true) ORDER BY id ASC"
-            );
+            const result = await pool.query(`
+                SELECT p.*,
+                       COALESCE(NULLIF(p.product_image, ''), pr.image, '/assets/images/products/fresh_cow_milk.jpg') AS product_image
+                FROM subscription_plans p
+                LEFT JOIN products pr ON pr.id = p.product_id
+                WHERE p.is_archived = false AND (p.status = 'active' OR p.is_active = true)
+                ORDER BY p.id ASC
+            `);
             plans = result.rows;
         } catch (_) {}
 
         if (plans.length === 0) {
-            plans = MOCK_PLANS.filter(p => !p.is_archived && p.status !== 'inactive');
+            plans = MOCK_PLANS.filter(p => !p.is_archived && p.status !== 'inactive').map(syncMockPlanWithCatalogProduct);
         }
 
         return res.json({
@@ -270,18 +324,23 @@ router.get("/plans", async (req, res) => {
     } catch {
         return res.json({
             success: true,
-            plans: MOCK_PLANS.filter(p => !p.is_archived && p.status !== 'inactive').map(enrichPlanWithConfigs)
+            plans: MOCK_PLANS.filter(p => !p.is_archived && p.status !== 'inactive').map(syncMockPlanWithCatalogProduct).map(enrichPlanWithConfigs)
         });
     }
 });
 
 /* GET ALL PLANS FOR ADMIN (WITH SUBSCRIBER COUNTS) */
 router.get("/plans/admin/all", authenticateToken, adminOnly, async (req, res) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
     try {
         let plans = [];
         try {
             const result = await pool.query(`
                 SELECT p.*,
+                       COALESCE(NULLIF(p.product_image, ''), pr.image, '/assets/images/products/fresh_cow_milk.jpg') AS product_image,
                        COALESCE((
                            SELECT COUNT(*)
                            FROM subscriptions s
@@ -289,13 +348,14 @@ router.get("/plans/admin/all", authenticateToken, adminOnly, async (req, res) =>
                              AND LOWER(COALESCE(s.status, '')) IN ('active', 'approved')
                        ), 0) AS active_subscribers
                 FROM subscription_plans p
+                LEFT JOIN products pr ON pr.id = p.product_id
                 ORDER BY p.is_archived ASC, p.id ASC
             `);
             plans = result.rows;
         } catch (_) {}
 
         if (plans.length === 0) {
-            plans = MOCK_PLANS.map(p => ({
+            plans = MOCK_PLANS.map(syncMockPlanWithCatalogProduct).map(p => ({
                 ...p,
                 active_subscribers: (MOCK_SUBSCRIPTIONS || []).filter(s => s.plan_id == p.id && (s.status || '').toLowerCase() === 'active').length
             }));
@@ -315,17 +375,27 @@ router.get("/plans/admin/all", authenticateToken, adminOnly, async (req, res) =>
 
 /* GET SINGLE PLAN */
 router.get("/plans/:id", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Surrogate-Control", "no-store");
     const id = parseInt(req.params.id);
     try {
         let plan = null;
         try {
-            const result = await pool.query("SELECT * FROM subscription_plans WHERE id=$1", [id]);
+            const result = await pool.query(`
+                SELECT p.*,
+                       COALESCE(NULLIF(p.product_image, ''), pr.image, '/assets/images/products/fresh_cow_milk.jpg') AS product_image
+                FROM subscription_plans p
+                LEFT JOIN products pr ON pr.id = p.product_id
+                WHERE p.id = $1
+            `, [id]);
             if (result.rows.length > 0) plan = result.rows[0];
         } catch (_) {}
-        if (!plan) plan = MOCK_PLANS.find(p => p.id === id) || MOCK_PLANS[0];
+        if (!plan) plan = syncMockPlanWithCatalogProduct(MOCK_PLANS.find(p => p.id === id) || MOCK_PLANS[0]);
         return res.json({ success: true, plan: enrichPlanWithConfigs(plan) });
     } catch {
-        const plan = MOCK_PLANS.find(p => p.id === id) || MOCK_PLANS[0];
+        const plan = syncMockPlanWithCatalogProduct(MOCK_PLANS.find(p => p.id === id) || MOCK_PLANS[0]);
         res.json({ success: true, plan: enrichPlanWithConfigs(plan) });
     }
 });
@@ -524,6 +594,7 @@ router.put("/plans/:id", authenticateToken, adminOnly, async (req, res) => {
             MOCK_PLANS[idx] = enrichPlanWithConfigs({
                 ...MOCK_PLANS[idx],
                 ...req.body,
+                product_image: savedImage || product_image || MOCK_PLANS[idx].product_image,
                 id: id
             });
             updatedPlan = updatedPlan || MOCK_PLANS[idx];

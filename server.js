@@ -177,6 +177,11 @@ app.use(
 );
 
 app.use(
+    "/api/admin/subscriptions",
+    subscriptionRoutes
+);
+
+app.use(
     "/api/locations",
     locationRoutes
 );
@@ -382,6 +387,8 @@ const backendAssetsUploadsPath = path.resolve(__dirname, "assets", "images", "up
 [
     backendPublicUploadsPath,
     path.join(backendPublicUploadsPath, "categories"),
+    path.join(backendPublicUploadsPath, "products"),
+    path.join(backendPublicUploadsPath, "subscriptions"),
     path.join(backendPublicUploadsPath, "partners"),
     path.join(backendPublicUploadsPath, "delivery_proofs"),
     path.join(backendPublicUploadsPath, "attendance"),

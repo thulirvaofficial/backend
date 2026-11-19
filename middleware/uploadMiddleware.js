@@ -6,9 +6,18 @@ const PROOF_UPLOADS_DIR = path.resolve(__dirname, "..", "public", "uploads", "de
 const PARTNER_UPLOADS_DIR = path.resolve(__dirname, "..", "public", "uploads", "partners");
 const USER_UPLOADS_DIR = path.resolve(__dirname, "..", "public", "uploads", "profiles");
 const CATEGORY_UPLOADS_DIR = path.resolve(__dirname, "..", "public", "uploads", "categories");
+const PRODUCT_UPLOADS_DIR = path.resolve(__dirname, "..", "public", "uploads", "products");
+const SUBSCRIPTION_UPLOADS_DIR = path.resolve(__dirname, "..", "public", "uploads", "subscriptions");
 
 // Ensure upload dirs exist
-[PROOF_UPLOADS_DIR, PARTNER_UPLOADS_DIR, USER_UPLOADS_DIR, CATEGORY_UPLOADS_DIR].forEach(dir => {
+[
+    PROOF_UPLOADS_DIR,
+    PARTNER_UPLOADS_DIR,
+    USER_UPLOADS_DIR,
+    CATEGORY_UPLOADS_DIR,
+    PRODUCT_UPLOADS_DIR,
+    SUBSCRIPTION_UPLOADS_DIR
+].forEach(dir => {
     if (!fs.existsSync(dir)) {
         try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
     }
@@ -267,14 +276,146 @@ const uploadCategoryImage = (req, res, next) => {
     });
 };
 
+// 5. Product Image Storage (Max 5MB, JPG/PNG/WEBP)
+const productStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        if (!fs.existsSync(PRODUCT_UPLOADS_DIR)) {
+            try { fs.mkdirSync(PRODUCT_UPLOADS_DIR, { recursive: true }); } catch (_) {}
+        }
+        cb(null, PRODUCT_UPLOADS_DIR);
+    },
+    filename: (req, file, cb) => {
+        let ext = path.extname(file.originalname).toLowerCase();
+        if (!ext || ext === "." || ext === ".tmp") ext = ".jpg";
+        const cleanExt = ext.startsWith(".") ? ext : `.${ext}`;
+        const rawBase = path.basename(file.originalname, ext);
+        const cleanBase = rawBase.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 30) || "product";
+        const uniqueSuffix = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+        cb(null, `prod_${cleanBase}_${uniqueSuffix}${cleanExt}`);
+    }
+});
+
+const uploadProductMulter = multer({
+    storage: productStorage,
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: categoryFileFilter
+});
+
+const uploadProductImage = (req, res, next) => {
+    const ct = (req.headers["content-type"] || "").toLowerCase();
+    if (!ct.includes("multipart/form-data")) {
+        return next();
+    }
+
+    const handler = uploadProductMulter.fields([
+        { name: "image", maxCount: 1 },
+        { name: "product_image", maxCount: 1 },
+        { name: "file", maxCount: 1 },
+        { name: "photo", maxCount: 1 }
+    ]);
+
+    handler(req, res, (err) => {
+        if (err) {
+            console.warn("[UPLOAD PRODUCT WARNING]:", err.message);
+            if (err.code === "LIMIT_FILE_SIZE") {
+                return res.status(400).json({
+                    success: false,
+                    message: "File size exceeds 5 MB maximum limit. Please select a smaller image."
+                });
+            }
+            return res.status(400).json({
+                success: false,
+                message: err.message || "Failed to upload product image."
+            });
+        }
+        if (req.files) {
+            const found = req.files["image"]?.[0] ||
+                          req.files["product_image"]?.[0] ||
+                          req.files["file"]?.[0] ||
+                          req.files["photo"]?.[0];
+            if (found) req.file = found;
+        }
+        next();
+    });
+};
+
+// 6. Subscription Image Storage (Max 5MB, JPG/PNG/WEBP)
+const subscriptionStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        if (!fs.existsSync(SUBSCRIPTION_UPLOADS_DIR)) {
+            try { fs.mkdirSync(SUBSCRIPTION_UPLOADS_DIR, { recursive: true }); } catch (_) {}
+        }
+        cb(null, SUBSCRIPTION_UPLOADS_DIR);
+    },
+    filename: (req, file, cb) => {
+        let ext = path.extname(file.originalname).toLowerCase();
+        if (!ext || ext === "." || ext === ".tmp") ext = ".jpg";
+        const cleanExt = ext.startsWith(".") ? ext : `.${ext}`;
+        const rawBase = path.basename(file.originalname, ext);
+        const cleanBase = rawBase.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 30) || "sub";
+        const uniqueSuffix = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+        cb(null, `sub_${cleanBase}_${uniqueSuffix}${cleanExt}`);
+    }
+});
+
+const uploadSubscriptionMulter = multer({
+    storage: subscriptionStorage,
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: categoryFileFilter
+});
+
+const uploadSubscriptionImage = (req, res, next) => {
+    const ct = (req.headers["content-type"] || "").toLowerCase();
+    if (!ct.includes("multipart/form-data")) {
+        return next();
+    }
+
+    const handler = uploadSubscriptionMulter.fields([
+        { name: "image", maxCount: 1 },
+        { name: "product_image", maxCount: 1 },
+        { name: "plan_image", maxCount: 1 },
+        { name: "file", maxCount: 1 },
+        { name: "photo", maxCount: 1 }
+    ]);
+
+    handler(req, res, (err) => {
+        if (err) {
+            console.warn("[UPLOAD SUBSCRIPTION WARNING]:", err.message);
+            if (err.code === "LIMIT_FILE_SIZE") {
+                return res.status(400).json({
+                    success: false,
+                    message: "File size exceeds 5 MB maximum limit. Please select a smaller image."
+                });
+            }
+            return res.status(400).json({
+                success: false,
+                message: err.message || "Failed to upload subscription image."
+            });
+        }
+        if (req.files) {
+            const found = req.files["image"]?.[0] ||
+                          req.files["product_image"]?.[0] ||
+                          req.files["plan_image"]?.[0] ||
+                          req.files["file"]?.[0] ||
+                          req.files["photo"]?.[0];
+            if (found) req.file = found;
+        }
+        next();
+    });
+};
+
 module.exports = {
     uploadDeliveryProof,
     uploadPartnerPhoto,
     uploadUserProfilePhoto,
     uploadCategoryImage,
+    uploadProductImage,
+    uploadSubscriptionImage,
     USER_UPLOADS_DIR,
     PARTNER_UPLOADS_DIR,
     PROOF_UPLOADS_DIR,
-    CATEGORY_UPLOADS_DIR
+    CATEGORY_UPLOADS_DIR,
+    PRODUCT_UPLOADS_DIR,
+    SUBSCRIPTION_UPLOADS_DIR
 };
 
