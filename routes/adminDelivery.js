@@ -127,7 +127,7 @@ router.post("/partners", async (req, res) => {
             password = "defaultpassword123",
             assigned_area = "Kanchipuram Main Hub",
             vehicle_type = "Scooter",
-            vehicle_number = "TN 21 XY 9999"
+            vehicle_number = ""
         } = req.body;
 
         if (!name || !phone) {
@@ -215,7 +215,7 @@ router.put("/partners/:id", async (req, res) => {
         if (email) partner.email = email;
         if (assigned_area) partner.assigned_area = assigned_area;
         if (vehicle_type) partner.vehicle_type = vehicle_type;
-        if (vehicle_number) partner.vehicle_number = vehicle_number;
+        if (vehicle_number !== undefined) partner.vehicle_number = (vehicle_number || "").trim().toUpperCase();
 
         await savePartner(partner);
         await recordAudit("Operations Admin", "UPDATE_DELIVERY_PARTNER", `Updated partner ${partnerId}`);

@@ -212,7 +212,7 @@ router.post("/", optionalAuth, async (req, res) => {
             must_change_password: true,
             assigned_area: assigned_area || "Padur",
             vehicle_type: vehicle_type || "Electric Scooter",
-            vehicle_number: vehicle_number || "TN 09 CY 7890",
+            vehicle_number: vehicle_number ? vehicle_number.trim().toUpperCase() : "",
             is_active: true,
             is_online: false,
             kyc_status: "NOT_SUBMITTED",

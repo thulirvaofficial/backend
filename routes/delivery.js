@@ -158,7 +158,7 @@ const registerPartnerHandler = async (req, res) => {
             city = "Chennai",
             pincode,
             vehicle_type = "Scooter",
-            vehicle_number = "TN 21 AB 1234",
+            vehicle_number = "",
             assigned_area = "Chennai Central",
             driving_licence,
             identity_documents,
@@ -794,7 +794,7 @@ const updatePartnerProfileHandler = async (req, res) => {
         if (pincode !== undefined) partner.pincode = pincode ? pincode.trim() : "";
         if (assigned_area !== undefined && assigned_area.trim()) partner.assigned_area = assigned_area.trim();
         if (vehicle_type !== undefined && vehicle_type.trim()) partner.vehicle_type = vehicle_type.trim();
-        if (vehicle_number !== undefined && vehicle_number.trim()) partner.vehicle_number = vehicle_number.trim();
+        if (vehicle_number !== undefined) partner.vehicle_number = (vehicle_number || "").trim().toUpperCase();
         if (emergency_contact !== undefined) partner.emergency_contact = emergency_contact ? emergency_contact.trim() : null;
         partner.updated_at = new Date().toISOString();
 

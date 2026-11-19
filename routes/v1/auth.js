@@ -146,7 +146,7 @@ router.post("/partner/register", async (req, res) => {
             password_hash: hashedPassword,
             assigned_area: assigned_area || "Padur",
             vehicle_type: vehicle_type || "Electric Scooter",
-            vehicle_number: vehicle_number || "TN 09 CY 7890",
+            vehicle_number: vehicle_number ? vehicle_number.trim().toUpperCase() : "",
             is_active: true,
             is_online: true,
             kyc_status: (aadhaar_front_url && aadhaar_back_url) ? "PENDING" : "NOT_SUBMITTED",
