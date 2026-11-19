@@ -61,6 +61,15 @@ function saveBase64Image(image, prefix = "cat") {
     return image;
 }
 
+function broadcastCategoryUpdate(req, eventData) {
+    try {
+        const io = req.app.get("io");
+        if (io) {
+            io.emit("category:updated", eventData);
+        }
+    } catch (_) {}
+}
+
 function cleanupOldCategoryImage(oldPath, newPath = null, excludeCatId = null) {
     if (!oldPath || typeof oldPath !== "string") return;
     if (newPath && oldPath === newPath) return; // Same image, do not delete
@@ -110,8 +119,16 @@ function normalizeCategory(r) {
         desc = null;
     }
 
-    const webImg = r.category_image || r.website_image || r.image || "/assets/images/products/fresh_cow_milk.jpg";
-    const mobImg = r.mobile_image || r.app_image || r.appImage || r.category_image || webImg;
+    // Determine normalized image path:
+    // If an image was set, return its exact path.
+    // If explicitly null or empty string, return null.
+    let rawImg = r.category_image !== undefined ? r.category_image : (r.image !== undefined ? r.image : (r.website_image !== undefined ? r.website_image : r.mobile_image));
+    let imgPath = null;
+    if (rawImg !== null && rawImg !== undefined) {
+        imgPath = rawImg.toString().trim();
+        if (imgPath.length === 0) imgPath = null;
+    }
+
     const catIcon = r.category_icon || r.emoji || "🥛";
     const isActive = r.is_active !== undefined ? Boolean(r.is_active) : (r.status !== 'inactive');
     const displayOrder = Number(r.display_order ?? r.id ?? 1);
@@ -129,11 +146,11 @@ function normalizeCategory(r) {
         slug: catKey,
         description: desc,
         category_description: desc,
-        image: webImg,
-        category_image: mobImg,
-        website_image: webImg,
-        mobile_image: mobImg,
-        appImage: mobImg,
+        image: imgPath,
+        category_image: imgPath,
+        website_image: imgPath,
+        mobile_image: imgPath,
+        appImage: imgPath,
         emoji: catIcon,
         category_icon: catIcon,
         is_active: isActive,
@@ -149,9 +166,10 @@ function normalizeCategory(r) {
 
 // GET ALL CATEGORIES
 router.get(["/", "/all", "/list"], async (req, res) => {
-    res.set("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
     res.set("Pragma", "no-cache");
     res.set("Expires", "0");
+    res.set("Surrogate-Control", "no-store");
 
     try {
         let categories = [];
@@ -187,7 +205,10 @@ router.get(["/", "/all", "/list"], async (req, res) => {
 
 // GET SINGLE CATEGORY
 router.get("/:id", async (req, res) => {
-    res.set("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+    res.set("Pragma", "no-cache");
+    res.set("Expires", "0");
+    res.set("Surrogate-Control", "no-store");
     const id = parseInt(req.params.id, 10);
     const key = req.params.id.toString().trim();
 
@@ -265,23 +286,47 @@ router.post(["/", "/create"], authenticateToken, adminOnly, async (req, res) => 
         const active = body.is_active !== undefined ? Boolean(body.is_active) : true;
         const now = new Date().toISOString();
 
-        const savedWebImg = saveBase64Image(body.website_image || body.category_image || body.image, "cat_web") || "/assets/images/products/fresh_cow_milk.jpg";
-        const savedMobImg = saveBase64Image(body.mobile_image || body.appImage || body.category_image, "cat_mob") || savedWebImg;
+        let incomingImg = undefined;
+        if (body.category_image !== undefined) incomingImg = body.category_image;
+        else if (body.image_web !== undefined) incomingImg = body.image_web;
+        else if (body.image_url !== undefined) incomingImg = body.image_url;
+        else if (body.image !== undefined) incomingImg = body.image;
+        else if (body.website_image !== undefined) incomingImg = body.website_image;
+        else if (body.mobile_image !== undefined) incomingImg = body.mobile_image;
+
+        let savedImg = null;
+        if (incomingImg !== undefined && incomingImg !== null && incomingImg.toString().trim().length > 0) {
+            savedImg = saveBase64Image(incomingImg.toString().trim(), "cat");
+        }
+        const savedWebImg = savedImg;
+        const savedMobImg = savedImg;
 
         let createdCategory = null;
 
         // 1. Try DB insertion
         try {
             const dbRes = await pool.query(
-                `INSERT INTO categories (name, display_name, description, slug, image, website_image, mobile_image, emoji, display_order, is_active, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+                `INSERT INTO categories (name, display_name, description, slug, category_key, image, website_image, mobile_image, category_image, emoji, category_icon, display_order, is_active, updated_at)
+                 VALUES ($1, $2, $3, $4, $4, $5, $5, $6, $6, $7, $7, $8, $9, NOW())
                  RETURNING *`,
-                [name, displayName, description, categoryKey, savedWebImg, savedWebImg, savedMobImg, icon, orderNum, active]
+                [name, displayName, description, categoryKey, savedWebImg, savedMobImg, icon, orderNum, active]
             );
             if (dbRes.rows && dbRes.rows.length > 0) {
                 createdCategory = normalizeCategory(dbRes.rows[0]);
             }
-        } catch (_) {}
+        } catch (dbErr) {
+            try {
+                const dbRes = await pool.query(
+                    `INSERT INTO categories (name, display_name, description, image, website_image, mobile_image, emoji, display_order, is_active)
+                     VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8)
+                     RETURNING *`,
+                    [name, displayName, description, savedWebImg, savedMobImg, icon, orderNum, active]
+                );
+                if (dbRes.rows && dbRes.rows.length > 0) {
+                    createdCategory = normalizeCategory(dbRes.rows[0]);
+                }
+            } catch (_) {}
+        }
 
         // 2. Persist to disk categories.json
         const local = loadLocalCategories();
@@ -316,6 +361,8 @@ router.post(["/", "/create"], authenticateToken, adminOnly, async (req, res) => 
         local.push(createdCategory);
         local.sort((a, b) => a.display_order - b.display_order || a.id - b.id);
         saveLocalCategories(local);
+
+        broadcastCategoryUpdate(req, { action: "create", category: createdCategory });
 
         return res.json({
             success: true,
@@ -363,14 +410,27 @@ router.put(["/:id", "/update/:id"], authenticateToken, adminOnly, async (req, re
         const prevWebImg = existing.website_image || existing.image;
         const prevMobImg = existing.mobile_image || existing.appImage || existing.category_image;
 
-        let savedWebImg = existing.website_image || existing.image;
-        if (body.website_image !== undefined || body.category_image !== undefined || body.image !== undefined) {
-            savedWebImg = saveBase64Image(body.website_image || body.category_image || body.image, "cat_web");
+        // Image Handling: prioritize explicit image fields, honor clearing
+        let incomingImg = undefined;
+        if (body.category_image !== undefined) incomingImg = body.category_image;
+        else if (body.image_web !== undefined) incomingImg = body.image_web;
+        else if (body.image_url !== undefined) incomingImg = body.image_url;
+        else if (body.image !== undefined) incomingImg = body.image;
+        else if (body.mobile_image !== undefined) incomingImg = body.mobile_image;
+        else if (body.website_image !== undefined) incomingImg = body.website_image;
+
+        let finalImage = existing.category_image || existing.website_image || existing.image || null;
+
+        if (incomingImg !== undefined) {
+            if (incomingImg === null || (typeof incomingImg === "string" && incomingImg.trim().length === 0)) {
+                finalImage = null; // Image explicitly removed
+            } else {
+                finalImage = saveBase64Image(incomingImg.toString().trim(), "cat");
+            }
         }
-        let savedMobImg = existing.mobile_image || existing.appImage || savedWebImg;
-        if (body.mobile_image !== undefined || body.appImage !== undefined || body.category_image !== undefined) {
-            savedMobImg = saveBase64Image(body.mobile_image || body.appImage || body.category_image, "cat_mob");
-        }
+
+        const savedWebImg = finalImage;
+        const savedMobImg = finalImage;
 
         // 1. Try DB update
         try {
@@ -380,17 +440,37 @@ router.put(["/:id", "/update/:id"], authenticateToken, adminOnly, async (req, re
                      display_name = $2,
                      description = $3,
                      slug = $4,
+                     category_key = $4,
                      image = $5,
                      website_image = $5,
                      mobile_image = $6,
+                     category_image = $6,
                      emoji = $7,
+                     category_icon = $7,
                      display_order = $8,
                      is_active = $9,
                      updated_at = NOW()
                  WHERE id = $10`,
                 [updatedName, updatedDisplayName, updatedDescription, updatedKey, savedWebImg, savedMobImg, updatedIcon, updatedOrder, updatedActive, id]
             );
-        } catch (_) {}
+        } catch (dbErr) {
+            try {
+                await pool.query(
+                    `UPDATE categories
+                     SET name = $1,
+                         display_name = $2,
+                         description = $3,
+                         image = $4,
+                         website_image = $4,
+                         mobile_image = $5,
+                         emoji = $6,
+                         display_order = $7,
+                         is_active = $8
+                     WHERE id = $9`,
+                    [updatedName, updatedDisplayName, updatedDescription, savedWebImg, savedMobImg, updatedIcon, updatedOrder, updatedActive, id]
+                );
+            } catch (_) {}
+        }
 
         // 2. Persist to disk
         local[idx] = normalizeCategory({
@@ -428,6 +508,8 @@ router.put(["/:id", "/update/:id"], authenticateToken, adminOnly, async (req, re
             cleanupOldCategoryImage(prevMobImg, savedMobImg);
         }
 
+        broadcastCategoryUpdate(req, { action: "update", category: local[idx] });
+
         return res.json({
             success: true,
             message: "Category updated successfully",
@@ -457,6 +539,8 @@ router.delete("/:id", authenticateToken, adminOnly, async (req, res) => {
             if (img1) cleanupOldCategoryImage(img1, null, id);
             if (img2 && img2 !== img1) cleanupOldCategoryImage(img2, null, id);
         }
+
+        broadcastCategoryUpdate(req, { action: "delete", id });
 
         return res.json({ success: true, message: "Category deleted successfully" });
     } catch (err) {

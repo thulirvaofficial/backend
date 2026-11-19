@@ -65,12 +65,18 @@ async function initializeDatabase() {
             );
         `);
 
-        // Ensure category mobile_image and display_order columns exist
+        // Ensure category columns exist
         const catCols = [
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS slug VARCHAR(150)",
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS category_key VARCHAR(150)",
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS category_image VARCHAR(500)",
             "ALTER TABLE categories ADD COLUMN IF NOT EXISTS website_image VARCHAR(500)",
             "ALTER TABLE categories ADD COLUMN IF NOT EXISTS mobile_image VARCHAR(500)",
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS category_icon VARCHAR(50)",
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS category_description TEXT",
             "ALTER TABLE categories ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true",
-            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 1"
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 1",
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
         ];
         for (const sql of catCols) {
             await pool.query(sql).catch(e => console.warn("Category migration warn:", e.message));

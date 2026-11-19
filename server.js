@@ -410,8 +410,10 @@ app.use("/admin", express.static(adminPath));
 // 3. Common Static Assets & Uploads (shared with Mobile App and Web)
 const staticUploadOptions = {
     setHeaders: (res) => {
-        res.set("Cache-Control", "no-cache, must-revalidate");
+        res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
         res.set("Pragma", "no-cache");
+        res.set("Expires", "0");
+        res.set("Surrogate-Control", "no-store");
     }
 };
 
