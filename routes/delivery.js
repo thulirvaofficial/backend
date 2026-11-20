@@ -2196,6 +2196,28 @@ const updatePartnerOrderStatusHandler = async (req, res) => {
         if (failed_reason) order.failed_reason = failed_reason;
         if (notes) order.notes = notes;
 
+        // Doorstep COD refusal tracking: strictly count confirmed customer doorstep refusals on COD orders
+        const isDoorstepRefusal = (failed_reason === "customer_refused_doorstep" || 
+                                   failed_reason === "customer_refused" || 
+                                   failed_reason === "refused_by_customer" ||
+                                   (notes && notes.toLowerCase().includes("doorstep refusal")) ||
+                                   (notes && notes.toLowerCase().includes("customer refused")));
+        const isCodPayment = String(order.payment_method || "").toLowerCase().includes("cod") ||
+                             String(order.payment_method || "").toLowerCase().includes("cash on delivery");
+
+        if (isDoorstepRefusal && isCodPayment) {
+            try {
+                const { recordDoorstepCodRefusal } = require("../services/codRiskService");
+                const custId = order.user_id || order.customer_id;
+                recordDoorstepCodRefusal(custId, order.id || id, {
+                    partnerId,
+                    notes: notes || failed_reason
+                }).catch(e => console.warn("[COD RISK TRIGGER ERROR]:", e.message));
+            } catch (err) {
+                console.warn("[COD RISK IMPORT ERROR]:", err.message);
+            }
+        }
+
         // Also update in DB if available
         try {
             const num = parseInt(id, 10);

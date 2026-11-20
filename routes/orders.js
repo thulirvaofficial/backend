@@ -194,6 +194,17 @@ router.post("/", async (req, res) => {
                     message: "Cash on Delivery (COD) is currently disabled by Admin. Please choose UPI QR or Online Payment."
                 });
             }
+
+            // Strict Customer Account Level COD Restriction Enforcement
+            const { checkCustomerCodEligibility } = require("../services/codRiskService");
+            const codCheck = await checkCustomerCodEligibility(user_id, customer_phone);
+            if (!codCheck.eligible) {
+                return res.status(400).json({
+                    success: false,
+                    cod_restricted: true,
+                    message: codCheck.reason || "Cash on Delivery (COD) is unavailable for your account due to previous unaccepted deliveries. Please proceed with UPI QR or Online Payment."
+                });
+            }
         }
 
         // Order Idempotency Guard (Prevents double order submission for same payment reference)

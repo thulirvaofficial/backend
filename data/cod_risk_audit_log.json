@@ -1,0 +1,77 @@
+[
+  {
+    "id": 1795141611493,
+    "customer_id": "TEST-COD-USER-999",
+    "customer_name": "User TEST-COD-USER-999",
+    "action": "ADMIN_RESTRICTED",
+    "reason": "Admin decision due to high-risk location verification failure.",
+    "previous_state": true,
+    "new_state": false,
+    "refusal_count": 0,
+    "order_ids": [],
+    "admin_id": "1",
+    "admin_name": "THULIRVA Super Admin",
+    "created_at": "2026-11-20T02:26:51.404Z"
+  },
+  {
+    "id": 1795141612371,
+    "customer_id": "TEST-COD-USER-999",
+    "customer_name": "User TEST-COD-USER-999",
+    "action": "ADMIN_RESTORED",
+    "reason": "Customer verified via phone call and promised to accept next delivery.",
+    "previous_state": false,
+    "new_state": true,
+    "refusal_count": 0,
+    "order_ids": [],
+    "admin_id": "1",
+    "admin_name": "THULIRVA Super Admin",
+    "created_at": "2026-11-20T02:26:51.387Z"
+  },
+  {
+    "id": 1795141611973,
+    "customer_id": "TEST-COD-USER-999",
+    "customer_name": "User TEST-COD-USER-999",
+    "action": "AUTO_RESTRICTED",
+    "reason": "Cash on Delivery restricted automatically after 2 doorstep delivery refusals (Orders: ORD-COD-REFUSE-1, ORD-COD-REFUSE-2).",
+    "previous_state": true,
+    "new_state": false,
+    "refusal_count": 2,
+    "order_ids": [
+      "ORD-COD-REFUSE-1",
+      "ORD-COD-REFUSE-2"
+    ],
+    "admin_id": null,
+    "admin_name": "System Guard",
+    "created_at": "2026-11-20T02:26:51.347Z"
+  },
+  {
+    "id": 1795141611971,
+    "customer_id": "TEST-COD-USER-999",
+    "customer_name": "User TEST-COD-USER-999",
+    "action": "REFUSAL_RECORDED",
+    "reason": "Doorstep refusal recorded on Order ORD-COD-REFUSE-1. Refusal count: 1. Notes: Customer was not home and refused parcel on call.",
+    "previous_state": true,
+    "new_state": true,
+    "refusal_count": 1,
+    "order_ids": [
+      "ORD-COD-REFUSE-1"
+    ],
+    "admin_id": null,
+    "admin_name": "Admin",
+    "created_at": "2026-11-20T02:26:51.344Z"
+  },
+  {
+    "id": 1795141611442,
+    "customer_id": "TEST-COD-USER-999",
+    "customer_name": "User TEST-COD-USER-999",
+    "action": "ADMIN_RESTORED",
+    "reason": "Restored manually by admin.",
+    "previous_state": true,
+    "new_state": true,
+    "refusal_count": 0,
+    "order_ids": [],
+    "admin_id": null,
+    "admin_name": "Test Harness",
+    "created_at": "2026-11-20T02:26:51.323Z"
+  }
+]

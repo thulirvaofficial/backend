@@ -12,7 +12,8 @@ const {
     getAdminTickets,
     updateTicketStatus,
     updateTicketPriority,
-    assignTicketAgent
+    assignTicketAgent,
+    reopenTicket
 } = require("../services/supportService");
 
 const router = express.Router();
@@ -205,6 +206,38 @@ router.post("/tickets/:ticketId/messages", authenticateToken, upload.single("att
     }
 });
 
+/**
+ * POST /api/support/tickets/:ticketId/reopen
+ * Reopen a resolved or closed ticket
+ */
+router.post("/tickets/:ticketId/reopen", authenticateToken, async (req, res) => {
+    try {
+        const { ticketId } = req.params;
+        const { reason } = req.body;
+        const userId = req.user.partner_id || req.user.id;
+        const userRole = req.user.role === "delivery_partner" ? "delivery_partner" : "customer";
+
+        const details = await getTicketDetails(ticketId, false);
+        if (!details || !details.ticket) {
+            return res.status(404).json({ success: false, message: "Ticket not found." });
+        }
+        if (String(details.ticket.user_id) !== String(userId) && req.user.role !== "admin" && req.user.role !== "super_admin") {
+            return res.status(403).json({ success: false, message: "Unauthorized access to this ticket." });
+        }
+
+        const result = await reopenTicket({
+            ticketId,
+            userId,
+            userRole,
+            reason: reason || "Customer/Partner requested ticket reopening."
+        });
+
+        return res.json({ success: true, ...result });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: "Failed to reopen ticket: " + err.message });
+    }
+});
+
 /* =========================================================================
    2. ADMIN SUPPORT ENDPOINTS
    Base mount: /api/admin/support
@@ -338,13 +371,37 @@ adminRouter.patch("/tickets/:ticketId/priority", async (req, res) => {
 adminRouter.patch("/tickets/:ticketId/assign", async (req, res) => {
     try {
         const { ticketId } = req.params;
-        const { admin_id, admin_name } = req.body;
-        if (!admin_id || !admin_name) {
-            return res.status(400).json({ success: false, message: "admin_id and admin_name are required." });
+        let { admin_id, admin_name, assigned_agent } = req.body;
+        if (!admin_name && assigned_agent) {
+            admin_name = assigned_agent;
         }
+        if (!admin_name) {
+            return res.status(400).json({ success: false, message: "admin_name or assigned_agent is required." });
+        }
+        admin_id = admin_id || req.user.id || 1;
 
         const result = await assignTicketAgent(ticketId, admin_id, admin_name);
         return res.json({ success: true, message: "Support agent assigned.", ...result });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * POST /api/admin/support/tickets/:ticketId/reopen
+ * Admin reopens a ticket
+ */
+adminRouter.post("/tickets/:ticketId/reopen", async (req, res) => {
+    try {
+        const { ticketId } = req.params;
+        const { reason } = req.body;
+        const result = await reopenTicket({
+            ticketId,
+            userId: req.user.id,
+            userRole: "admin",
+            reason: reason || "Admin reopened ticket for further investigation."
+        });
+        return res.json({ success: true, ...result });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }

@@ -1,1 +1,154 @@
-[]
+[
+  {
+    "id": 1795137584837,
+    "ticket_id": "THU-TKT-20261120-7739",
+    "event_type": "CREATED",
+    "actor_id": "2",
+    "actor_name": "kamsh",
+    "actor_role": "customer",
+    "event_data": {
+      "category": "Delivery Delay",
+      "priority": "NORMAL",
+      "order_id": "ORD-TEST-1001"
+    },
+    "created_at": "2026-11-20T01:19:44.519Z"
+  },
+  {
+    "id": 1795137584737,
+    "ticket_id": "THU-TKT-20261120-7739",
+    "event_type": "INTERNAL_NOTE_ADDED",
+    "actor_id": "1",
+    "actor_name": "THULIRVA Super Admin",
+    "actor_role": "admin",
+    "event_data": {
+      "preview": "Confidential note: Hub route 4 road blockage confirmed."
+    },
+    "created_at": "2026-11-20T01:19:44.587Z"
+  },
+  {
+    "id": 1795137584717,
+    "ticket_id": "THU-TKT-20261120-7739",
+    "event_type": "ASSIGNED",
+    "actor_id": "1",
+    "actor_name": "Senior Support Executive",
+    "actor_role": "admin",
+    "event_data": {
+      "assignedTo": "Senior Support Executive"
+    },
+    "created_at": "2026-11-20T01:19:44.609Z"
+  },
+  {
+    "id": 1795137585367,
+    "ticket_id": "THU-TKT-20261120-7739",
+    "event_type": "STATUS_CHANGED",
+    "actor_id": "1",
+    "actor_name": "THULIRVA Super Admin",
+    "actor_role": "admin",
+    "event_data": {
+      "newStatus": "RESOLVED"
+    },
+    "created_at": "2026-11-20T01:19:44.625Z"
+  },
+  {
+    "id": 1795137585473,
+    "ticket_id": "THU-TKT-20261120-7739",
+    "event_type": "REOPENED",
+    "actor_id": "2",
+    "actor_name": "kamsh",
+    "actor_role": "customer",
+    "event_data": {
+      "reason": "Issue recurred today."
+    },
+    "created_at": "2026-11-20T01:19:44.643Z"
+  },
+  {
+    "id": 1795137585517,
+    "ticket_id": "THU-TKT-20261120-6052",
+    "event_type": "CREATED",
+    "actor_id": "THU-DP-0001",
+    "actor_name": "Karthik Raja",
+    "actor_role": "delivery_partner",
+    "event_data": {
+      "category": "Payment and Payout Issues",
+      "priority": "HIGH",
+      "order_id": "PAYOUT-INCENTIVE-99"
+    },
+    "created_at": "2026-11-20T01:19:44.661Z"
+  },
+  {
+    "id": 1795141611286,
+    "ticket_id": "THU-TKT-20261120-6323",
+    "event_type": "CREATED",
+    "actor_id": "2",
+    "actor_name": "kamsh",
+    "actor_role": "customer",
+    "event_data": {
+      "category": "Delivery Delay",
+      "priority": "NORMAL",
+      "order_id": "ORD-TEST-1001"
+    },
+    "created_at": "2026-11-20T02:26:50.694Z"
+  },
+  {
+    "id": 1795141610866,
+    "ticket_id": "THU-TKT-20261120-6323",
+    "event_type": "INTERNAL_NOTE_ADDED",
+    "actor_id": "1",
+    "actor_name": "THULIRVA Super Admin",
+    "actor_role": "admin",
+    "event_data": {
+      "preview": "Confidential note: Hub route 4 road blockage confirmed."
+    },
+    "created_at": "2026-11-20T02:26:50.761Z"
+  },
+  {
+    "id": 1795141610917,
+    "ticket_id": "THU-TKT-20261120-6323",
+    "event_type": "ASSIGNED",
+    "actor_id": "1",
+    "actor_name": "Senior Support Executive",
+    "actor_role": "admin",
+    "event_data": {
+      "assignedTo": "Senior Support Executive"
+    },
+    "created_at": "2026-11-20T02:26:50.781Z"
+  },
+  {
+    "id": 1795141611279,
+    "ticket_id": "THU-TKT-20261120-6323",
+    "event_type": "STATUS_CHANGED",
+    "actor_id": "1",
+    "actor_name": "THULIRVA Super Admin",
+    "actor_role": "admin",
+    "event_data": {
+      "newStatus": "RESOLVED"
+    },
+    "created_at": "2026-11-20T02:26:50.794Z"
+  },
+  {
+    "id": 1795141611782,
+    "ticket_id": "THU-TKT-20261120-6323",
+    "event_type": "REOPENED",
+    "actor_id": "2",
+    "actor_name": "kamsh",
+    "actor_role": "customer",
+    "event_data": {
+      "reason": "Issue recurred today."
+    },
+    "created_at": "2026-11-20T02:26:50.812Z"
+  },
+  {
+    "id": 1795141611627,
+    "ticket_id": "THU-TKT-20261120-4738",
+    "event_type": "CREATED",
+    "actor_id": "THU-DP-0001",
+    "actor_name": "Karthik Raja",
+    "actor_role": "delivery_partner",
+    "event_data": {
+      "category": "Payment and Payout Issues",
+      "priority": "HIGH",
+      "order_id": "PAYOUT-INCENTIVE-99"
+    },
+    "created_at": "2026-11-20T02:26:50.830Z"
+  }
+]

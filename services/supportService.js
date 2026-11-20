@@ -382,6 +382,12 @@ async function getUserTickets(userId, userType) {
         );
     }
 
+    tickets = tickets.map(t => {
+        t.ticket_id = t.ticket_id || t.ticket_number || String(t.id);
+        t.ticket_number = t.ticket_number || t.ticket_id || String(t.id);
+        return t;
+    });
+
     return tickets;
 }
 
@@ -460,6 +466,14 @@ async function getTicketDetails(ticketId, isAdmin = false) {
                 String(n.ticket_id) === String(ticket.id)
             );
         }
+    }
+
+    // Normalize IDs and attach messages/notes to ticket object for frontend parity
+    ticket.ticket_id = ticket.ticket_id || ticket.ticket_number || String(ticket.id);
+    ticket.ticket_number = ticket.ticket_number || ticket.ticket_id || String(ticket.id);
+    ticket.messages = messages;
+    if (isAdmin) {
+        ticket.internal_notes = internalNotes;
     }
 
     return {
@@ -550,6 +564,13 @@ async function getAdminTickets({ status, priority, category, userType, search, p
         closed: all.filter(t => t.status === "CLOSED").length,
         urgent: all.filter(t => t.priority === "URGENT" && t.status !== "CLOSED").length
     };
+
+    // Normalize IDs
+    tickets = tickets.map(t => {
+        t.ticket_id = t.ticket_id || t.ticket_number || String(t.id);
+        t.ticket_number = t.ticket_number || t.ticket_id || String(t.id);
+        return t;
+    });
 
     // Pagination
     const totalCount = tickets.length;
@@ -667,21 +688,26 @@ async function updateTicketPriority(ticketId, newPriority, adminId, adminName) {
  * Assign support agent to ticket
  */
 async function assignTicketAgent(ticketId, adminId, adminName) {
+    if (!adminId && adminName) {
+        adminId = 1;
+    }
+    const cleanAdminName = adminName || "Support Specialist";
+
     try {
         if (pool && typeof isDbOnline === "function" && isDbOnline()) {
             await pool.query(`
                 UPDATE support_tickets 
                 SET assigned_admin_id = $1, assigned_admin_name = $2, updated_at = NOW()
                 WHERE ticket_number = $3 OR id::text = $3
-            `, [String(adminId), adminName, String(ticketId)]);
+            `, [String(adminId || 1), cleanAdminName, String(ticketId)]);
         }
     } catch (_) {}
 
     const tickets = readJson(TICKETS_FILE);
     const t = tickets.find(x => String(x.ticket_number) === String(ticketId) || String(x.id) === String(ticketId));
     if (t) {
-        t.assigned_admin_id = String(adminId);
-        t.assigned_admin_name = adminName;
+        t.assigned_admin_id = String(adminId || 1);
+        t.assigned_admin_name = cleanAdminName;
         t.updated_at = new Date().toISOString();
         writeJson(TICKETS_FILE, tickets);
     }
@@ -689,13 +715,73 @@ async function assignTicketAgent(ticketId, adminId, adminName) {
     await logTicketEvent({
         ticketId,
         eventType: "ASSIGNED",
-        actorId: adminId,
-        actorName: adminName,
+        actorId: adminId || 1,
+        actorName: cleanAdminName,
         actorRole: "admin",
-        eventData: { assignedTo: adminName }
+        eventData: { assignedTo: cleanAdminName }
     });
 
-    return { success: true, ticketId, assigned_admin_name: adminName };
+    return { success: true, ticketId, assigned_admin_name: cleanAdminName };
+}
+
+/**
+ * Reopen a resolved or closed ticket
+ */
+async function reopenTicket({ ticketId, userId, userRole, reason = "" }) {
+    const nowIso = new Date().toISOString();
+    const newStatus = "OPEN";
+
+    try {
+        if (pool && typeof isDbOnline === "function" && isDbOnline()) {
+            await pool.query(`
+                UPDATE support_tickets 
+                SET status = $1, updated_at = NOW(), resolved_at = NULL, closed_at = NULL
+                WHERE ticket_number = $2 OR id::text = $2
+            `, [newStatus, String(ticketId)]);
+        }
+    } catch (_) {}
+
+    const tickets = readJson(TICKETS_FILE);
+    const t = tickets.find(x => String(x.ticket_number) === String(ticketId) || String(x.id) === String(ticketId));
+    if (t) {
+        t.status = newStatus;
+        t.updated_at = nowIso;
+        t.resolved_at = null;
+        t.closed_at = null;
+        writeJson(TICKETS_FILE, tickets);
+    }
+
+    if (reason && reason.trim()) {
+        await addTicketMessage({
+            ticketId: t ? t.ticket_number : ticketId,
+            senderId: userId || (t ? t.user_id : "user"),
+            senderName: userRole === "admin" ? "Support Admin" : (t ? t.user_name : "User"),
+            senderRole: userRole || (t ? t.user_type : "customer"),
+            message: `[Ticket Reopened]: ${reason.trim()}`
+        });
+    }
+
+    await logTicketEvent({
+        ticketId,
+        eventType: "REOPENED",
+        actorId: userId || "user",
+        actorName: userRole === "admin" ? "Admin" : (t ? t.user_name : "User"),
+        actorRole: userRole || "customer",
+        eventData: { reason }
+    });
+
+    try {
+        emitToAdmin("support:ticket:reopened", { ticketId, reason });
+        sendNotification({
+            title: `Support Ticket Reopened [${t ? t.ticket_number : ticketId}]`,
+            message: `${t ? t.user_name : "User"} reopened support ticket: ${reason || "Issue persists"}`,
+            type: "support_ticket_reopened",
+            targetId: t ? t.ticket_number : ticketId,
+            forAdmin: true
+        }).catch(() => {});
+    } catch (_) {}
+
+    return { success: true, ticketId, status: newStatus, message: "Ticket reopened successfully." };
 }
 
 module.exports = {
@@ -707,6 +793,7 @@ module.exports = {
     getAdminTickets,
     updateTicketStatus,
     updateTicketPriority,
-    assignTicketAgent
+    assignTicketAgent,
+    reopenTicket
 };
 

@@ -89,6 +89,9 @@ const announcementRoutes =
 const { supportRouter, adminSupportRouter } =
     require("./routes/support");
 
+const { codRouter, adminCodRouter } =
+    require("./routes/codManagement");
+
 const app = express();
 
 const PORT =
@@ -376,7 +379,16 @@ app.use(
 
 app.use("/api/v1", v1Routes);
 app.use("/api/support", supportRouter);
+app.use("/api/customer/tickets", supportRouter);
+app.use("/api/partner/tickets", supportRouter);
 app.use("/api/admin/support", adminSupportRouter);
+app.use("/api/admin/tickets", adminSupportRouter);
+
+// COD Risk Management & Eligibility Routes
+app.use("/api/cod", codRouter);
+app.use("/api/cod-status", codRouter);
+app.use("/api/admin/cod-restrictions", adminCodRouter);
+app.use("/api/admin/cod-risk", adminCodRouter);
 app.use("/api/health", require("./routes/v1/health"));
 app.use("/api/earnings-v1", require("./routes/v1/earnings"));
 app.use("/api/bank-accounts", require("./routes/v1/bankAccounts"));
