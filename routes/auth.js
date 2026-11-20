@@ -9,6 +9,7 @@ const { sendNotification } = require("../services/notificationService");
 const { validateEmail, validatePhone, validatePassword, validateName, validateAddress } = require("../utils/validators");
 const { revokeToken } = require("../middleware/auth");
 const emailService = require("../services/emailService");
+const admin2FAService = require("../services/admin2FAService");
 
 const router = express.Router();
 
@@ -358,6 +359,8 @@ router.post("/login", async (req, res) => {
                 }
 
                 const userRole = String(user.role || "customer").toLowerCase().trim();
+                const isStaff = isAdminLogin || userRole === "admin" || userRole === "super_admin" || cleanIdentifier === "admin@thulirva.com";
+
                 if (isAdminLogin && userRole !== "admin" && userRole !== "super_admin") {
                     return res.status(403).json({
                         success: false,
@@ -366,11 +369,6 @@ router.post("/login", async (req, res) => {
                 }
 
                 clearLoginAttempts(cleanIdentifier, clientIp);
-                const token = jwt.sign(
-                    { id: user.id, email: user.email, role: user.role },
-                    process.env.JWT_SECRET || "thulirva_secret_key_2026",
-                    { expiresIn: "30d" }
-                );
 
                 const userPayload = {
                     id: user.id,
@@ -387,6 +385,32 @@ router.post("/login", async (req, res) => {
                     created_at: user.created_at || new Date().toISOString()
                 };
 
+                const adminPayload = (userRole === "admin" || userRole === "super_admin" || isStaff) ? {
+                    id: user.id,
+                    name: user.name || "Super Admin",
+                    admin_name: user.name || "Super Admin",
+                    email: user.email,
+                    role: userRole === "super_admin" ? "Super Admin" : "Operations Admin",
+                    raw_role: userRole,
+                    profile_photo: user.profile_photo || ""
+                } : null;
+
+                // MANDATORY TWO-STEP VERIFICATION FOR EVERY ADMINISTRATIVE LOGIN
+                if (isStaff) {
+                    return await admin2FAService.initiate2FA(req, res, {
+                        user,
+                        role: userRole,
+                        userPayload,
+                        adminPayload
+                    });
+                }
+
+                const token = jwt.sign(
+                    { id: user.id, email: user.email, role: user.role },
+                    process.env.JWT_SECRET || "thulirva_secret_key_2026",
+                    { expiresIn: "30d" }
+                );
+
                 const resData = {
                     success: true,
                     token,
@@ -396,20 +420,6 @@ router.post("/login", async (req, res) => {
                         user: userPayload
                     }
                 };
-
-                if (userRole === "admin" || userRole === "super_admin") {
-                    const adminPayload = {
-                        id: user.id,
-                        name: user.name || "Super Admin",
-                        admin_name: user.name || "Super Admin",
-                        email: user.email,
-                        role: userRole === "super_admin" ? "Super Admin" : "Operations Admin",
-                        raw_role: userRole,
-                        profile_photo: user.profile_photo || ""
-                    };
-                    resData.admin = adminPayload;
-                    resData.data.admin = adminPayload;
-                }
 
                 return res.json(resData);
             }
@@ -427,6 +437,8 @@ router.post("/login", async (req, res) => {
             const valid = await bcrypt.compare(password, memUser.password);
             if (valid) {
                 const memRole = String(memUser.role || "customer").toLowerCase().trim();
+                const isMemStaff = isAdminLogin || memRole === "admin" || memRole === "super_admin" || cleanIdentifier === "admin@thulirva.com";
+
                 if (isAdminLogin && memRole !== "admin" && memRole !== "super_admin") {
                     return res.status(403).json({
                         success: false,
@@ -435,11 +447,6 @@ router.post("/login", async (req, res) => {
                 }
 
                 clearLoginAttempts(cleanIdentifier, clientIp);
-                const token = jwt.sign(
-                    { id: memUser.id, email: memUser.email, role: memUser.role },
-                    process.env.JWT_SECRET || "thulirva_secret_key_2026",
-                    { expiresIn: "30d" }
-                );
 
                 const memUserPayload = {
                     id: memUser.id,
@@ -456,6 +463,32 @@ router.post("/login", async (req, res) => {
                     created_at: memUser.created_at || new Date().toISOString()
                 };
 
+                const memAdminPayload = (memRole === "admin" || memRole === "super_admin" || isMemStaff) ? {
+                    id: memUser.id,
+                    name: memUser.name || "Super Admin",
+                    admin_name: memUser.name || "Super Admin",
+                    email: memUser.email,
+                    role: memRole === "super_admin" ? "Super Admin" : "Operations Admin",
+                    raw_role: memRole,
+                    profile_photo: memUser.profile_photo || ""
+                } : null;
+
+                // MANDATORY TWO-STEP VERIFICATION FOR EVERY ADMINISTRATIVE LOGIN
+                if (isMemStaff) {
+                    return await admin2FAService.initiate2FA(req, res, {
+                        user: memUser,
+                        role: memRole,
+                        userPayload: memUserPayload,
+                        adminPayload: memAdminPayload
+                    });
+                }
+
+                const token = jwt.sign(
+                    { id: memUser.id, email: memUser.email, role: memUser.role },
+                    process.env.JWT_SECRET || "thulirva_secret_key_2026",
+                    { expiresIn: "30d" }
+                );
+
                 const memResData = {
                     success: true,
                     token,
@@ -465,20 +498,6 @@ router.post("/login", async (req, res) => {
                         user: memUserPayload
                     }
                 };
-
-                if (memRole === "admin" || memRole === "super_admin") {
-                    const memAdminPayload = {
-                        id: memUser.id,
-                        name: memUser.name || "Super Admin",
-                        admin_name: memUser.name || "Super Admin",
-                        email: memUser.email,
-                        role: memRole === "super_admin" ? "Super Admin" : "Operations Admin",
-                        raw_role: memRole,
-                        profile_photo: memUser.profile_photo || ""
-                    };
-                    memResData.admin = memAdminPayload;
-                    memResData.data.admin = memAdminPayload;
-                }
 
                 return res.json(memResData);
             } else {
@@ -500,6 +519,46 @@ router.post("/login", async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Login failed"
+        });
+    }
+});
+
+/* ============================================================
+   ADMIN TWO-STEP VERIFICATION (2FA) ENDPOINTS
+============================================================ */
+
+/**
+ * POST /api/auth/verify-2fa & /api/auth/admin-verify-2fa
+ * Validates 6-digit code and issues official Admin JWT session
+ */
+router.post(["/verify-2fa", "/admin-verify-2fa"], async (req, res) => {
+    try {
+        const { twoFactorToken, otp } = req.body;
+        const result = await admin2FAService.verify2FA(twoFactorToken, otp);
+        return res.status(result.status || (result.success ? 200 : 400)).json(result);
+    } catch (err) {
+        console.error("[ROUTE VERIFY 2FA ERROR]:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to verify two-step code."
+        });
+    }
+});
+
+/**
+ * POST /api/auth/resend-2fa & /api/auth/admin-resend-2fa
+ * Dispatches fresh code to admin@thulirva.com (enforces 30s cooldown)
+ */
+router.post(["/resend-2fa", "/admin-resend-2fa"], async (req, res) => {
+    try {
+        const { twoFactorToken } = req.body;
+        const result = await admin2FAService.resend2FA(twoFactorToken, req);
+        return res.status(result.status || (result.success ? 200 : 400)).json(result);
+    } catch (err) {
+        console.error("[ROUTE RESEND 2FA ERROR]:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to resend two-step code."
         });
     }
 });

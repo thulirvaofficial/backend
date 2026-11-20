@@ -1,0 +1,41 @@
+[
+  {
+    "twoFactorToken": "2fa_f00d1896822789844000179c705bb65000acb8c26232a2f9",
+    "userId": 1,
+    "userEmail": "admin@thulirva.com",
+    "targetEmail": "admin@thulirva.com",
+    "adminName": "THULIRVA Super Admin",
+    "role": "super_admin",
+    "otp": "859861",
+    "expiresAt": 1795188783992,
+    "attempts": 0,
+    "maxAttempts": 5,
+    "lastResentAt": 1795188183992,
+    "clientIp": "::1",
+    "userAgent": "node",
+    "userPayload": {
+      "id": 1,
+      "name": "THULIRVA Super Admin",
+      "admin_name": "THULIRVA Super Admin",
+      "email": "admin@thulirva.com",
+      "phone": "7904880944",
+      "alternate_phone": "",
+      "address": "Arcot Road, Valasaravakkam, Chennai",
+      "city": "Chennai",
+      "pincode": "600087",
+      "profile_photo": "/uploads/profiles/profile_1_1794686372800.png",
+      "role": "super_admin",
+      "created_at": "2026-01-01T00:00:00.000Z"
+    },
+    "adminPayload": {
+      "id": 1,
+      "name": "THULIRVA Super Admin",
+      "admin_name": "THULIRVA Super Admin",
+      "email": "admin@thulirva.com",
+      "role": "Super Admin",
+      "raw_role": "super_admin",
+      "profile_photo": "/uploads/profiles/profile_1_1794686372800.png"
+    },
+    "createdAt": "2026-11-20T15:23:03.993Z"
+  }
+]

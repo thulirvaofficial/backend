@@ -155,7 +155,7 @@ const { authenticateToken, adminOnly } = require("./middleware/auth");
 // Strict Global RBAC Authorization Gate for All /api/admin Routes
 app.use("/api/admin", (req, res, next) => {
     const p = req.path.toLowerCase();
-    if (p === "/login" || p === "/auth/login") {
+    if (p === "/login" || p === "/auth/login" || p.includes("2fa")) {
         return next();
     }
     return authenticateToken(req, res, () => {
@@ -166,7 +166,7 @@ app.use("/api/admin", (req, res, next) => {
 // Strict Global RBAC Gate for /api/v1/admin
 app.use("/api/v1/admin", (req, res, next) => {
     const p = req.path.toLowerCase();
-    if (p === "/login" || p === "/auth/login") {
+    if (p === "/login" || p === "/auth/login" || p.includes("2fa")) {
         return next();
     }
     return authenticateToken(req, res, () => {

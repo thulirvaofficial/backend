@@ -296,6 +296,75 @@ class EmailService {
     }
 
     /**
+     * Send Enterprise 2-Step Verification (2FA) Email for Admin Access
+     */
+    async sendAdmin2StepVerificationEmail({
+        to = "admin@thulirva.com",
+        adminName = "System Administrator",
+        otp,
+        ipAddress = "127.0.0.1",
+        userAgent = "Admin Portal",
+        expiryMinutes = 10
+    }) {
+        const formattedOtp = String(otp).split("").join("  ");
+        const subject = `🔐 ${otp} is your Thulirva Admin 2-Step Verification Code`;
+
+        const bodyHtml = `
+            <div style="background-color: #FEF3C7; border-left: 4px solid #D97706; padding: 12px 16px; border-radius: 6px; margin-bottom: 18px;">
+                <strong style="color: #92400E; font-size: 13.5px;">Security Alert: Administrative Login Attempt Detected</strong>
+            </div>
+
+            <h2 style="color: #123F2B; font-size: 22px; font-weight: 800; margin: 0 0 14px; text-align: left;">
+                Admin Two-Step Verification
+            </h2>
+            <p style="color: #334155; font-size: 14.5px; line-height: 1.6; margin: 0 0 12px;">
+                Hello <strong>${adminName}</strong>,
+            </p>
+            <p style="color: #334155; font-size: 14.5px; line-height: 1.6; margin: 0 0 20px;">
+                An administrative sign-in was requested for the Thulirva Operations & Management Console. Please enter the two-step verification code below to authorize this session:
+            </p>
+
+            <!-- Prominent OTP Card -->
+            <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #FAF8EF; border: 2px solid #C2A649; border-radius: 14px; margin: 20px 0;">
+                <tr>
+                    <td align="center" style="padding: 24px 16px;">
+                        <div style="font-size: 11px; font-weight: 800; color: #123F2B; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 6px;">
+                            Two-Step Verification Code
+                        </div>
+                        <div style="font-size: 38px; font-weight: 900; letter-spacing: 12px; color: #123F2B; font-family: 'Courier New', Courier, monospace; margin: 8px 0; padding-left: 12px;">
+                            ${formattedOtp}
+                        </div>
+                        <div style="font-size: 12px; font-weight: 700; color: #DC2626; margin-top: 6px;">
+                            ⏱ Code expires in ${expiryMinutes} minutes
+                        </div>
+                    </td>
+                </tr>
+            </table>
+
+            <!-- Session Metadata -->
+            <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 14px 16px; margin: 20px 0; font-size: 12.5px; color: #475569; line-height: 1.7;">
+                <div><strong>Requested From IP:</strong> ${ipAddress}</div>
+                <div><strong>Client Platform:</strong> ${userAgent}</div>
+                <div><strong>Timestamp:</strong> ${new Date().toUTCString()}</div>
+            </div>
+
+            <p style="color: #DC2626; font-size: 13px; line-height: 1.5; margin: 18px 0 0;">
+                <strong>Do not share this code with anyone.</strong> Thulirva IT staff will never ask for your verification code. If you did not initiate this login, please investigate and change your master administrative password immediately.
+            </p>
+        `;
+
+        const text = `Thulirva Admin Two-Step Verification\n\nCode: ${otp}\nExpires in: ${expiryMinutes} minutes\nIP: ${ipAddress}\nTime: ${new Date().toISOString()}\n\nDo not share this code with anyone.`;
+
+        const html = this._wrapTemplate({
+            title: `Admin 2-Step Verification - Thulirva`,
+            preheader: `Admin verification code: ${otp}. Valid for ${expiryMinutes} minutes.`,
+            bodyHtml
+        });
+
+        return this.sendMail({ to, subject, html, text });
+    }
+
+    /**
      * Send Welcome Registration Email
      */
     async sendWelcomeEmail({ to, name = "Valued Customer", role = "customer" }) {

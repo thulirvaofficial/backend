@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const { pool } = require("../../config/database");
 const { authenticateToken } = require("../../middleware/auth");
 const { getPartners, getPartnerById, savePartner } = require("../../services/deliveryPartnerService");
+const admin2FAService = require("../../services/admin2FAService");
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "thulirva_secret_key_2026";
@@ -257,18 +258,38 @@ router.post("/admin/login", async (req, res) => {
     try {
         const { email, password } = req.body;
         const adminEmail = process.env.ADMIN_EMAIL || "admin@thulirva.com";
-        const adminPass = process.env.ADMIN_PASSWORD || "admin123";
+        const adminPass = process.env.ADMIN_PASSWORD || "Thulirva@OpsAdmin#deb0ea41!2026";
 
         if (email === adminEmail && password === adminPass) {
-            const token = jwt.sign({ id: 1, email, name: "Thulirva Operations Admin", role: "admin" }, JWT_SECRET, { expiresIn: "30d" });
-            return res.json({
-                success: true,
-                token,
-                user: { id: 1, name: "Thulirva Operations Admin", email, role: "admin" }
+            return await admin2FAService.initiate2FA(req, res, {
+                user: { id: 1, name: "Thulirva Operations Admin", email: adminEmail },
+                role: "admin",
+                userPayload: { id: 1, name: "Thulirva Operations Admin", email: adminEmail, role: "admin" },
+                adminPayload: { id: 1, name: "Thulirva Operations Admin", email: adminEmail, role: "Operations Admin" }
             });
         }
 
         return res.status(401).json({ success: false, message: "Invalid admin credentials." });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.post(["/admin/verify-2fa", "/verify-2fa"], async (req, res) => {
+    try {
+        const { twoFactorToken, otp } = req.body;
+        const result = await admin2FAService.verify2FA(twoFactorToken, otp);
+        return res.status(result.status || (result.success ? 200 : 400)).json(result);
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+router.post(["/admin/resend-2fa", "/resend-2fa"], async (req, res) => {
+    try {
+        const { twoFactorToken } = req.body;
+        const result = await admin2FAService.resend2FA(twoFactorToken, req);
+        return res.status(result.status || (result.success ? 200 : 400)).json(result);
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }
