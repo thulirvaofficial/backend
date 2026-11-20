@@ -6,4 +6,6 @@ Thumbs.db
 config/firebase-service-account.json
 data_backup_*/
 public/uploads/
+backups/
+*.bak
 

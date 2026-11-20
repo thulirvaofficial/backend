@@ -30,5 +30,13 @@
     "admin_name": "THULIRVA Super Admin",
     "note": "Confidential note: Hub route 4 road blockage confirmed.",
     "created_at": "2026-11-20T02:26:50.760Z"
+  },
+  {
+    "id": 1795165092380,
+    "ticket_id": "THU-TKT-20261120-4738",
+    "admin_id": "1",
+    "admin_name": "THULIRVA Super Admin",
+    "note": "Operations staff verified issue details at 2026-11-20T08:58:12.018Z",
+    "created_at": "2026-11-20T08:58:12.089Z"
   }
 ]

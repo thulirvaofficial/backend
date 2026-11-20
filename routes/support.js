@@ -343,9 +343,24 @@ adminRouter.patch("/tickets/:ticketId/status", async (req, res) => {
         return res.status(500).json({ success: false, message: err.message });
     }
 });
+adminRouter.put("/tickets/:ticketId/status", async (req, res) => {
+    try {
+        const { ticketId } = req.params;
+        const { status } = req.body;
+        if (!status) {
+            return res.status(400).json({ success: false, message: "Status is required." });
+        }
+
+        const adminName = req.user.name || "Super Admin";
+        const result = await updateTicketStatus(ticketId, status, req.user.id, adminName);
+        return res.json({ success: true, message: "Ticket status updated.", ...result });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
 
 /**
- * PATCH /api/admin/support/tickets/:ticketId/priority
+ * PATCH & PUT /api/admin/support/tickets/:ticketId/priority
  * Update ticket priority
  */
 adminRouter.patch("/tickets/:ticketId/priority", async (req, res) => {
@@ -363,12 +378,45 @@ adminRouter.patch("/tickets/:ticketId/priority", async (req, res) => {
         return res.status(500).json({ success: false, message: err.message });
     }
 });
+adminRouter.put("/tickets/:ticketId/priority", async (req, res) => {
+    try {
+        const { ticketId } = req.params;
+        const { priority } = req.body;
+        if (!priority) {
+            return res.status(400).json({ success: false, message: "Priority is required." });
+        }
+
+        const adminName = req.user.name || "Super Admin";
+        const result = await updateTicketPriority(ticketId, priority, req.user.id, adminName);
+        return res.json({ success: true, message: "Ticket priority updated.", ...result });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
 
 /**
- * PATCH /api/admin/support/tickets/:ticketId/assign
+ * PATCH & POST /api/admin/support/tickets/:ticketId/assign
  * Assign agent to ticket
  */
 adminRouter.patch("/tickets/:ticketId/assign", async (req, res) => {
+    try {
+        const { ticketId } = req.params;
+        let { admin_id, admin_name, assigned_agent } = req.body;
+        if (!admin_name && assigned_agent) {
+            admin_name = assigned_agent;
+        }
+        if (!admin_name) {
+            return res.status(400).json({ success: false, message: "admin_name or assigned_agent is required." });
+        }
+        admin_id = admin_id || req.user.id || 1;
+
+        const result = await assignTicketAgent(ticketId, admin_id, admin_name);
+        return res.json({ success: true, message: "Support agent assigned.", ...result });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+adminRouter.post("/tickets/:ticketId/assign", async (req, res) => {
     try {
         const { ticketId } = req.params;
         let { admin_id, admin_name, assigned_agent } = req.body;
@@ -434,6 +482,124 @@ adminRouter.post("/tickets/:ticketId/internal-notes", async (req, res) => {
         });
     } catch (err) {
         return res.status(500).json({ success: false, message: "Failed to record internal note: " + err.message });
+    }
+});
+
+/**
+ * POST /api/admin/support/tickets/:ticketId/approve-profile-update
+ * Admin approves partner profile update request and automatically updates delivery_partners.json
+ */
+adminRouter.post("/tickets/:ticketId/approve-profile-update", async (req, res) => {
+    try {
+        const { ticketId } = req.params;
+        const details = await getTicketDetails(ticketId, true);
+        if (!details || !details.ticket) {
+            return res.status(404).json({ success: false, message: "Ticket not found." });
+        }
+        const ticket = details.ticket;
+        const partnerId = ticket.user_id;
+
+        let { field, requested_value } = req.body;
+        if (!field && ticket.metadata && ticket.metadata.field) {
+            field = ticket.metadata.field;
+            requested_value = ticket.metadata.requested_value;
+        }
+
+        const partnersFile = path.resolve(__dirname, "..", "data", "delivery_partners.json");
+        let partners = [];
+        if (fs.existsSync(partnersFile)) {
+            partners = JSON.parse(fs.readFileSync(partnersFile, "utf-8"));
+        }
+        const partnerIdx = partners.findIndex(p => p.partner_id === partnerId);
+        if (partnerIdx === -1) {
+            return res.status(404).json({ success: false, message: `Partner ${partnerId} not found in database.` });
+        }
+
+        const allowedFields = ["name", "phone", "email", "vehicle_type", "vehicle_number", "address", "assigned_area", "city", "pincode"];
+        if (field && allowedFields.includes(field)) {
+            partners[partnerIdx][field] = requested_value;
+            partners[partnerIdx].updated_at = new Date().toISOString();
+            fs.writeFileSync(partnersFile, JSON.stringify(partners, null, 2), "utf-8");
+        }
+
+        const adminName = req.user.name || "Super Admin";
+        await updateTicketStatus(ticketId, "RESOLVED", req.user.id, adminName);
+
+        await addTicketMessage({
+            ticketId: ticket.ticket_number,
+            senderId: req.user.id || 1,
+            senderName: adminName,
+            senderRole: "admin",
+            message: `Profile update request for '${field || "profile details"}' has been approved and applied to your profile.`
+        });
+
+        try {
+            const { sendNotification } = require("../services/notificationService");
+            const { emitToPartner } = require("../services/socketService");
+            await sendNotification({
+                recipientId: partnerId,
+                recipientRole: "delivery_partner",
+                title: "Profile Update Approved",
+                message: `Your request to update ${field || "profile details"} has been approved and updated.`,
+                type: "PROFILE_UPDATED"
+            });
+            emitToPartner(partnerId, "profile:updated", { partner: partners[partnerIdx] });
+        } catch (_) {}
+
+        return res.json({
+            success: true,
+            message: "Profile update approved and applied successfully.",
+            updated_partner: partners[partnerIdx]
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+/**
+ * POST /api/admin/support/tickets/:ticketId/reject-profile-update
+ * Admin rejects partner profile update request
+ */
+adminRouter.post("/tickets/:ticketId/reject-profile-update", async (req, res) => {
+    try {
+        const { ticketId } = req.params;
+        const { rejection_reason } = req.body;
+        const details = await getTicketDetails(ticketId, true);
+        if (!details || !details.ticket) {
+            return res.status(404).json({ success: false, message: "Ticket not found." });
+        }
+        const ticket = details.ticket;
+        const partnerId = ticket.user_id;
+
+        const adminName = req.user.name || "Super Admin";
+        await updateTicketStatus(ticketId, "CLOSED", req.user.id, adminName);
+
+        const reasonText = rejection_reason || "Details could not be verified with supporting documentation.";
+        await addTicketMessage({
+            ticketId: ticket.ticket_number,
+            senderId: req.user.id || 1,
+            senderName: adminName,
+            senderRole: "admin",
+            message: `Profile update request was rejected. Reason: ${reasonText}`
+        });
+
+        try {
+            const { sendNotification } = require("../services/notificationService");
+            await sendNotification({
+                recipientId: partnerId,
+                recipientRole: "delivery_partner",
+                title: "Profile Update Rejected",
+                message: `Your request to update profile details was rejected. Reason: ${reasonText}`,
+                type: "PROFILE_REJECTED"
+            });
+        } catch (_) {}
+
+        return res.json({
+            success: true,
+            message: "Profile update request rejected."
+        });
+    } catch (err) {
+        return res.status(500).json({ success: false, message: err.message });
     }
 });
 

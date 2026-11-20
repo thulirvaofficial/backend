@@ -36,16 +36,36 @@ async function fetchLiveUser(userId) {
     return null;
 }
 
+// Server-Side Revoked Tokens Store (Token Blacklist)
+const REVOKED_TOKENS = new Map(); // token -> expiresAtMs
+
+function revokeToken(token) {
+    if (!token || typeof token !== "string") return;
+    try {
+        const decoded = jwt.decode(token);
+        const expiresAt = decoded && decoded.exp ? decoded.exp * 1000 : Date.now() + (30 * 24 * 60 * 60 * 1000);
+        REVOKED_TOKENS.set(token, expiresAt);
+    } catch (_) {
+        REVOKED_TOKENS.set(token, Date.now() + (24 * 60 * 60 * 1000));
+    }
+}
+
+function isTokenRevoked(token) {
+    if (!token) return true;
+    const expiresAt = REVOKED_TOKENS.get(token);
+    if (!expiresAt) return false;
+    if (Date.now() > expiresAt) {
+        REVOKED_TOKENS.delete(token);
+        return false;
+    }
+    return true;
+}
+
 /**
  * Reusable JWT Authentication Middleware
  * Enforces verified user identity against database / persistent records.
  */
 async function authenticateToken(req, res, next) {
-    // If request has already been authenticated upstream by global gate, skip re-evaluating
-    if (req.user && (req.user.role === "super_admin" || req.user.role === "admin")) {
-        return next();
-    }
-
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return res.status(401).json({
@@ -55,25 +75,49 @@ async function authenticateToken(req, res, next) {
     }
 
     const token = authHeader.split(" ")[1];
-    if (!token) {
+    if (!token || typeof token !== "string") {
         return res.status(401).json({
             success: false,
             message: "Authentication token missing."
         });
     }
 
+    // Check if token has been explicitly revoked upon logout
+    if (isTokenRevoked(token)) {
+        return res.status(401).json({
+            success: false,
+            message: "Session has been invalidated. Please sign in again."
+        });
+    }
+
     let decoded = null;
+    const secret = process.env.JWT_SECRET || "thulirva_secret_key_2026";
     try {
-        decoded = jwt.verify(token, process.env.JWT_SECRET || "thulirva_secret_key_2026");
-    } catch (err) {
-        try {
-            decoded = jwt.verify(token, "THULIRVA_CHANGE_THIS_SECRET_KEY");
-        } catch (_) {
-            return res.status(401).json({
-                success: false,
-                message: "Session expired or invalid token. Please sign in again."
-            });
-        }
+        decoded = jwt.verify(token, secret);
+    } catch (_) {
+        return res.status(401).json({
+            success: false,
+            message: "Session expired or invalid token. Please sign in again."
+        });
+    }
+
+    if (!decoded || !decoded.id) {
+        return res.status(401).json({
+            success: false,
+            message: "Malformed authentication token payload."
+        });
+    }
+
+    // Admin direct validation
+    if (decoded.role === "super_admin" || decoded.role === "admin") {
+        req.user = {
+            id: decoded.id || 1,
+            name: decoded.name || "THULIRVA Super Admin",
+            email: decoded.email || "admin@thulirva.com",
+            phone: decoded.phone || "7904880944",
+            role: decoded.role
+        };
+        return next();
     }
 
     // Delivery Partner special case (uses partner_id in token)
@@ -154,5 +198,7 @@ module.exports = {
     adminOnly,
     superAdminOnly,
     customerOnly,
-    partnerOnly
+    partnerOnly,
+    revokeToken,
+    isTokenRevoked
 };

@@ -1,4 +1,5 @@
 const express = require("express");
+const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const path = require("path");
@@ -6,38 +7,40 @@ const fs = require("fs");
 const { pool } = require("../config/database");
 const { sendNotification } = require("../services/notificationService");
 const { validateEmail, validatePhone, validatePassword, validateName, validateAddress } = require("../utils/validators");
+const { revokeToken } = require("../middleware/auth");
+const emailService = require("../services/emailService");
 
 const router = express.Router();
 
 const OTP_STORE = new Map(); // phone -> { code, expiresAt }
 
-// Rate Limiter for Login Attempts
+// Dual Rate Limiter for Login Attempts (Key + IP Protection)
 const LOGIN_ATTEMPTS = new Map(); // key -> { count, lockUntil }
-function checkLoginRateLimit(key) {
+function checkLoginRateLimit(key, ip = "127.0.0.1") {
     const now = Date.now();
-    const record = LOGIN_ATTEMPTS.get(key);
-    if (!record) return { allowed: true };
-    if (record.lockUntil && record.lockUntil > now) {
+    const recKey = LOGIN_ATTEMPTS.get(key);
+    const recIp = LOGIN_ATTEMPTS.get(`ip:${ip}`);
+    const record = (recKey && recKey.lockUntil > now) ? recKey : (recIp && recIp.lockUntil > now ? recIp : null);
+    if (record && record.lockUntil > now) {
         const remainingMinutes = Math.ceil((record.lockUntil - now) / 60000);
         return { allowed: false, message: `Too many failed login attempts. Please try again in ${remainingMinutes} minute(s).` };
     }
-    if (record.lockUntil && record.lockUntil <= now) {
-        LOGIN_ATTEMPTS.delete(key);
-        return { allowed: true };
-    }
     return { allowed: true };
 }
-function recordFailedLogin(key) {
+function recordFailedLogin(key, ip = "127.0.0.1") {
     const now = Date.now();
-    const record = LOGIN_ATTEMPTS.get(key) || { count: 0 };
-    record.count += 1;
-    if (record.count >= 5) {
-        record.lockUntil = now + (15 * 60 * 1000); // 15 min lockout
-    }
-    LOGIN_ATTEMPTS.set(key, record);
+    [key, `ip:${ip}`].forEach(k => {
+        const r = LOGIN_ATTEMPTS.get(k) || { count: 0 };
+        r.count += 1;
+        if (r.count >= 5) {
+            r.lockUntil = now + (15 * 60 * 1000); // 15-minute security lockout
+        }
+        LOGIN_ATTEMPTS.set(k, r);
+    });
 }
-function clearLoginAttempts(key) {
+function clearLoginAttempts(key, ip = "127.0.0.1") {
     LOGIN_ATTEMPTS.delete(key);
+    LOGIN_ATTEMPTS.delete(`ip:${ip}`);
 }
 
 function extractUserId(req) {
@@ -177,6 +180,15 @@ router.post("/register", async (req, res) => {
                 forAdmin: false
             }).catch(() => {});
 
+            // Dispatch Branded Welcome Email via Centralized Mail Server
+            if (cleanEmail && cleanEmail.includes("@")) {
+                emailService.sendWelcomeEmail({
+                    to: cleanEmail,
+                    name: cleanName,
+                    role: "customer"
+                }).catch(err => console.warn("[WELCOME EMAIL WARNING]:", err.message));
+            }
+
             // Also update in-memory and disk fallback store
             let memIdx = IN_MEMORY_USERS.findIndex(u => u.email.toLowerCase() === cleanEmail);
             if (memIdx >= 0) {
@@ -240,6 +252,14 @@ router.post("/register", async (req, res) => {
             IN_MEMORY_USERS.push(newMemUser);
             saveUsersToDisk(IN_MEMORY_USERS);
 
+            if (cleanEmail && cleanEmail.includes("@")) {
+                emailService.sendWelcomeEmail({
+                    to: cleanEmail,
+                    name: cleanName,
+                    role: "customer"
+                }).catch(err => console.warn("[WELCOME EMAIL WARNING]:", err.message));
+            }
+
             const token = jwt.sign(
                 { id: newMemUser.id, email: newMemUser.email, role: newMemUser.role },
                 process.env.JWT_SECRET || "thulirva_secret_key_2026",
@@ -279,8 +299,18 @@ router.post("/register", async (req, res) => {
 ============================================================ */
 router.post("/login", async (req, res) => {
     try {
-        const identifier = (req.body.email || req.body.identifier || req.body.phone || "").trim();
-        const { password } = req.body;
+        const rawIdent = req.body.email || req.body.identifier || req.body.phone;
+        const rawPassword = req.body.password;
+
+        if (typeof rawIdent !== "string" || typeof rawPassword !== "string") {
+            return res.status(400).json({
+                success: false,
+                message: "Email or phone number and password must be valid strings"
+            });
+        }
+
+        const identifier = rawIdent.trim();
+        const password = rawPassword;
 
         if (!identifier || !password) {
             return res.status(400).json({
@@ -291,36 +321,14 @@ router.post("/login", async (req, res) => {
 
         const cleanIdentifier = identifier.toLowerCase();
         const phoneDigits = identifier.replace(/\D/g, "");
+        const clientIp = req.ip || req.connection?.remoteAddress || "127.0.0.1";
 
-        // Rate limit check
-        const rateChk = checkLoginRateLimit(cleanIdentifier);
+        // Rate limit check (Key + IP Protection)
+        const rateChk = checkLoginRateLimit(cleanIdentifier, clientIp);
         if (!rateChk.allowed) {
             return res.status(429).json({
                 success: false,
                 message: rateChk.message
-            });
-        }
-
-        // Admin quick check
-        if ((cleanIdentifier === "admin@thulirva.com" || cleanIdentifier === "admin") && password === "admin123") {
-            clearLoginAttempts(cleanIdentifier);
-            const token = jwt.sign(
-                { id: 1, email: "admin@thulirva.com", role: "super_admin" },
-                process.env.JWT_SECRET || "thulirva_secret_key_2026",
-                { expiresIn: "30d" }
-            );
-            const superAdminUser = {
-                id: 1,
-                name: "THULIRVA Super Admin",
-                admin_name: "THULIRVA Super Admin",
-                email: "admin@thulirva.com",
-                role: "super_admin"
-            };
-            return res.json({
-                success: true,
-                token,
-                user: superAdminUser,
-                admin: superAdminUser
             });
         }
 
@@ -342,7 +350,7 @@ router.post("/login", async (req, res) => {
                 const user = result.rows[0];
                 const valid = await bcrypt.compare(password, user.password);
                 if (!valid) {
-                    recordFailedLogin(cleanIdentifier);
+                    recordFailedLogin(cleanIdentifier, clientIp);
                     return res.status(401).json({
                         success: false,
                         message: "Invalid credentials"
@@ -357,7 +365,7 @@ router.post("/login", async (req, res) => {
                     });
                 }
 
-                clearLoginAttempts(cleanIdentifier);
+                clearLoginAttempts(cleanIdentifier, clientIp);
                 const token = jwt.sign(
                     { id: user.id, email: user.email, role: user.role },
                     process.env.JWT_SECRET || "thulirva_secret_key_2026",
@@ -426,7 +434,7 @@ router.post("/login", async (req, res) => {
                     });
                 }
 
-                clearLoginAttempts(cleanIdentifier);
+                clearLoginAttempts(cleanIdentifier, clientIp);
                 const token = jwt.sign(
                     { id: memUser.id, email: memUser.email, role: memUser.role },
                     process.env.JWT_SECRET || "thulirva_secret_key_2026",
@@ -474,7 +482,7 @@ router.post("/login", async (req, res) => {
 
                 return res.json(memResData);
             } else {
-                recordFailedLogin(cleanIdentifier);
+                recordFailedLogin(cleanIdentifier, clientIp);
                 return res.status(401).json({
                     success: false,
                     message: "Invalid credentials"
@@ -482,7 +490,7 @@ router.post("/login", async (req, res) => {
             }
         }
 
-        recordFailedLogin(cleanIdentifier);
+        recordFailedLogin(cleanIdentifier, clientIp);
         return res.status(401).json({
             success: false,
             message: "Invalid credentials"
@@ -497,85 +505,138 @@ router.post("/login", async (req, res) => {
 });
 
 /* ============================================================
+   LOGOUT ENDPOINT (Token Invalidation & Session Termination)
+============================================================ */
+router.post("/logout", (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+            const token = authHeader.split(" ")[1];
+            if (token) {
+                revokeToken(token);
+            }
+        }
+        return res.json({
+            success: true,
+            message: "Successfully logged out. Session terminated."
+        });
+    } catch (err) {
+        return res.status(500).json({
+            success: false,
+            message: "Error terminating session"
+        });
+    }
+});
+
+/* ============================================================
    FORGOT PASSWORD & OTP RESET ENDPOINTS (MODULE 26)
 ============================================================ */
 const passwordResetService = require("../services/passwordResetService");
 
-// 1. Check Account Existence & Retrieve Available Verification Methods
+// 1. Forgot Password -> Directly sends 6-digit OTP to registered email with generic response
 router.post("/forgot-password", async (req, res) => {
     try {
-        const identifier = (req.body.identifier || req.body.email || req.body.phone || "").trim();
+        const identifier = (req.body.email || req.body.identifier || req.body.phone || "").trim();
+        const reqIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+
         if (!identifier) {
             return res.status(400).json({
                 success: false,
-                message: "Please enter your registered email address or mobile number."
+                message: "Please enter your registered email address."
             });
         }
 
-        const user = await passwordResetService.findAccountByIdentifier(identifier);
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: "No account found matching this email or phone number. Please check the details or create an account."
-            });
-        }
-
-        const methods = [];
-        if (user.email && user.email.includes("@")) methods.push("email");
-        if (user.phone && user.phone.replace(/\D/g, "").length >= 10) methods.push("sms");
-
-        res.json({
-            success: true,
-            message: "Account verified. Please select your preferred verification method.",
-            user_id: user.id,
-            masked_email: passwordResetService.maskEmail(user.email),
-            masked_phone: passwordResetService.maskPhone(user.phone),
-            methods: methods
+        const result = await passwordResetService.generateAndSendResetOtp({
+            identifier,
+            method: "email",
+            reqIp
         });
+
+        res.json(result);
     } catch (err) {
         console.error("[FORGOT PASSWORD ERROR]", err);
-        res.status(500).json({ success: false, message: err.message || "An unexpected error occurred." });
+        res.status(400).json({
+            success: false,
+            message: err.message || "Failed to process password reset request."
+        });
     }
 });
 
-// 2. Dispatch Reset OTP (Email or SMS)
+// 2. Dispatch / Send Reset OTP (Email)
 router.post("/send-reset-otp", async (req, res) => {
     try {
-        const identifier = (req.body.identifier || req.body.email || req.body.phone || "").trim();
-        const method = (req.body.method || "email").toLowerCase();
-        const reqIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+        const identifier = (req.body.email || req.body.identifier || req.body.phone || "").trim();
+        const reqIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
 
-        const result = await passwordResetService.generateAndSendResetOtp({ identifier, method, reqIp });
+        if (!identifier) {
+            return res.status(400).json({
+                success: false,
+                message: "Please enter your registered email address."
+            });
+        }
+
+        const result = await passwordResetService.generateAndSendResetOtp({
+            identifier,
+            method: "email",
+            reqIp
+        });
+
         res.json(result);
     } catch (err) {
-        res.status(400).json({ success: false, message: err.message || "Failed to send verification code." });
+        res.status(400).json({
+            success: false,
+            message: err.message || "Failed to send verification code."
+        });
     }
 });
 
 // 3. Resend Reset OTP with 60-second cooldown
 router.post("/resend-reset-otp", async (req, res) => {
     try {
-        const identifier = (req.body.identifier || req.body.email || req.body.phone || "").trim();
-        const method = (req.body.method || "email").toLowerCase();
-        const reqIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+        const identifier = (req.body.email || req.body.identifier || req.body.phone || "").trim();
+        const reqIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
 
-        const result = await passwordResetService.generateAndSendResetOtp({ identifier, method, reqIp });
+        if (!identifier) {
+            return res.status(400).json({
+                success: false,
+                message: "Please enter your registered email address."
+            });
+        }
+
+        const result = await passwordResetService.generateAndSendResetOtp({
+            identifier,
+            method: "email",
+            reqIp
+        });
+
         res.json(result);
     } catch (err) {
-        res.status(400).json({ success: false, message: err.message || "Failed to resend verification code." });
+        res.status(400).json({
+            success: false,
+            message: err.message || "Failed to resend verification code."
+        });
     }
 });
 
-// 4. Verify Reset OTP -> Generates Single-Use Reset Token
+// 4. Verify Reset OTP -> Issues Single-Use Server-Side Reset Token
 router.post("/verify-reset-otp", async (req, res) => {
     try {
-        const identifier = (req.body.identifier || req.body.email || req.body.phone || "").trim();
+        const identifier = (req.body.email || req.body.identifier || req.body.phone || "").trim();
         const otp = (req.body.otp || req.body.code || "").trim();
+        const reqIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
 
-        const result = await passwordResetService.verifyResetOtp({ identifier, otp });
+        const result = await passwordResetService.verifyResetOtp({
+            identifier,
+            otp,
+            reqIp
+        });
+
         res.json(result);
     } catch (err) {
-        res.status(400).json({ success: false, message: err.message || "Verification code validation failed." });
+        res.status(400).json({
+            success: false,
+            message: err.message || "Verification code validation failed."
+        });
     }
 });
 
@@ -591,9 +652,13 @@ router.post("/reset-password", async (req, res) => {
             new_password: newPassword,
             confirm_password: confirmPassword
         });
+
         res.json(result);
     } catch (err) {
-        res.status(400).json({ success: false, message: err.message || "Failed to reset password." });
+        res.status(400).json({
+            success: false,
+            message: err.message || "Failed to reset password."
+        });
     }
 });
 
@@ -999,54 +1064,120 @@ router.delete("/profile/photo", async (req, res) => {
 });
 
 /* ============================================================
-   OTP VERIFICATION FOR MOBILE NUMBER CHANGE
+   CENTRALIZED OTP VERIFICATION (EMAIL & PHONE)
 ============================================================ */
 router.post("/send-otp", async (req, res) => {
-    const { phone } = req.body;
-    if (!phone) {
-        return res.status(400).json({ success: false, message: "Phone number is required" });
+    try {
+        const rawTarget = req.body.email || req.body.phone || req.body.identifier;
+        if (!rawTarget || typeof rawTarget !== "string") {
+            return res.status(400).json({ success: false, message: "Valid email address or phone number is required" });
+        }
+
+        const isEmail = rawTarget.includes("@");
+        const cleanKey = isEmail ? rawTarget.trim().toLowerCase() : rawTarget.replace(/\D/g, "");
+
+        if (!cleanKey) {
+            return res.status(400).json({ success: false, message: "Invalid target destination for OTP" });
+        }
+
+        // Generate cryptographically random 6-digit OTP
+        const code = crypto.randomInt(100000, 999999).toString();
+        const expiresAt = Date.now() + (5 * 60 * 1000); // 5 minutes
+
+        OTP_STORE.set(cleanKey, {
+            code,
+            expiresAt,
+            attempts: 0
+        });
+
+        if (isEmail) {
+            await emailService.sendOtpEmail({
+                to: cleanKey,
+                name: req.body.name || "Customer",
+                otp: code,
+                purpose: req.body.purpose || "Verification",
+                expiryMinutes: 5
+            });
+            console.log(`✉ [OTP EMAIL DISPATCH] Sent OTP to ${cleanKey}`);
+        } else {
+            console.log(`📱 [OTP SMS DISPATCH] Generated OTP for phone ${cleanKey}`);
+        }
+
+        // Strictly do NOT return the plaintext OTP in the response
+        return res.json({
+            success: true,
+            message: `Verification code sent successfully to ${isEmail ? cleanKey : "phone"}. Valid for 5 minutes.`
+        });
+    } catch (err) {
+        console.error("[SEND OTP ERROR]", err);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to dispatch verification code: " + (err.message || "Unknown error")
+        });
     }
-
-    const cleanPhone = phone.replace(/\D/g, "");
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-
-    OTP_STORE.set(cleanPhone, {
-        code,
-        expiresAt: Date.now() + 10 * 60 * 1000
-    });
-
-    console.log(`📱 [OTP DISPATCH] Sent OTP ${code} to ${cleanPhone}`);
-
-    res.json({
-        success: true,
-        message: `OTP sent to ${phone}. Enter code to verify.`,
-        otp: code
-    });
 });
 
 router.post("/verify-otp", async (req, res) => {
-    const { phone, otp } = req.body;
-    if (!phone || !otp) {
-        return res.status(400).json({ success: false, message: "Phone and OTP code are required" });
-    }
+    try {
+        const rawTarget = req.body.email || req.body.phone || req.body.identifier;
+        const otp = (req.body.otp || req.body.code || "").toString().trim();
 
-    const cleanPhone = phone.replace(/\D/g, "");
-    const record = OTP_STORE.get(cleanPhone);
+        if (!rawTarget || !otp) {
+            return res.status(400).json({ success: false, message: "Identifier and OTP code are required" });
+        }
 
-    if (otp === "123456" || (record && record.code === otp.toString() && Date.now() <= record.expiresAt)) {
-        OTP_STORE.delete(cleanPhone);
-        return res.json({
-            success: true,
-            verified: true,
-            message: "Phone number verified successfully"
+        const isEmail = rawTarget.includes("@");
+        const cleanKey = isEmail ? rawTarget.trim().toLowerCase() : rawTarget.replace(/\D/g, "");
+        const record = OTP_STORE.get(cleanKey);
+
+        if (!record) {
+            return res.status(400).json({
+                success: false,
+                verified: false,
+                message: "No verification code found or code has expired. Please request a new one."
+            });
+        }
+
+        if (Date.now() > record.expiresAt) {
+            OTP_STORE.delete(cleanKey);
+            return res.status(400).json({
+                success: false,
+                verified: false,
+                message: "Verification code has expired. Please request a new code."
+            });
+        }
+
+        record.attempts = (record.attempts || 0) + 1;
+        if (record.attempts > 5) {
+            OTP_STORE.delete(cleanKey);
+            return res.status(429).json({
+                success: false,
+                verified: false,
+                message: "Too many incorrect attempts. Please request a new code."
+            });
+        }
+
+        // Secure string comparison (no hardcoded backdoors)
+        if (record.code === otp) {
+            OTP_STORE.delete(cleanKey);
+            return res.json({
+                success: true,
+                verified: true,
+                message: "Verification successful"
+            });
+        }
+
+        return res.status(400).json({
+            success: false,
+            verified: false,
+            message: "Invalid verification code. Please check and try again."
+        });
+    } catch (err) {
+        return res.status(500).json({
+            success: false,
+            message: "Error verifying code: " + (err.message || "Unknown error")
         });
     }
-
-    res.status(400).json({
-        success: false,
-        verified: false,
-        message: "Invalid or expired OTP code"
-    });
 });
 
 module.exports = router;

@@ -3,6 +3,7 @@ const path = require("path");
 const { pool, isDbOnline } = require("../config/database");
 const { sendNotification } = require("./notificationService");
 const { emitToAdmin, emitToUser, emitToPartner } = require("./socketService");
+const emailService = require("./emailService");
 
 const DATA_DIR = path.resolve(__dirname, "..", "data");
 const TICKETS_FILE = path.join(DATA_DIR, "support_tickets.json");
@@ -41,6 +42,59 @@ function writeJson(filePath, data) {
     } catch (e) {
         console.error(`[SUPPORT STORE WRITE ERROR] ${filePath}:`, e.message);
     }
+}
+
+/**
+ * Normalize ticket object ensuring universal field aliases (snake_case + camelCase)
+ */
+function normalizeTicket(t) {
+    if (!t) return null;
+    const ticketId = t.ticket_number || t.ticket_id || String(t.id || "");
+    const userType = (t.user_type || t.userType || "customer").toLowerCase();
+    const isPartner = userType.includes("partner") || userType.includes("delivery");
+    
+    return {
+        ...t,
+        id: t.id || ticketId,
+        ticket_id: ticketId,
+        ticketId: ticketId,
+        ticket_number: ticketId,
+        ticketNumber: ticketId,
+        user_id: String(t.user_id || t.userId || ""),
+        userId: String(t.user_id || t.userId || ""),
+        user_name: t.user_name || t.userName || (isPartner ? "Delivery Partner" : "Customer"),
+        userName: t.user_name || t.userName || (isPartner ? "Delivery Partner" : "Customer"),
+        user_phone: t.user_phone || t.userPhone || "",
+        userPhone: t.user_phone || t.userPhone || "",
+        user_email: t.user_email || t.userEmail || "",
+        userEmail: t.user_email || t.userEmail || "",
+        user_type: userType,
+        userType: userType,
+        category: t.category || t.ticketType || "General Support",
+        ticketType: t.category || t.ticketType || "General Support",
+        subject: t.subject || t.title || "Support Request",
+        title: t.subject || t.title || "Support Request",
+        description: t.description || t.message || "",
+        message: t.description || t.message || "",
+        order_id: t.order_id || t.orderId || null,
+        orderId: t.order_id || t.orderId || null,
+        priority: (t.priority || t.severity || "NORMAL").toUpperCase(),
+        severity: (t.priority || t.severity || "NORMAL").toUpperCase(),
+        status: (t.status || t.ticketStatus || "OPEN").toUpperCase(),
+        ticketStatus: (t.status || t.ticketStatus || "OPEN").toUpperCase(),
+        assigned_admin_id: t.assigned_admin_id || t.assignedAdminId || null,
+        assignedAdminId: t.assigned_admin_id || t.assignedAdminId || null,
+        assigned_admin_name: t.assigned_admin_name || t.assignedAdminName || null,
+        assignedAdminName: t.assigned_admin_name || t.assignedAdminName || null,
+        created_at: t.created_at || t.createdAt || new Date().toISOString(),
+        createdAt: t.created_at || t.createdAt || new Date().toISOString(),
+        updated_at: t.updated_at || t.updatedAt || new Date().toISOString(),
+        updatedAt: t.updated_at || t.updatedAt || new Date().toISOString(),
+        resolved_at: t.resolved_at || t.resolvedAt || null,
+        resolvedAt: t.resolved_at || t.resolvedAt || null,
+        closed_at: t.closed_at || t.closedAt || null,
+        closedAt: t.closed_at || t.closedAt || null
+    };
 }
 
 /**
@@ -193,15 +247,43 @@ async function createTicket({
 
     // 5. Notify Admins in real-time
     try {
-        emitToAdmin("support:ticket:new", ticket);
-        emitToAdmin("support:ticket:created", ticket);
+        const normalized = normalizeTicket(ticket);
+        emitToAdmin("support:ticket:new", normalized);
+        emitToAdmin("support:ticket:created", normalized);
+        emitToAdmin("support:ticket:updated", normalized);
+        
+        const isPartner = (ticket.user_type || "").toLowerCase().includes("partner") || (ticket.user_type || "").toLowerCase().includes("delivery");
+        const notifTitle = isPartner ? "NEW DELIVERY PARTNER TICKET" : "NEW CUSTOMER SUPPORT TICKET";
+        const notifBody = `[${ticket.ticket_number}] ${ticket.user_name}: ${subject}`;
+
         sendNotification({
-            title: `New Support Ticket [${ticket.ticket_number}]`,
-            message: `${ticket.user_name} (${ticket.user_type}): ${subject}`,
+            title: notifTitle,
+            message: notifBody,
             type: "support_ticket_created",
             targetId: ticket.ticket_number,
+            channelId: "thulirva_admin_tickets_channel_v2",
+            data: {
+                type: "support_ticket_created",
+                ticketId: ticket.ticket_number,
+                userType: ticket.user_type,
+                channelId: "thulirva_admin_tickets_channel_v2"
+            },
             forAdmin: true
         }).catch(() => {});
+    } catch (_) {}
+
+    // 6. Send Ticket Receipt Confirmation Email to User via Centralized Email Service
+    try {
+        if (ticket.user_email && ticket.user_email.includes("@")) {
+            emailService.sendTicketConfirmationEmail({
+                to: ticket.user_email,
+                name: ticket.user_name,
+                ticketNumber: ticket.ticket_number,
+                subject: ticket.subject,
+                category: ticket.category,
+                description: ticket.description
+            }).catch(err => console.warn("[SUPPORT TICKET EMAIL DISPATCH WARNING]:", err.message));
+        }
     } catch (_) {}
 
     return ticket;
@@ -269,6 +351,24 @@ async function addTicketMessage({
         if (senderRole === "admin") {
             emitToUser(senderId, "support:message:new", payload);
             emitToPartner(senderId, "support:message:new", payload);
+
+            // Send Email Notification to Customer / Partner on Support Reply
+            try {
+                const tickets = readJson(TICKETS_FILE);
+                const t = tickets.find(x => String(x.ticket_number) === String(ticketId) || String(x.id) === String(ticketId));
+                if (t && t.user_email && t.user_email.includes("@")) {
+                    emailService.sendTicketUpdateEmail({
+                        to: t.user_email,
+                        name: t.user_name,
+                        ticketNumber: t.ticket_number,
+                        subject: t.subject,
+                        updateType: "reply",
+                        message: msg.message,
+                        senderName: senderName || "Customer Support",
+                        status: t.status
+                    }).catch(err => console.warn("[SUPPORT TICKET REPLY EMAIL WARNING]:", err.message));
+                }
+            } catch (_) {}
         }
     } catch (_) {}
 
@@ -469,17 +569,17 @@ async function getTicketDetails(ticketId, isAdmin = false) {
     }
 
     // Normalize IDs and attach messages/notes to ticket object for frontend parity
-    ticket.ticket_id = ticket.ticket_id || ticket.ticket_number || String(ticket.id);
-    ticket.ticket_number = ticket.ticket_number || ticket.ticket_id || String(ticket.id);
-    ticket.messages = messages;
+    const normalizedTicket = normalizeTicket(ticket);
+    normalizedTicket.messages = messages;
     if (isAdmin) {
-        ticket.internal_notes = internalNotes;
+        normalizedTicket.internal_notes = internalNotes;
+        normalizedTicket.internalNotes = internalNotes;
     }
 
     return {
-        ticket,
+        ticket: normalizedTicket,
         messages,
-        ...(isAdmin ? { internal_notes: internalNotes } : {})
+        ...(isAdmin ? { internal_notes: internalNotes, internalNotes } : {})
     };
 }
 
@@ -551,10 +651,24 @@ async function getAdminTickets({ status, priority, category, userType, search, p
         }
     }
 
-    // Calculate metrics across all tickets
+    // Calculate comprehensive metrics across all tickets in database/store
     const all = readJson(TICKETS_FILE);
+    const pendingStatuses = ["OPEN", "IN_PROGRESS", "WAITING_FOR_CUSTOMER", "WAITING_FOR_PARTNER"];
+    const customerPending = all.filter(t => {
+        const uType = (t.user_type || "").toLowerCase();
+        return pendingStatuses.includes(t.status) && !uType.includes("partner") && !uType.includes("delivery");
+    }).length;
+    const partnerPending = all.filter(t => {
+        const uType = (t.user_type || "").toLowerCase();
+        return pendingStatuses.includes(t.status) && (uType.includes("partner") || uType.includes("delivery"));
+    }).length;
+
     const metrics = {
         total: all.length,
+        customer_pending: customerPending,
+        partner_pending: partnerPending,
+        total_pending: customerPending + partnerPending,
+        pending: customerPending + partnerPending,
         new: all.filter(t => t.status === "OPEN").length,
         open: all.filter(t => t.status === "OPEN").length,
         in_progress: all.filter(t => t.status === "IN_PROGRESS").length,
@@ -562,15 +676,12 @@ async function getAdminTickets({ status, priority, category, userType, search, p
         waiting_partner: all.filter(t => t.status === "WAITING_FOR_PARTNER").length,
         resolved: all.filter(t => t.status === "RESOLVED").length,
         closed: all.filter(t => t.status === "CLOSED").length,
-        urgent: all.filter(t => t.priority === "URGENT" && t.status !== "CLOSED").length
+        urgent: all.filter(t => (t.priority || "").toUpperCase() === "URGENT" && t.status !== "CLOSED").length,
+        high: all.filter(t => (t.priority || "").toUpperCase() === "HIGH" && t.status !== "CLOSED").length
     };
 
-    // Normalize IDs
-    tickets = tickets.map(t => {
-        t.ticket_id = t.ticket_id || t.ticket_number || String(t.id);
-        t.ticket_number = t.ticket_number || t.ticket_id || String(t.id);
-        return t;
-    });
+    // Normalize IDs and all attributes
+    tickets = tickets.map(normalizeTicket);
 
     // Pagination
     const totalCount = tickets.length;
@@ -621,6 +732,12 @@ async function updateTicketStatus(ticketId, newStatus, adminId, adminName) {
         if (closedAt) t.closed_at = closedAt;
         writeJson(TICKETS_FILE, tickets);
 
+        // Real-time broadcast to Admin Socket.io channel
+        try {
+            emitToAdmin("support:ticket:status_changed", { ticketId: t.ticket_number, status: newStatus });
+            emitToAdmin("support:ticket:updated", normalizeTicket(t));
+        } catch (_) {}
+
         // Notify User
         try {
             sendNotification({
@@ -630,6 +747,19 @@ async function updateTicketStatus(ticketId, newStatus, adminId, adminName) {
                 type: "support_status_update",
                 targetId: t.ticket_number
             }).catch(() => {});
+
+            // Send Status Update Email on Resolution
+            if ((newStatus === "RESOLVED" || newStatus === "CLOSED") && t.user_email && t.user_email.includes("@")) {
+                emailService.sendTicketUpdateEmail({
+                    to: t.user_email,
+                    name: t.user_name,
+                    ticketNumber: t.ticket_number,
+                    subject: t.subject,
+                    updateType: "status",
+                    status: newStatus,
+                    senderName: adminName || "Support Team"
+                }).catch(err => console.warn("[SUPPORT TICKET STATUS EMAIL WARNING]:", err.message));
+            }
         } catch (_) {}
     }
 
@@ -670,6 +800,11 @@ async function updateTicketPriority(ticketId, newPriority, adminId, adminName) {
         t.priority = newPriority;
         t.updated_at = new Date().toISOString();
         writeJson(TICKETS_FILE, tickets);
+
+        try {
+            emitToAdmin("support:ticket:priority_changed", { ticketId: t.ticket_number, priority: newPriority });
+            emitToAdmin("support:ticket:updated", normalizeTicket(t));
+        } catch (_) {}
     }
 
     await logTicketEvent({
@@ -710,6 +845,11 @@ async function assignTicketAgent(ticketId, adminId, adminName) {
         t.assigned_admin_name = cleanAdminName;
         t.updated_at = new Date().toISOString();
         writeJson(TICKETS_FILE, tickets);
+
+        try {
+            emitToAdmin("support:ticket:assigned", { ticketId: t.ticket_number, assigned_admin_name: cleanAdminName, assigned_admin_id: String(adminId || 1) });
+            emitToAdmin("support:ticket:updated", normalizeTicket(t));
+        } catch (_) {}
     }
 
     await logTicketEvent({
@@ -772,6 +912,7 @@ async function reopenTicket({ ticketId, userId, userRole, reason = "" }) {
 
     try {
         emitToAdmin("support:ticket:reopened", { ticketId, reason });
+        if (t) emitToAdmin("support:ticket:updated", normalizeTicket(t));
         sendNotification({
             title: `Support Ticket Reopened [${t ? t.ticket_number : ticketId}]`,
             message: `${t ? t.user_name : "User"} reopened support ticket: ${reason || "Issue persists"}`,

@@ -89,6 +89,9 @@ const announcementRoutes =
 const { supportRouter, adminSupportRouter } =
     require("./routes/support");
 
+const { tipRouter, adminTipRouter } =
+    require("./routes/tips");
+
 const { codRouter, adminCodRouter } =
     require("./routes/codManagement");
 
@@ -101,6 +104,35 @@ const PORT =
 /* ============================================================
    MIDDLEWARE
 ============================================================ */
+
+/* ============================================================
+   ENTERPRISE SECURITY HEADERS & HARDENING MIDDLEWARE
+============================================================ */
+
+app.use((req, res, next) => {
+    // Prevent Clickjacking
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    // Prevent MIME-sniffing
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    // Referrer Policy
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    // Strict Transport Security (HSTS)
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+    // Content Security Policy
+    res.setHeader(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://fonts.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; connect-src 'self' ws: wss:;"
+    );
+
+    // Disable caching for admin paths to prevent session leakage via back button / browser disk cache
+    if (req.path.startsWith("/admin") || req.path.startsWith("/api/admin")) {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+    }
+
+    next();
+});
 
 app.use(cors());
 
@@ -384,6 +416,10 @@ app.use("/api/partner/tickets", supportRouter);
 app.use("/api/admin/support", adminSupportRouter);
 app.use("/api/admin/tickets", adminSupportRouter);
 
+// Customer & Partner Tip Ledger Routes
+app.use("/api/tips", tipRouter);
+app.use("/api/admin/tips", adminTipRouter);
+
 // COD Risk Management & Eligibility Routes
 app.use("/api/cod", codRouter);
 app.use("/api/cod-status", codRouter);
@@ -629,6 +665,32 @@ app.get(
 
     }
 );
+
+/* ============================================================
+   CUSTOM 404 NOT FOUND HANDLER (Animated Watercolor Experience)
+============================================================ */
+
+app.use((req, res) => {
+    // If it's an API route that reached here, return clean JSON
+    if (req.path.startsWith("/api")) {
+        return res.status(404).json({
+            success: false,
+            error: "NOT_FOUND",
+            message: `API endpoint ${req.method} ${req.originalUrl} not found.`
+        });
+    }
+
+    // Serve custom animated 404 page with HTTP 404 status
+    const custom404Path = path.join(websitePath, "404.html");
+    const fallback404 = path.resolve(__dirname, "..", "website", "404.html");
+    const fileToSend = fs.existsSync(custom404Path) ? custom404Path : (fs.existsSync(fallback404) ? fallback404 : null);
+
+    res.status(404);
+    if (fileToSend) {
+        return res.sendFile(fileToSend);
+    }
+    return res.type("html").send("<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1></body></html>");
+});
 
 
 /* ============================================================

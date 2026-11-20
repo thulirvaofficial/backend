@@ -3,7 +3,7 @@
     "id": 1,
     "name": "THULIRVA Super Admin",
     "email": "admin@thulirva.com",
-    "password": "$2b$10$BjfjUUcHYWQnaW9UMCsOi.SiUxqUuEKuDRciXl8w1nBwkbxWnpHoi",
+    "password": "$2b$12$u66P9NBPdcr1UQALFye5PueiDrI6/Vhhy6VYKRgw.XCfzPrbn312S",
     "phone": "7904880944",
     "alternate_phone": "",
     "address": "Arcot Road, Valasaravakkam, Chennai",
@@ -43,7 +43,7 @@
     "id": 3,
     "name": "Priya Raman",
     "email": "priya.raman@gmail.com",
-    "password": "$2b$10$BjfjUUcHYWQnaW9UMCsOi.SiUxqUuEKuDRciXl8w1nBwkbxWnpHoi",
+    "password": "$2b$10$h2o/1NtUExIhms26T/ByvuBO48BNjgnza1Ht3b5BphGFMx/xWFZ6C",
     "phone": "9840112233",
     "alternate_phone": "",
     "address": "12/B, Greenways Road, R.A Puram, Chennai",
@@ -59,7 +59,7 @@
       "ORD-2026-7811"
     ],
     "created_at": "2026-02-10T09:00:00.000Z",
-    "updated_at": "2026-11-18T14:20:00.000Z"
+    "updated_at": "2026-11-20T11:46:37.930Z"
   },
   {
     "id": 4,

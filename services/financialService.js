@@ -48,6 +48,13 @@ function maskAccountNumber(acc) {
     return "XXXX-XXXX-" + last4;
 }
 
+function maskUpiId(upi) {
+    if (!upi || !upi.includes("@")) return upi || "";
+    const [handle, provider] = upi.split("@");
+    if (handle.length <= 2) return `${handle[0]}*@${provider}`;
+    return `${handle.slice(0, 2)}***${handle.slice(-1)}@${provider}`;
+}
+
 function ensureDirectoryExists() {
     if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -982,7 +989,7 @@ function getAllCodRemittances({ status = null, partner_id = null } = {}) {
  */
 
 /**
- * Save / Update Partner Bank Details
+ * Save / Update Partner Bank Details & UPI
  * Automatically encrypts sensitive bank account numbers with AES-256
  */
 async function savePartnerBankDetails(partnerId, {
@@ -990,28 +997,55 @@ async function savePartnerBankDetails(partnerId, {
     bank_name,
     account_number,
     ifsc_code,
-    account_type = "savings"
+    account_type = "savings",
+    branch_name = "",
+    payout_preference = "bank", // 'bank' or 'upi'
+    upi_id = ""
 }) {
     if (!partnerId) throw new Error("Partner ID is required.");
-    if (!account_holder_name || !bank_name || !account_number || !ifsc_code) {
-        throw new Error("Account holder name, bank name, account number, and IFSC code are required.");
-    }
-
-    const cleanAcc = String(account_number).trim();
-    const cleanIfsc = String(ifsc_code).trim().toUpperCase();
 
     const bankDetailsList = loadJson(BANK_DETAILS_FILE, []);
     const idx = bankDetailsList.findIndex(b => b.partner_id === partnerId);
+    const existing = idx >= 0 ? bankDetailsList[idx] : {};
+
+    const cleanPref = String(payout_preference).toLowerCase() === "upi" ? "upi" : "bank";
+    let cleanUpi = String(upi_id || existing.upi_id || "").trim();
+
+    if (cleanPref === "upi") {
+        if (!cleanUpi) {
+            throw new Error("UPI ID is required when UPI is selected as preferred payout method.");
+        }
+        const upiRegex = /^[a-zA-Z0-9.\-_]{2,49}@[a-zA-Z]{2,49}$/;
+        if (!upiRegex.test(cleanUpi)) {
+            throw new Error("Invalid UPI ID format. Example: name@okaxis, 9876543210@paytm");
+        }
+    }
+
+    let cleanAcc = account_number ? String(account_number).trim() : (existing.encrypted_account_number ? decryptText(existing.encrypted_account_number) : "");
+    let cleanHolder = account_holder_name ? account_holder_name.trim() : (existing.account_holder_name || "");
+    let cleanBank = bank_name ? bank_name.trim() : (existing.bank_name || "");
+    let cleanIfsc = ifsc_code ? String(ifsc_code).trim().toUpperCase() : (existing.ifsc_code || "");
+    let cleanBranch = branch_name ? branch_name.trim() : (existing.branch_name || "");
+
+    if (cleanPref === "bank") {
+        if (!cleanHolder || !cleanBank || !cleanAcc || !cleanIfsc) {
+            throw new Error("Account holder name, bank name, account number, and IFSC code are required for Bank transfer.");
+        }
+    }
 
     const record = {
         partner_id: partnerId,
-        account_holder_name: account_holder_name.trim(),
-        bank_name: bank_name.trim(),
-        encrypted_account_number: encryptText(cleanAcc),
-        last4_account_number: cleanAcc.slice(-4),
-        masked_account_number: maskAccountNumber(cleanAcc),
+        account_holder_name: cleanHolder,
+        bank_name: cleanBank,
+        branch_name: cleanBranch,
+        encrypted_account_number: cleanAcc ? encryptText(cleanAcc) : "",
+        last4_account_number: cleanAcc ? cleanAcc.slice(-4) : "",
+        masked_account_number: cleanAcc ? maskAccountNumber(cleanAcc) : "",
         ifsc_code: cleanIfsc,
-        account_type: account_type || "savings",
+        account_type: account_type || existing.account_type || "savings",
+        payout_preference: cleanPref,
+        upi_id: cleanUpi,
+        masked_upi_id: cleanUpi ? maskUpiId(cleanUpi) : "",
         updated_at: new Date().toISOString()
     };
 
@@ -1022,45 +1056,19 @@ async function savePartnerBankDetails(partnerId, {
     }
     saveJson(BANK_DETAILS_FILE, bankDetailsList);
 
-    // Save to PostgreSQL if available
-    try {
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS partner_bank_details (
-                partner_id VARCHAR(50) PRIMARY KEY,
-                account_holder_name VARCHAR(100),
-                bank_name VARCHAR(100),
-                encrypted_account_number TEXT,
-                last4 VARCHAR(10),
-                ifsc_code VARCHAR(20),
-                account_type VARCHAR(20),
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        `);
-        await pool.query(`
-            INSERT INTO partner_bank_details (
-                partner_id, account_holder_name, bank_name, encrypted_account_number, last4, ifsc_code, account_type, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-            ON CONFLICT (partner_id) DO UPDATE SET
-                account_holder_name = EXCLUDED.account_holder_name,
-                bank_name = EXCLUDED.bank_name,
-                encrypted_account_number = EXCLUDED.encrypted_account_number,
-                last4 = EXCLUDED.last4,
-                ifsc_code = EXCLUDED.ifsc_code,
-                account_type = EXCLUDED.account_type,
-                updated_at = NOW()
-        `, [record.partner_id, record.account_holder_name, record.bank_name, record.encrypted_account_number, record.last4_account_number, record.ifsc_code, record.account_type]);
-    } catch (_) {}
-
     return {
         success: true,
-        message: "Bank details saved securely.",
+        message: "Payout and bank details saved securely.",
         bank_details: {
             partner_id: record.partner_id,
             account_holder_name: record.account_holder_name,
             bank_name: record.bank_name,
+            branch_name: record.branch_name,
             account_number: record.masked_account_number,
             ifsc_code: record.ifsc_code,
             account_type: record.account_type,
+            payout_preference: record.payout_preference,
+            upi_id: record.masked_upi_id || record.upi_id,
             updated_at: record.updated_at
         }
     };
@@ -1096,10 +1104,14 @@ async function getPartnerBankDetails(partnerId, reveal = false, adminName = null
         partner_id: record.partner_id,
         account_holder_name: record.account_holder_name,
         bank_name: record.bank_name,
+        branch_name: record.branch_name || "",
         account_number: returnedAccount,
         is_revealed: Boolean(reveal && adminName),
         ifsc_code: record.ifsc_code,
         account_type: record.account_type,
+        payout_preference: record.payout_preference || "bank",
+        upi_id: reveal && adminName ? (record.upi_id || "") : (record.masked_upi_id || record.upi_id || ""),
+        raw_upi_id: record.upi_id || "",
         updated_at: record.updated_at
     };
 }
