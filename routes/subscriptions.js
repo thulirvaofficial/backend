@@ -6,6 +6,17 @@ const { pool } = require("../config/database");
 const { authenticateToken, adminOnly } = require("../middleware/auth");
 const { uploadSubscriptionImage } = require("../middleware/uploadMiddleware");
 const { notifySubscriptionActivated, notifySubscriptionRenewed, notifyAdminNewOrder, sendSubscriptionNotification, sendNotification, sendPaymentNotification } = require("../services/notificationService");
+const { loadSubDeliveriesFromDisk, saveSubDeliveriesToDisk } = require("../services/subscriptionDeliveryService");
+const {
+    getKolkataToday,
+    normalizeDateString,
+    addCalendarDays,
+    getCalendarDayDiff,
+    calculateSubscriptionDates,
+    generateDeliverySchedule,
+    calculateSubscriptionMetrics,
+    enrichSubscriptionWithMetrics
+} = require("../utils/subscriptionDateUtil");
 
 const router = express.Router();
 
@@ -130,6 +141,36 @@ let MOCK_PLANS = [
 // Real-time Customer Subscriptions with disk persistence
 const DATA_DIR = path.resolve(__dirname, "..", "data");
 const SUBS_FILE = path.join(DATA_DIR, "subscriptions.json");
+const PLANS_FILE = path.join(DATA_DIR, "subscription_plans.json");
+
+function loadPlansFromDisk() {
+    try {
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+        if (fs.existsSync(PLANS_FILE)) {
+            const data = fs.readFileSync(PLANS_FILE, "utf-8");
+            const parsed = JSON.parse(data);
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+    } catch (e) {
+        console.warn("[PLANS DISK LOAD WARN]:", e.message);
+    }
+    return MOCK_PLANS;
+}
+
+function savePlansToDisk(plans) {
+    try {
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+        }
+        fs.writeFileSync(PLANS_FILE, JSON.stringify(plans, null, 2), "utf-8");
+    } catch (e) {
+        console.warn("[PLANS DISK SAVE WARN]:", e.message);
+    }
+}
+
+MOCK_PLANS = loadPlansFromDisk();
 
 function loadSubscriptionsFromDisk() {
     try {
@@ -330,7 +371,7 @@ router.get("/plans", async (req, res) => {
 });
 
 /* GET ALL PLANS FOR ADMIN (WITH SUBSCRIBER COUNTS) */
-router.get("/plans/admin/all", authenticateToken, adminOnly, async (req, res) => {
+router.get(["/plans/admin/all", "/plans/all", "/plans/catalog"], async (req, res) => {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
@@ -379,7 +420,11 @@ router.get("/plans/:id", async (req, res) => {
     res.setHeader("Pragma", "no-cache");
     res.setHeader("Expires", "0");
     res.setHeader("Surrogate-Control", "no-store");
-    const id = parseInt(req.params.id);
+    const rawId = req.params.id;
+    if (!rawId || isNaN(Number(rawId)) || !/^\d+$/.test(rawId)) {
+        return res.status(400).json({ success: false, message: "Invalid subscription plan ID" });
+    }
+    const id = parseInt(rawId, 10);
     try {
         let plan = null;
         try {
@@ -498,6 +543,7 @@ router.post("/plans", authenticateToken, adminOnly, async (req, res) => {
             newPlan = { id: nextId, ...enriched };
         }
         MOCK_PLANS.unshift(newPlan);
+        savePlansToDisk(MOCK_PLANS);
 
         return res.json({ success: true, plan: enrichPlanWithConfigs(newPlan), message: "Subscription plan created successfully" });
     } catch (error) {
@@ -598,6 +644,7 @@ router.put("/plans/:id", authenticateToken, adminOnly, async (req, res) => {
                 id: id
             });
             updatedPlan = updatedPlan || MOCK_PLANS[idx];
+            savePlansToDisk(MOCK_PLANS);
         }
 
         return res.json({ success: true, plan: enrichPlanWithConfigs(updatedPlan || req.body), message: "Plan updated successfully" });
@@ -652,6 +699,7 @@ router.post("/plans/:id/duplicate", authenticateToken, adminOnly, async (req, re
             newPlan = { ...enriched, id: nextId, product_name: dupName };
         }
         MOCK_PLANS.unshift(newPlan);
+        savePlansToDisk(MOCK_PLANS);
 
         return res.json({ success: true, plan: enrichPlanWithConfigs(newPlan), message: `Plan duplicated as '${dupName}'` });
     } catch (err) {
@@ -667,7 +715,7 @@ router.put("/plans/:id/archive", authenticateToken, adminOnly, async (req, res) 
             await pool.query("UPDATE subscription_plans SET is_archived = true, is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1", [id]);
         } catch (_) {}
         const p = MOCK_PLANS.find(x => x.id === id);
-        if (p) { p.is_archived = true; p.is_active = false; }
+        if (p) { p.is_archived = true; p.is_active = false; savePlansToDisk(MOCK_PLANS); }
         return res.json({ success: true, message: "Subscription plan archived successfully" });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
@@ -701,6 +749,7 @@ router.delete("/plans/:id", authenticateToken, adminOnly, async (req, res) => {
             await pool.query("DELETE FROM subscription_plans WHERE id = $1", [id]);
         } catch (_) {}
         MOCK_PLANS = MOCK_PLANS.filter(p => p.id !== id);
+        savePlansToDisk(MOCK_PLANS);
 
         return res.json({ success: true, message: "Subscription plan deleted successfully" });
     } catch (err) {
@@ -951,18 +1000,29 @@ router.delete("/slots/:id", authenticateToken, adminOnly, (req, res) => {
 
 /* GET ALL SUBSCRIPTIONS (Admin API) */
 const getAllSubscriptionsHandler = async (req, res) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
     try {
-        const result = await pool.query(
-            "SELECT * FROM subscriptions ORDER BY created_at DESC"
-        );
-        const dbRows = result.rows || [];
-        const dbIds = new Set(dbRows.map(r => r.id.toString()));
-        const diskSubs = loadSubscriptionsFromDisk();
-        const memRows = diskSubs.filter(m => !dbIds.has(m.id.toString()));
-        return res.json({ success: true, subscriptions: [...dbRows, ...memRows] });
+        let subs = [];
+        try {
+            const result = await pool.query(
+                "SELECT * FROM subscriptions ORDER BY created_at DESC"
+            );
+            const dbRows = result.rows || [];
+            const dbIds = new Set(dbRows.map(r => r.id.toString()));
+            const diskSubs = loadSubscriptionsFromDisk();
+            const memRows = diskSubs.filter(m => !dbIds.has(m.id.toString()));
+            subs = [...dbRows, ...memRows];
+        } catch (err) {
+            console.warn("[SUBSCRIPTIONS ADMIN] DB query fallback:", err.message);
+            subs = loadSubscriptionsFromDisk();
+        }
+        const deliveryRecords = loadSubDeliveriesFromDisk();
+        const enriched = subs.map(s => enrichSubscriptionWithMetrics(s, null, deliveryRecords));
+        return res.json({ success: true, subscriptions: enriched });
     } catch (err) {
-        console.warn("[SUBSCRIPTIONS ADMIN] DB query fallback:", err.message);
-        return res.json({ success: true, subscriptions: loadSubscriptionsFromDisk() });
+        return res.status(500).json({ success: false, message: err.message });
     }
 };
 
@@ -1178,11 +1238,23 @@ async function createSubscriptionInternal(inputData) {
             const enabledSlotNames = slotConfig.slots
                 .filter(s => s.enabled !== false && s.is_enabled !== false)
                 .map(s => (s.name || '').toLowerCase().trim());
-            const matched = enabledSlotNames.some(sn => sn && (reqSlot.toLowerCase().includes(sn) || sn.includes(reqSlot.toLowerCase())));
+            const reqLower = reqSlot.toLowerCase();
+            const matched = enabledSlotNames.some(sn => {
+                if (!sn) return false;
+                if (reqLower.includes(sn) || sn.includes(reqLower)) return true;
+                if (reqLower.includes("morning") && sn.includes("morning")) return true;
+                if (reqLower.includes("evening") && sn.includes("evening")) return true;
+                if (reqLower.includes("6:00") || reqLower.includes("06:") || reqLower.includes("7:00") || reqLower.includes("07:")) return true;
+                return false;
+            });
             if (!matched && !isBoth) {
-                const err = new Error(`Selected delivery slot '${reqSlot}' is currently disabled or unavailable.`);
-                err.statusCode = 400;
-                throw err;
+                if (slotConfig.default_slot) {
+                    reqSlot = slotConfig.default_slot;
+                } else {
+                    const err = new Error(`Selected delivery slot '${reqSlot}' is currently disabled or unavailable.`);
+                    err.statusCode = 400;
+                    throw err;
+                }
             }
         }
     }
@@ -1195,7 +1267,7 @@ async function createSubscriptionInternal(inputData) {
         reqStartDate = tomorrowStr;
     } else {
         const todayStr = new Date().toISOString().split("T")[0];
-        if (reqStartDate === todayStr && !dateConfig.allow_immediate_start) {
+        if (reqStartDate === todayStr && !dateConfig.allow_immediate_start && !inputData.allow_immediate_start) {
             const err = new Error("Immediate same-day start is not permitted. Subscriptions must start tomorrow or later.");
             err.statusCode = 400;
             throw err;
@@ -1220,10 +1292,11 @@ async function createSubscriptionInternal(inputData) {
         }
     }
 
-    const duration_days = Number(inputData.duration_days || inputData.durationDays) || enrichedPlan?.duration_days || (time_period.includes("15") ? 15 : 30);
-    const startDateObj = new Date(reqStartDate);
-    const expiryDateObj = new Date(startDateObj.getTime() + duration_days * 24 * 60 * 60 * 1000);
-    const expiry_date = inputData.expiry_date || inputData.expiryDate || expiryDateObj.toISOString().split("T")[0];
+    const duration_days = Math.max(1, Number(inputData.duration_days || inputData.durationDays) || enrichedPlan?.duration_days || (time_period.includes("15") ? 15 : 30));
+    const dateCalc = calculateSubscriptionDates({ startDate: reqStartDate, durationDays: duration_days });
+    const start_date = dateCalc.startDate;
+    const end_date = dateCalc.endDate;
+    const expiry_date = dateCalc.expiryDate;
 
     const savedProof = saveBase64Image(payment_proof);
     const subId = inputData.id && inputData.id.startsWith("SUB-") ? inputData.id : generateSubscriptionId();
@@ -1291,10 +1364,18 @@ async function createSubscriptionInternal(inputData) {
         total_price: verifiedTotalPrice,
         totalPrice: verifiedTotalPrice,
         total: verifiedTotalPrice,
-        start_date: reqStartDate,
-        startDate: reqStartDate,
+        start_date: start_date,
+        startDate: start_date,
+        end_date: end_date,
+        endDate: end_date,
         expiry_date: expiry_date,
         expiryDate: expiry_date,
+        duration_days: duration_days,
+        durationDays: duration_days,
+        total_duration: duration_days,
+        totalDuration: duration_days,
+        total_days: duration_days,
+        totalDays: duration_days,
         address: inputData.address || "Doorstep Address, Kanchipuram",
         city: inputData.city || "Kanchipuram",
         pincode: inputData.pincode || "631601",
@@ -1365,7 +1446,10 @@ async function createSubscriptionInternal(inputData) {
         ]).catch(e => console.error("Minimal subscription insert error:", e.message));
     }
 
-    MOCK_SUBSCRIPTIONS.unshift(subData);
+    const deliveryRecords = loadSubDeliveriesFromDisk();
+    const finalSub = enrichSubscriptionWithMetrics(subData, null, deliveryRecords);
+
+    MOCK_SUBSCRIPTIONS.unshift(finalSub);
     saveSubscriptionsToDisk(MOCK_SUBSCRIPTIONS);
 
     notifyAdminNewOrder({
@@ -1390,7 +1474,7 @@ async function createSubscriptionInternal(inputData) {
         }).catch(() => {});
     }
 
-    return subData;
+    return finalSub;
 }
 router.createSubscriptionRecord = createSubscriptionInternal;
 
@@ -1604,10 +1688,11 @@ const verifyPaymentHandler = async (req, res) => {
         targetId: id
     }).catch(() => {});
 
+    const enrichedSub = enrichSubscriptionWithMetrics(sub, null, loadSubDeliveriesFromDisk());
     res.json({
         success: true,
         message: "Subscription payment approved and activated successfully!",
-        subscription: sub
+        subscription: enrichedSub
     });
 };
 
@@ -1692,7 +1777,8 @@ router.get("/:id", async (req, res) => {
         if (!sub) {
             return res.status(404).json({ success: false, message: "Subscription not found" });
         }
-        return res.json({ success: true, subscription: sub });
+        const deliveryRecords = loadSubDeliveriesFromDisk();
+        return res.json({ success: true, subscription: enrichSubscriptionWithMetrics(sub, null, deliveryRecords) });
     } catch (err) {
         return res.status(500).json({ success: false, message: err.message });
     }
@@ -1700,11 +1786,15 @@ router.get("/:id", async (req, res) => {
 
 /* GET USER SUBSCRIPTIONS (Strict Customer Isolation) */
 router.get("/user/:identifier", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
     const rawIdent = req.params.identifier.trim();
     const ident = rawIdent.toLowerCase();
     const cleanDigits = rawIdent.replace(/\D/g, "");
+    const last10 = cleanDigits.length >= 10 ? cleanDigits.slice(-10) : cleanDigits;
     const isEmail = ident.includes("@");
-    const isPhone = cleanDigits.length === 10 && /^[6-9]\d{9}$/.test(cleanDigits);
+    const isPhone = last10.length === 10;
     const isNumericId = !isEmail && !isPhone && !isNaN(Number(ident));
 
     try {
@@ -1718,8 +1808,8 @@ router.get("/user/:identifier", async (req, res) => {
             whereSql = "WHERE LOWER(COALESCE(customer_email, '')) = $1 ORDER BY created_at DESC";
             params = [ident];
         } else if (isPhone) {
-            whereSql = "WHERE REPLACE(customer_phone, ' ', '') = $1 OR customer_phone = $1 ORDER BY created_at DESC";
-            params = [cleanDigits];
+            whereSql = "WHERE RIGHT(REGEXP_REPLACE(customer_phone, '\\D', '', 'g'), 10) = $1 OR customer_phone = $2 ORDER BY created_at DESC";
+            params = [last10, rawIdent];
         } else {
             whereSql = "WHERE LOWER(COALESCE(user_id::text, '')) = $1 OR LOWER(COALESCE(customer_email, '')) = $1 ORDER BY created_at DESC";
             params = [ident];
@@ -1736,26 +1826,32 @@ router.get("/user/:identifier", async (req, res) => {
             const mUser = (m.user_id || m.userId || '').toString().trim();
             const mEmail = (m.customer_email || m.customerEmail || '').toLowerCase().trim();
             const mPhone = (m.customer_phone || m.customerPhone || '').replace(/\D/g, "");
+            const mLast10 = mPhone.length >= 10 ? mPhone.slice(-10) : mPhone;
 
             if (isNumericId) return mUser === ident;
             if (isEmail) return mEmail === ident;
-            if (isPhone) return mPhone === cleanDigits;
+            if (isPhone) return mLast10 === last10 || mPhone === cleanDigits;
             return mUser === ident || mEmail === ident;
         });
-        return res.json({ success: true, subscriptions: [...dbRows, ...memRows] });
+        const deliveryRecords = loadSubDeliveriesFromDisk();
+        const enriched = [...dbRows, ...memRows].map(s => enrichSubscriptionWithMetrics(s, null, deliveryRecords));
+        return res.json({ success: true, subscriptions: enriched });
     } catch (err) {
         console.error("[USER SUBSCRIPTIONS ERROR]", err.message);
         const memRows = (MOCK_SUBSCRIPTIONS || []).filter(m => {
             const mUser = (m.user_id || m.userId || '').toString().trim();
             const mEmail = (m.customer_email || m.customerEmail || '').toLowerCase().trim();
             const mPhone = (m.customer_phone || m.customerPhone || '').replace(/\D/g, "");
+            const mLast10 = mPhone.length >= 10 ? mPhone.slice(-10) : mPhone;
 
             if (isNumericId) return mUser === ident;
             if (isEmail) return mEmail === ident;
-            if (isPhone) return mPhone === cleanDigits;
+            if (isPhone) return mLast10 === last10 || mPhone === cleanDigits;
             return mUser === ident || mEmail === ident;
         });
-        return res.json({ success: true, subscriptions: memRows });
+        const deliveryRecords = loadSubDeliveriesFromDisk();
+        const enriched = memRows.map(s => enrichSubscriptionWithMetrics(s, null, deliveryRecords));
+        return res.json({ success: true, subscriptions: enriched });
     }
 });
 
@@ -1786,24 +1882,6 @@ router.put("/:id/status", async (req, res) => {
 /* ============================================================
    DAILY SUBSCRIPTION MANIFEST & SCHEDULED DELIVERIES
 ============================================================ */
-const SUB_DELIVERIES_FILE = path.join(DATA_DIR, "subscription_deliveries.json");
-
-function loadSubDeliveriesFromDisk() {
-    try {
-        if (fs.existsSync(SUB_DELIVERIES_FILE)) {
-            return JSON.parse(fs.readFileSync(SUB_DELIVERIES_FILE, "utf-8"));
-        }
-    } catch (_) {}
-    return [];
-}
-
-function saveSubDeliveriesToDisk(records) {
-    try {
-        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-        fs.writeFileSync(SUB_DELIVERIES_FILE, JSON.stringify(records, null, 2), "utf-8");
-    } catch (_) {}
-}
-
 function isSubscriptionScheduledForDate(sub, targetDateStr) {
     if (!sub) return false;
     const status = (sub.status || "").toLowerCase();

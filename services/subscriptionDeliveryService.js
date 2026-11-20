@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { pool } = require("../config/database");
+const { calculateSubscriptionDates, calculateSubscriptionMetrics } = require("../utils/subscriptionDateUtil");
 
 const DATA_DIR = path.resolve(__dirname, "..", "data");
 const SUB_DELIVERIES_FILE = path.join(DATA_DIR, "subscription_deliveries.json");
@@ -135,18 +136,16 @@ async function generateDailySubscriptionDeliveries(dateStr) {
         const subId = (sub.id || sub.subscription_id || "").toString();
         if (!subId) continue;
 
-        // Check start date
+        // Check start date & calculate accurate end date using centralized engine
         const startDateStr = formatDateKey(sub.start_date || sub.created_at);
         if (targetDate < startDateStr) continue;
 
-        // Check end date or duration
-        let endDateStr = sub.end_date ? formatDateKey(sub.end_date) : null;
-        if (!endDateStr && sub.duration_days) {
-            const sDt = new Date(startDateStr);
-            sDt.setDate(sDt.getDate() + parseInt(sub.duration_days, 10));
-            endDateStr = formatDateKey(sDt);
-        }
-        if (endDateStr && targetDate > endDateStr) continue;
+        const dateCalc = calculateSubscriptionDates({
+            startDate: startDateStr,
+            durationDays: sub.duration_days || sub.durationDays || 30
+        });
+        const endDateStr = dateCalc.endDate;
+        if (targetDate > endDateStr) continue;
 
         // Check frequency
         const freq = (sub.frequency || "daily").toLowerCase().trim();
@@ -178,12 +177,9 @@ async function generateDailySubscriptionDeliveries(dateStr) {
         );
         if (alreadyExists) continue;
 
-        // Calculate remaining days
-        let remainingDays = 30;
-        if (endDateStr) {
-            const eDt = new Date(endDateStr);
-            remainingDays = Math.max(0, Math.ceil((eDt - targetDt) / (1000 * 60 * 60 * 24)));
-        }
+        // Calculate remaining days using centralized metrics engine
+        const metrics = calculateSubscriptionMetrics(sub, targetDate);
+        const remainingDays = metrics.remainingDays;
 
         const task = {
             id: `DLY-${subId}-${targetDate.replace(/-/g, "")}`,
@@ -452,6 +448,8 @@ module.exports = {
     getAreaAllocationSetting,
     setAreaAllocationSetting,
     formatDateKey,
-    formatReadableDate
+    formatReadableDate,
+    loadSubDeliveriesFromDisk,
+    saveSubDeliveriesToDisk
 };
 

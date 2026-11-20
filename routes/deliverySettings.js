@@ -242,3 +242,4 @@ module.exports = {
     loadSettings,
     saveSettings
 };
+
