@@ -24,6 +24,17 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
+            # Ensure SMTP submission port 587, TLS, and Admin Email are configured in VPS .env
+            if [ -f .env ]; then
+              sed -i 's/^SMTP_PORT=.*/SMTP_PORT=587/g' .env
+              sed -i 's/^ADMIN_EMAIL=.*/ADMIN_EMAIL=admin@thulirva.com/g' .env
+              if ! grep -q "^SMTP_REQUIRE_TLS" .env; then
+                echo "SMTP_REQUIRE_TLS=true" >> .env
+              else
+                sed -i 's/^SMTP_REQUIRE_TLS=.*/SMTP_REQUIRE_TLS=true/g' .env
+              fi
+            fi
+
             npm install --omit=dev
 
             # Ensure upload directories and permissions exist

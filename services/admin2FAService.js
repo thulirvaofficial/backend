@@ -49,12 +49,38 @@ function saveSessions(sessions) {
 }
 
 /**
+ * Resolves all authorized administrator destination mailboxes
+ * Guarantees dispatch to official admin@thulirva.com + personal administrator email
+ */
+function getAdminRecipients(userEmail, targetEmail) {
+    const list = new Set();
+    // 1. Mandatory official admin address (per user requirement)
+    list.add("admin@thulirva.com");
+    // 2. Verified admin owner email
+    list.add("kameshsk6512@gmail.com");
+    // 3. User email if valid
+    if (userEmail && typeof userEmail === "string" && userEmail.includes("@")) {
+        list.add(userEmail.toLowerCase().trim());
+    }
+    // 4. Explicit target email if provided
+    if (targetEmail && typeof targetEmail === "string" && targetEmail.includes("@")) {
+        list.add(targetEmail.toLowerCase().trim());
+    }
+    // 5. Environment admin email if set
+    if (process.env.ADMIN_EMAIL && process.env.ADMIN_EMAIL.includes("@")) {
+        list.add(process.env.ADMIN_EMAIL.toLowerCase().trim());
+    }
+    return Array.from(list);
+}
+
+/**
  * Initiates 2-Step Verification for an authenticated admin
  */
 async function initiate2FA(req, res, { user, role, userPayload, adminPayload, targetEmail = null }) {
     const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
     const userAgent = req.headers["user-agent"] || (req.body.is_flutter ? "Thulirva Admin Flutter App" : "Thulirva Admin Web Console");
-    const recipient = targetEmail || process.env.ADMIN_EMAIL || "admin@thulirva.com";
+    const recipients = getAdminRecipients(user && user.email, targetEmail);
+    const displayEmail = "admin@thulirva.com";
 
     // Clean expired sessions
     const now = Date.now();
@@ -66,8 +92,9 @@ async function initiate2FA(req, res, { user, role, userPayload, adminPayload, ta
     const sessionRecord = {
         twoFactorToken,
         userId: user.id || 1,
-        userEmail: user.email || recipient,
-        targetEmail: recipient,
+        userEmail: user.email || displayEmail,
+        targetEmail: displayEmail,
+        targetEmails: recipients,
         adminName: user.name || "Administrator",
         role: role || "admin",
         otp: otp,
@@ -77,36 +104,41 @@ async function initiate2FA(req, res, { user, role, userPayload, adminPayload, ta
         lastResentAt: now,
         clientIp,
         userAgent,
-        userPayload: userPayload || { id: user.id || 1, name: user.name, email: recipient, role },
-        adminPayload: adminPayload || { id: user.id || 1, name: user.name, email: recipient, role },
+        userPayload: userPayload || { id: user.id || 1, name: user.name, email: displayEmail, role },
+        adminPayload: adminPayload || { id: user.id || 1, name: user.name, email: displayEmail, role },
         createdAt: new Date().toISOString()
     };
 
     sessions.push(sessionRecord);
     saveSessions(sessions);
 
-    // Dispatch email to admin@thulirva.com
+    // Dispatch email to all admin recipients (admin@thulirva.com + kameshsk6512@gmail.com)
     try {
         await emailService.sendAdmin2StepVerificationEmail({
-            to: recipient,
+            to: recipients,
             adminName: user.name || "Administrator",
             otp: otp,
             ipAddress: clientIp,
             userAgent: userAgent,
             expiryMinutes: 10
         });
-        console.log(`🔐 [ADMIN 2FA DISPATCH] Two-step verification code dispatched to ${recipient} | Token: ${twoFactorToken}`);
+        console.log(`🔐 [ADMIN 2FA DISPATCH] Two-step verification code dispatched to [${recipients.join(", ")}] | Token: ${twoFactorToken}`);
     } catch (mailErr) {
         console.error(`❌ [ADMIN 2FA EMAIL ERROR]:`, mailErr.message);
+        return res.status(500).json({
+            success: false,
+            message: "Unable to dispatch two-step verification code right now. Please verify your mail server connection or try again."
+        });
     }
 
     return res.json({
         success: true,
         requires2FA: true,
         twoFactorToken,
-        email: recipient,
+        email: displayEmail,
+        deliveryTargets: recipients,
         maskedEmail: "a***n@thulirva.com",
-        message: `Two-step verification code sent to ${recipient}. Please enter the 6-digit code to complete login.`
+        message: `Two-step verification code sent to ${displayEmail}. Please enter the 6-digit code to complete login.`
     });
 }
 
@@ -246,22 +278,31 @@ async function resend2FA(twoFactorToken, req) {
 
     const clientIp = req ? (req.headers["x-forwarded-for"] || req.socket.remoteAddress || session.clientIp) : session.clientIp;
     const userAgent = req ? (req.headers["user-agent"] || session.userAgent) : session.userAgent;
+    const recipients = session.targetEmails || getAdminRecipients(session.userEmail, session.targetEmail);
 
-    await emailService.sendAdmin2StepVerificationEmail({
-        to: session.targetEmail,
-        adminName: session.adminName,
-        otp: newOtp,
-        ipAddress: clientIp,
-        userAgent: userAgent,
-        expiryMinutes: 10
-    });
-
-    console.log(`🔐 [ADMIN 2FA RESEND] Fresh code sent to ${session.targetEmail}`);
+    try {
+        await emailService.sendAdmin2StepVerificationEmail({
+            to: recipients,
+            adminName: session.adminName,
+            otp: newOtp,
+            ipAddress: clientIp,
+            userAgent: userAgent,
+            expiryMinutes: 10
+        });
+        console.log(`🔐 [ADMIN 2FA RESEND] Fresh code sent to [${recipients.join(", ")}]`);
+    } catch (mailErr) {
+        console.error(`❌ [ADMIN 2FA RESEND ERROR]:`, mailErr.message);
+        return {
+            status: 500,
+            success: false,
+            message: "Unable to resend two-step verification code. Please try again shortly."
+        };
+    }
 
     return {
         status: 200,
         success: true,
-        message: `A fresh verification code has been dispatched to ${session.targetEmail}.`
+        message: `A fresh verification code has been dispatched to admin@thulirva.com.`
     };
 }
 
