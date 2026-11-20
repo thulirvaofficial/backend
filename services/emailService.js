@@ -26,8 +26,9 @@ class EmailService {
 
         this.config = {
             host: process.env.SMTP_HOST || "mail.thulirva.com",
-            port: parseInt(process.env.SMTP_PORT || "25", 10),
+            port: parseInt(process.env.SMTP_PORT || "587", 10),
             secure: process.env.SMTP_SECURE === "true",
+            requireTLS: process.env.SMTP_REQUIRE_TLS !== "false",
             user: process.env.SMTP_USER || "noreply@thulirva.com",
             pass: process.env.SMTP_PASS || "65284b3a049058d55b9ea557e10a8f0d",
             fromName: process.env.SMTP_FROM_NAME || "Thulirva",
@@ -44,10 +45,11 @@ class EmailService {
         const transportOpts = {
             host,
             port,
-            secure, // false for port 25 and 587 (STARTTLS)
-            connectionTimeout: 5000,
-            greetingTimeout: 5000,
-            socketTimeout: 10000,
+            secure, // false for port 587 (STARTTLS)
+            requireTLS: port === 587 || this.config.requireTLS,
+            connectionTimeout: 10000,
+            greetingTimeout: 10000,
+            socketTimeout: 20000,
             tls: {
                 rejectUnauthorized: false
             }
@@ -64,48 +66,38 @@ class EmailService {
     }
 
     /**
-     * Get or create active transporter with automatic dual-port fallback.
-     * Tries configured port (default 25); if blocked (e.g. ISP or firewall),
-     * automatically falls back to submission port 587 with STARTTLS.
+     * Get or create active transporter with automatic fallback.
+     * Prioritizes submission port 587 with STARTTLS for secure authenticated relay.
+     * If DNS resolution encounters latency or fails, falls back to direct VPS IP on port 587.
      */
-    async getTransporter() {
-        if (this.activeTransporter) {
+    async getTransporter(forceRefresh = false) {
+        if (this.activeTransporter && !forceRefresh) {
             return this.activeTransporter;
         }
 
-        const primaryPort = this.config.port || 25;
+        const primaryPort = this.config.port || 587;
         this.primaryTransporter = this._buildTransporter(this.config.host, primaryPort, this.config.secure);
 
         try {
-            // Test primary connection
             await this.primaryTransporter.verify();
-            console.log(`✓ [SMTP] Connected to primary mail server at ${this.config.host}:${primaryPort}`);
+            console.log(`✓ [SMTP] Connected to authenticated mail server at ${this.config.host}:${primaryPort}`);
             this.activeTransporter = this.primaryTransporter;
             return this.activeTransporter;
         } catch (err) {
-            console.warn(`[SMTP NOTICE] Primary port ${primaryPort} check failed (${err.message}). Attempting submission port 587...`);
-            
-            // Fallback to port 587
-            this.fallbackTransporter = this._buildTransporter(this.config.host, 587, false);
+            console.warn(`[SMTP NOTICE] Connection to ${this.config.host}:${primaryPort} failed (${err.message}). Testing direct VPS IP fallback...`);
+
+            // Direct VPS IP fallback on port 587
+            const fallbackPort = primaryPort === 25 ? 587 : primaryPort;
+            this.fallbackTransporter = this._buildTransporter(this.config.vpsIp, fallbackPort, false);
             try {
                 await this.fallbackTransporter.verify();
-                console.log(`✓ [SMTP] Connected to mail server via submission port 587 (STARTTLS)`);
+                console.log(`✓ [SMTP] Connected to Thulirva VPS mail server directly at ${this.config.vpsIp}:${fallbackPort}`);
                 this.activeTransporter = this.fallbackTransporter;
                 return this.activeTransporter;
             } catch (fbErr) {
-                // If domain DNS has issues, try direct VPS IP on 587
-                console.warn(`[SMTP NOTICE] Hostname probe failed (${fbErr.message}). Testing direct VPS IP ${this.config.vpsIp}:587...`);
-                const ipTransporter = this._buildTransporter(this.config.vpsIp, 587, false);
-                try {
-                    await ipTransporter.verify();
-                    console.log(`✓ [SMTP] Connected to Thulirva VPS mail server directly at ${this.config.vpsIp}:587`);
-                    this.activeTransporter = ipTransporter;
-                    return this.activeTransporter;
-                } catch (ipErr) {
-                    console.error(`[SMTP FATAL] All SMTP connection attempts failed: ${ipErr.message}`);
-                    // Return primary anyway so callers receive descriptive error
-                    return this.primaryTransporter;
-                }
+                console.error(`[SMTP FATAL] Direct VPS fallback also failed: ${fbErr.message}`);
+                // Return primary so callers receive descriptive error
+                return this.primaryTransporter;
             }
         }
     }
@@ -140,7 +132,6 @@ class EmailService {
             throw new Error("Recipient email address ('to') is required.");
         }
 
-        const transporter = await this.getTransporter();
         const fromAddress = from || `"${this.config.fromName}" <${this.config.fromEmail}>`;
         const replyToAddress = replyTo || this.config.replyTo;
 
@@ -154,6 +145,8 @@ class EmailService {
             attachments
         };
 
+        let transporter = await this.getTransporter();
+
         try {
             const info = await transporter.sendMail(mailOptions);
             console.log(`✉ [SMTP DISPATCH] Sent to ${to} | Subject: "${subject}" | MsgId: ${info.messageId}`);
@@ -163,10 +156,25 @@ class EmailService {
                 response: info.response
             };
         } catch (err) {
-            console.error(`❌ [SMTP ERROR] Failed to send email to ${to}:`, err.message);
-            // If primary failed during active send, reset activeTransporter to retry on fallback
+            console.warn(`[SMTP NOTICE] Initial send to ${to} failed (${err.message}). Retrying with fresh connection...`);
             this.activeTransporter = null;
-            throw new Error(`Email delivery failed via Thulirva mail server: ${err.message}`);
+            try {
+                transporter = await this.getTransporter(true);
+                const info = await transporter.sendMail(mailOptions);
+                console.log(`✉ [SMTP DISPATCH RETRY] Sent to ${to} | Subject: "${subject}" | MsgId: ${info.messageId}`);
+                return {
+                    success: true,
+                    messageId: info.messageId,
+                    response: info.response
+                };
+            } catch (retryErr) {
+                console.error(`❌ [SMTP ERROR] Failed to send email to ${to}:`, retryErr.message);
+                if (retryErr.response) {
+                    console.error(`❌ [SMTP SERVER RESPONSE] Code: ${retryErr.responseCode} | Details: ${retryErr.response}`);
+                }
+                this.activeTransporter = null;
+                throw new Error(`Email delivery failed via Thulirva mail server: ${retryErr.message}`);
+            }
         }
     }
 

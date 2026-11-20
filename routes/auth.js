@@ -592,6 +592,24 @@ router.post("/logout", (req, res) => {
 ============================================================ */
 const passwordResetService = require("../services/passwordResetService");
 
+// Helper: Sanitize public error messages to prevent leaking internal mail server/database details
+function sanitizeAuthError(err, fallback = "Unable to send your verification code right now. Please try again in a few minutes.") {
+    if (!err) return fallback;
+    const msg = typeof err === "string" ? err : (err.message || "");
+    if (
+        msg.includes("wait") ||
+        msg.includes("Too many") ||
+        msg.includes("valid email") ||
+        msg.includes("registered email") ||
+        msg.includes("cooldown") ||
+        msg.includes("expired") ||
+        msg.includes("Invalid")
+    ) {
+        return msg;
+    }
+    return fallback;
+}
+
 // 1. Forgot Password -> Directly sends 6-digit OTP to registered email with generic response
 router.post("/forgot-password", async (req, res) => {
     try {
@@ -616,7 +634,7 @@ router.post("/forgot-password", async (req, res) => {
         console.error("[FORGOT PASSWORD ERROR]", err);
         res.status(400).json({
             success: false,
-            message: err.message || "Failed to process password reset request."
+            message: sanitizeAuthError(err)
         });
     }
 });
@@ -642,9 +660,10 @@ router.post("/send-reset-otp", async (req, res) => {
 
         res.json(result);
     } catch (err) {
+        console.error("[SEND RESET OTP ERROR]", err);
         res.status(400).json({
             success: false,
-            message: err.message || "Failed to send verification code."
+            message: sanitizeAuthError(err)
         });
     }
 });
@@ -670,9 +689,10 @@ router.post("/resend-reset-otp", async (req, res) => {
 
         res.json(result);
     } catch (err) {
+        console.error("[RESEND RESET OTP ERROR]", err);
         res.status(400).json({
             success: false,
-            message: err.message || "Failed to resend verification code."
+            message: sanitizeAuthError(err)
         });
     }
 });
@@ -1171,7 +1191,7 @@ router.post("/send-otp", async (req, res) => {
         console.error("[SEND OTP ERROR]", err);
         return res.status(500).json({
             success: false,
-            message: "Failed to dispatch verification code: " + (err.message || "Unknown error")
+            message: sanitizeAuthError(err, "Unable to send your verification code right now. Please try again in a few minutes.")
         });
     }
 });

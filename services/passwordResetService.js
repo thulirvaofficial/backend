@@ -289,11 +289,16 @@ async function generateAndSendResetOtp({ identifier, method = "email", reqIp = "
     } catch (_) {}
 
     // Dispatch via Thulirva SMTP
-    await sendResetEmail({
-        toEmail: user.email,
-        name: user.name,
-        otp: otp
-    });
+    try {
+        await sendResetEmail({
+            toEmail: user.email,
+            name: user.name,
+            otp: otp
+        });
+    } catch (mailErr) {
+        console.error(`[PASSWORD RESET SMTP FAILURE] Target: ${user.email} | Technical Error:`, mailErr.message);
+        throw new Error("Unable to send your verification code right now. Please try again in a few minutes.");
+    }
 
     return {
         success: true,
