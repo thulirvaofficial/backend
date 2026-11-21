@@ -1383,6 +1383,41 @@ async function initializeDatabase() {
             try { await pool.query(idxSql); } catch {}
         }
 
+        // Customer App Releases Table & Indexes
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS app_releases (
+                id SERIAL PRIMARY KEY,
+                release_id VARCHAR(100) UNIQUE NOT NULL,
+                version VARCHAR(50) NOT NULL,
+                version_code INTEGER NOT NULL,
+                release_title VARCHAR(255) NOT NULL,
+                release_notes TEXT,
+                release_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                apk_path VARCHAR(255) NOT NULL,
+                apk_filename VARCHAR(255) NOT NULL,
+                file_size_bytes BIGINT NOT NULL,
+                file_size_formatted VARCHAR(50) NOT NULL,
+                checksum_sha256 VARCHAR(64) NOT NULL,
+                min_supported_version VARCHAR(50) DEFAULT '1.0.0',
+                is_mandatory BOOLEAN DEFAULT false,
+                status VARCHAR(20) DEFAULT 'draft',
+                download_count INTEGER DEFAULT 0,
+                uploaded_by VARCHAR(150),
+                published_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        const releaseIndexes = [
+            "CREATE INDEX IF NOT EXISTS idx_app_releases_status ON app_releases (status)",
+            "CREATE INDEX IF NOT EXISTS idx_app_releases_version_code ON app_releases (version_code)",
+            "CREATE INDEX IF NOT EXISTS idx_app_releases_created ON app_releases (created_at DESC)"
+        ];
+        for (const idxSql of releaseIndexes) {
+            try { await pool.query(idxSql); } catch {}
+        }
+
         // Ensure delivery_partners table exists without injecting fake mock data
         console.log("[+] Database tables ready");
     } catch (error) {

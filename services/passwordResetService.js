@@ -46,7 +46,7 @@ function loadOtpsFromDisk() {
             const raw = fs.readFileSync(RESET_OTPS_FILE, "utf-8");
             return JSON.parse(raw);
         }
-    } catch (_) {}
+    } catch (_) { }
     return [];
 }
 
@@ -86,7 +86,7 @@ async function ensureDbTable() {
             CREATE INDEX IF NOT EXISTS idx_reset_otps_user ON password_reset_otps(user_id);
             CREATE INDEX IF NOT EXISTS idx_reset_otps_ident ON password_reset_otps(identifier);
         `);
-    } catch (_) {}
+    } catch (_) { }
 }
 ensureDbTable();
 
@@ -153,7 +153,7 @@ async function findAccountByIdentifier(rawIdentifier) {
         if (res.rows && res.rows.length > 0) {
             return res.rows[0];
         }
-    } catch (_) {}
+    } catch (_) { }
 
     // 2. Check JSON / in-memory store
     try {
@@ -174,7 +174,7 @@ async function findAccountByIdentifier(rawIdentifier) {
                 };
             }
         }
-    } catch (_) {}
+    } catch (_) { }
 
     return null;
 }
@@ -229,7 +229,7 @@ async function generateAndSendResetOtp({ identifier, method = "email", reqIp = "
     IN_MEMORY_RESET_OTPS = loadOtpsFromDisk();
 
     // Enforce 60-second resend cooldown for active OTPs
-    const existingActive = IN_MEMORY_RESET_OTPS.find(o => 
+    const existingActive = IN_MEMORY_RESET_OTPS.find(o =>
         o.user_id === user.id &&
         !o.is_used &&
         o.expires_at > now
@@ -286,7 +286,7 @@ async function generateAndSendResetOtp({ identifier, method = "email", reqIp = "
              VALUES ($1, $2, 'email', $3, $4, $5, 0, $6, $7, false, NOW())`,
             [user.id, cleanIdent, user.email.toLowerCase(), otpHash, salt, MAX_ATTEMPTS, new Date(expiresAt)]
         );
-    } catch (_) {}
+    } catch (_) { }
 
     // Dispatch via Thulirva SMTP
     try {
@@ -332,7 +332,7 @@ async function verifyResetOtp({ identifier, otp, reqIp = "127.0.0.1" }) {
     IN_MEMORY_RESET_OTPS = loadOtpsFromDisk();
 
     // Find active OTP record matching identifier or target destination
-    let record = IN_MEMORY_RESET_OTPS.find(o => 
+    let record = IN_MEMORY_RESET_OTPS.find(o =>
         (o.identifier === cleanIdent || o.target_destination.toLowerCase() === cleanIdent) &&
         !o.is_used &&
         o.expires_at > now
@@ -364,7 +364,7 @@ async function verifyResetOtp({ identifier, otp, reqIp = "127.0.0.1" }) {
                 "UPDATE password_reset_otps SET attempts = attempts + 1 WHERE id = $1",
                 [record.id]
             );
-        } catch (_) {}
+        } catch (_) { }
 
         if (remaining === 0) {
             throw new Error("Maximum attempts exceeded. This verification code has been locked. Please request a new code.");
@@ -404,7 +404,7 @@ async function verifyResetOtp({ identifier, otp, reqIp = "127.0.0.1" }) {
              WHERE id = $3`,
             [tokenHash, new Date(record.reset_token_expires_at), record.id]
         );
-    } catch (_) {}
+    } catch (_) { }
 
     return {
         success: true,
@@ -492,7 +492,7 @@ async function resetPassword({ reset_token, new_password, confirm_password }) {
             "UPDATE password_reset_otps SET reset_token_used = true WHERE reset_token_hash = $1",
             [tokenHash]
         );
-    } catch (_) {}
+    } catch (_) { }
 
     // 2. Update JSON user store
     try {
@@ -505,7 +505,7 @@ async function resetPassword({ reset_token, new_password, confirm_password }) {
                 fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), "utf-8");
             }
         }
-    } catch (_) {}
+    } catch (_) { }
 
     return {
         success: true,

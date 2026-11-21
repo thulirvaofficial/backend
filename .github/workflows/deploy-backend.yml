@@ -38,21 +38,21 @@ jobs:
             npm install --omit=dev
 
             # Ensure upload directories and permissions exist
-            mkdir -p public/uploads/profiles public/uploads/partners public/uploads/delivery_proofs public/uploads/attendance public/uploads/announcements
+            mkdir -p public/uploads/profiles public/uploads/partners public/uploads/delivery_proofs public/uploads/attendance public/uploads/announcements public/uploads/apks
             chmod -R 775 public/uploads 2>/dev/null || true
 
-            # Configure Nginx client_max_body_size 25M to fix HTTP 413
+            # Configure Nginx client_max_body_size 150M to allow APK uploads
             if [ -f /etc/nginx/nginx.conf ]; then
               if ! grep -q "client_max_body_size" /etc/nginx/nginx.conf; then
-                sudo sed -i '/http {/a \    client_max_body_size 25M;' /etc/nginx/nginx.conf 2>/dev/null || true
+                sudo sed -i '/http {/a \    client_max_body_size 150M;' /etc/nginx/nginx.conf 2>/dev/null || true
               else
-                sudo sed -i 's/client_max_body_size .*/client_max_body_size 25M;/g' /etc/nginx/nginx.conf 2>/dev/null || true
+                sudo sed -i 's/client_max_body_size .*/client_max_body_size 150M;/g' /etc/nginx/nginx.conf 2>/dev/null || true
               fi
             fi
 
             for site in /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*; do
               if [ -f "$site" ]; then
-                sudo sed -i 's/client_max_body_size .*/client_max_body_size 25M;/g' "$site" 2>/dev/null || true
+                sudo sed -i 's/client_max_body_size .*/client_max_body_size 150M;/g' "$site" 2>/dev/null || true
                 if ! grep -q "location /uploads/" "$site"; then
                   sudo sed -i '/location \/api/i \    location /uploads/ {\n        proxy_pass http://127.0.0.1:5500/uploads/;\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n    }\n' "$site" 2>/dev/null || true
                 fi

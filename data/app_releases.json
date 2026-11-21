@@ -1,0 +1,24 @@
+[
+  {
+    "release_id": "rel_1795248918693_fkuljr",
+    "version": "1.0.0",
+    "version_code": 1,
+    "release_title": "Official THULIRVA Customer Android Release",
+    "release_notes": "• Fresh Cow Milk & Dairy Subscriptions\n• Live Order Tracking\n• Delivery Partner Tips & Instant Coupons\n• Direct In-App OTA Update Engine",
+    "release_date": "2026-11-21T08:15:18.694Z",
+    "apk_path": "E:\\website (3)\\backend\\public\\uploads\\apks\\thulirva_customer_v1.0.0.apk",
+    "apk_filename": "thulirva_customer_v1.0.0.apk",
+    "file_size_bytes": 242359368,
+    "file_size_formatted": "231.13 MB",
+    "checksum_sha256": "4aca90b3d3a2ed80b552b30d75bf3825d157ec640a8773ee080dc4df14ef179c",
+    "min_supported_version": "1.0.0",
+    "is_mandatory": false,
+    "status": "published",
+    "download_count": 0,
+    "uploaded_by": "THULIRVA Release Engineering",
+    "published_at": "2026-11-21T08:15:18.694Z",
+    "created_at": "2026-11-21T08:15:18.694Z",
+    "updated_at": "2026-11-21T08:15:18.694Z",
+    "id": 1795248918694
+  }
+]

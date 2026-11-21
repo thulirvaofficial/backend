@@ -61,7 +61,9 @@ async function run2FATestSuite() {
         assert.strictEqual(data.success, true);
         assert.strictEqual(data.requires2FA, true, "Expected requires2FA to be true");
         assert.ok(data.twoFactorToken, "Expected twoFactorToken to be returned");
-        assert.strictEqual(data.email, ADMIN_EMAIL);
+        assert.ok(data.email && data.email.includes("@"), "Expected email in 2FA response");
+        assert.ok(Array.isArray(data.deliveryTargets) && data.deliveryTargets.includes("thulirvaofficial@gmail.com"), "Expected thulirvaofficial@gmail.com in delivery targets");
+        assert.ok(data.deliveryTargets.includes("admin@thulirva.com"), "Expected admin@thulirva.com in delivery targets");
         assert.strictEqual(data.token, undefined, "JWT token must NOT be issued before 2FA!");
         assert.strictEqual(data.otp, undefined, "CRITICAL: Plaintext OTP leaked in response!");
         assert.strictEqual(data.code, undefined, "CRITICAL: Plaintext code leaked in response!");
@@ -69,12 +71,13 @@ async function run2FATestSuite() {
         twoFactorToken = data.twoFactorToken;
     });
 
-    await it("Session is recorded in server store with recipient admin@thulirva.com", () => {
+    await it("Session is recorded in server store with recipients thulirvaofficial@gmail.com and admin@thulirva.com", () => {
         assert.ok(fs.existsSync(SESSIONS_FILE), "admin_2fa_sessions.json must exist");
         const sessions = JSON.parse(fs.readFileSync(SESSIONS_FILE, "utf-8"));
         const session = sessions.find(s => s.twoFactorToken === twoFactorToken);
         assert.ok(session, "Session record not found in data store");
-        assert.strictEqual(session.targetEmail, ADMIN_EMAIL);
+        assert.ok(session.targetEmails.includes("thulirvaofficial@gmail.com"), "Session must include thulirvaofficial@gmail.com");
+        assert.ok(session.targetEmails.includes("admin@thulirva.com"), "Session must include admin@thulirva.com");
         assert.strictEqual(session.otp.length, 6);
         assert.strictEqual(session.attempts, 0);
     });
@@ -216,3 +219,4 @@ run2FATestSuite().catch(err => {
     console.error("Test Suite Execution Error:", err);
     process.exit(1);
 });
+

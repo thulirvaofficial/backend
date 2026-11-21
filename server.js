@@ -95,6 +95,9 @@ const { tipRouter, adminTipRouter } =
 const { codRouter, adminCodRouter } =
     require("./routes/codManagement");
 
+const { publicRouter: appReleaseRoutes, adminRouter: adminAppReleaseRoutes } =
+    require("./routes/appReleases");
+
 const app = express();
 
 const PORT =
@@ -425,6 +428,10 @@ app.use("/api/cod", codRouter);
 app.use("/api/cod-status", codRouter);
 app.use("/api/admin/cod-restrictions", adminCodRouter);
 app.use("/api/admin/cod-risk", adminCodRouter);
+
+// Customer App Releases & OTA Distribution Routes
+app.use("/api/app/releases", appReleaseRoutes);
+app.use("/api/admin/app/releases", adminAppReleaseRoutes);
 app.use("/api/health", require("./routes/v1/health"));
 app.use("/api/earnings-v1", require("./routes/v1/earnings"));
 app.use("/api/bank-accounts", require("./routes/v1/bankAccounts"));
@@ -457,6 +464,7 @@ const backendAssetsUploadsPath = path.resolve(__dirname, "assets", "images", "up
     path.join(backendPublicUploadsPath, "payments"),
     path.join(backendPublicUploadsPath, "announcements"),
     path.join(backendPublicUploadsPath, "support"),
+    path.join(backendPublicUploadsPath, "apks"),
     backendAssetsUploadsPath,
     path.join(backendAssetsUploadsPath, "profiles"),
     websiteUploadsPath,
