@@ -224,6 +224,29 @@ async function saveDeliveryProof({ orderId, subId, partnerId, imageBase64, file,
                     partner.today_deliveries_count = (partner.today_deliveries_count || 0) + 1;
                     await savePartner(partner);
                 }
+
+                // Credit customer tip chosen at checkout to delivery partner
+                const tipVal = Number(order.tip_amount || order.tipAmount || 0);
+                if (tipVal > 0 && !order.partner_tip_credited) {
+                    try {
+                        const { recordEarningEntry } = require("./financialService");
+                        const { recordCheckoutTip } = require("./tipService");
+                        await recordEarningEntry({
+                            partner_id: actualPartnerId,
+                            entry_type: "delivery_tip",
+                            reference_id: cleanId,
+                            amount_in_rupees: tipVal,
+                            description: `Customer tip for Order #${order.order_number || cleanId}`
+                        });
+                        await recordCheckoutTip({
+                            order,
+                            partnerId: actualPartnerId,
+                            partnerName: partner?.name || partner?.full_name || "Partner"
+                        });
+                        order.partner_tip_credited = true;
+                        order.partner_tip_amount = tipVal;
+                    } catch (_) {}
+                }
             } catch (_) {}
         }
 
@@ -347,6 +370,29 @@ async function saveDeliveryProof({ orderId, subId, partnerId, imageBase64, file,
                     `UPDATE delivery_partners SET total_deliveries_count = COALESCE(total_deliveries_count, 0) + 1, today_deliveries_count = COALESCE(today_deliveries_count, 0) + 1, updated_at = NOW() WHERE partner_id = $1`,
                     [actualPartnerId]
                 ).catch(() => {});
+
+                // Credit customer tip chosen at checkout to delivery partner
+                const tipVal = Number(targetOrder.tip_amount || targetOrder.tipAmount || 0);
+                if (tipVal > 0 && !targetOrder.partner_tip_credited) {
+                    try {
+                        const { recordEarningEntry } = require("./financialService");
+                        const { recordCheckoutTip } = require("./tipService");
+                        await recordEarningEntry({
+                            partner_id: actualPartnerId,
+                            entry_type: "delivery_tip",
+                            reference_id: cleanId,
+                            amount_in_rupees: tipVal,
+                            description: `Customer tip for Order #${targetOrder.order_number || cleanId}`
+                        });
+                        await recordCheckoutTip({
+                            order: targetOrder,
+                            partnerId: actualPartnerId,
+                            partnerName: partner?.name || partner?.full_name || "Partner"
+                        });
+                        targetOrder.partner_tip_credited = true;
+                        targetOrder.partner_tip_amount = tipVal;
+                    } catch (_) {}
+                }
             } catch (_) {}
 
             // Module 6: Record COD Cash Collection if COD order
@@ -473,6 +519,29 @@ async function completeDelivery({ orderId, subId, partnerId, remarks, latitude, 
                     partner.today_deliveries_count = (partner.today_deliveries_count || 0) + 1;
                     await savePartner(partner);
                 }
+
+                // Credit customer tip chosen at checkout to delivery partner
+                const tipVal = Number(order.tip_amount || order.tipAmount || 0);
+                if (tipVal > 0 && !order.partner_tip_credited) {
+                    try {
+                        const { recordEarningEntry } = require("./financialService");
+                        const { recordCheckoutTip } = require("./tipService");
+                        await recordEarningEntry({
+                            partner_id: actualPartnerId,
+                            entry_type: "delivery_tip",
+                            reference_id: cleanId,
+                            amount_in_rupees: tipVal,
+                            description: `Customer tip for Order #${order.order_number || cleanId}`
+                        });
+                        await recordCheckoutTip({
+                            order,
+                            partnerId: actualPartnerId,
+                            partnerName: partner?.name || partner?.full_name || "Partner"
+                        });
+                        order.partner_tip_credited = true;
+                        order.partner_tip_amount = tipVal;
+                    } catch (_) {}
+                }
             } catch (_) {}
         }
 
@@ -543,6 +612,29 @@ async function completeDelivery({ orderId, subId, partnerId, remarks, latitude, 
                     partner.total_deliveries_count = (partner.total_deliveries_count || 0) + 1;
                     partner.today_deliveries_count = (partner.today_deliveries_count || 0) + 1;
                     await savePartner(partner);
+                }
+
+                // Credit customer tip chosen at checkout to delivery partner
+                const tipVal = Number(order.tip_amount || order.tipAmount || 0);
+                if (tipVal > 0 && !order.partner_tip_credited) {
+                    try {
+                        const { recordEarningEntry } = require("./financialService");
+                        const { recordCheckoutTip } = require("./tipService");
+                        await recordEarningEntry({
+                            partner_id: actualPartnerId,
+                            entry_type: "delivery_tip",
+                            reference_id: cleanId,
+                            amount_in_rupees: tipVal,
+                            description: `Customer tip for Order #${order.order_number || cleanId}`
+                        });
+                        await recordCheckoutTip({
+                            order,
+                            partnerId: actualPartnerId,
+                            partnerName: partner?.name || partner?.full_name || "Partner"
+                        });
+                        order.partner_tip_credited = true;
+                        order.partner_tip_amount = tipVal;
+                    } catch (_) {}
                 }
             } catch (_) {}
         }

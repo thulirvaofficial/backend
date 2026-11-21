@@ -114,6 +114,7 @@ router.post("/", async (req, res) => {
         const delivery_zone = req.body.delivery_zone || req.body.deliveryZone || "";
         const coupon_code = req.body.coupon_code || req.body.couponCode || null;
         const discount_amount = Number(req.body.discount_amount || req.body.discount || 0) || 0;
+        const tip_amount = Math.max(0, Math.min(500, Number(req.body.tip_amount || req.body.tipAmount || 0) || 0));
 
         // Validation
         if (!items || !Array.isArray(items) || items.length === 0) {
@@ -301,7 +302,7 @@ router.post("/", async (req, res) => {
             distance_km: req.body.distance_km || null
         });
         const delivery = chargeCalc.delivery_fee;
-        const total = Math.max(0, subtotal + delivery - discount_amount);
+        const total = Math.max(0, subtotal + delivery - discount_amount + tip_amount);
 
         const savedProof = saveBase64Image(payment_proof);
         const order_number = generateUniqueOrderNumber();
@@ -364,8 +365,8 @@ router.post("/", async (req, res) => {
                         order_number, user_id, customer_name, customer_phone, customer_email,
                         address, city, state, pincode, subtotal, delivery_charge, discount_amount, coupon_code, total,
                         payment_method, payment_status, order_status, transaction_id, payment_proof,
-                        delivery_type, delivery_zone, pickup_location_id, pickup_location_name, pickup_slot
-                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+                        delivery_type, delivery_zone, pickup_location_id, pickup_location_name, pickup_slot, tip_amount
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
                     RETURNING *`,
                     [
                         order_number, validUserId, customer_name, customer_phone, customer_email,
@@ -379,7 +380,7 @@ router.post("/", async (req, res) => {
                         "pending",
                         transaction_id, savedProof || "",
                         order_type, delivery_zone,
-                        pickup_location_id, pickup_location_name, pickup_slot
+                        pickup_location_id, pickup_location_name, pickup_slot, tip_amount
                     ]
                 );
 
@@ -502,6 +503,9 @@ router.post("/", async (req, res) => {
             total,
             total_price: total,
             totalPrice: total,
+            tip_amount: tip_amount,
+            tipAmount: tip_amount,
+            tip_for_partner: tip_amount,
             financial_breakdown: {
                 customer_delivery_fee: chargeCalc.delivery_fee,
                 partner_delivery_earning: chargeCalc.partner_delivery_earning,

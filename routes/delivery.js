@@ -2311,6 +2311,34 @@ const updatePartnerOrderStatusHandler = async (req, res) => {
                 await recordProductDeliveryEarning(partnerId, order.id || id, partnerPayout, snapshot);
                 order.partner_earnings_credited = true;
                 order.partner_earning_amount = partnerPayout;
+
+                // Credit customer tip chosen at checkout to delivery partner
+                const tipVal = Number(order.tip_amount || order.tipAmount || 0);
+                if (tipVal > 0 && !order.partner_tip_credited) {
+                    try {
+                        const { recordEarningEntry } = require("../services/financialService");
+                        const { recordCheckoutTip } = require("../services/tipService");
+
+                        await recordEarningEntry({
+                            partner_id: partnerId,
+                            entry_type: "delivery_tip",
+                            reference_id: order.id || id,
+                            amount_in_rupees: tipVal,
+                            description: `Customer tip for Order #${order.order_number || order.id || id}`
+                        });
+
+                        await recordCheckoutTip({
+                            order,
+                            partnerId,
+                            partnerName: partner?.name || partner?.full_name || "Partner"
+                        });
+
+                        order.partner_tip_credited = true;
+                        order.partner_tip_amount = tipVal;
+                    } catch (tipErr) {
+                        console.warn("[DELIVERY TIP CREDIT WARN]:", tipErr.message);
+                    }
+                }
             } catch (earnErr) {
                 console.warn("[DELIVERY EARNING RECORD WARN]:", earnErr.message);
             }
@@ -2734,6 +2762,10 @@ router.get("/earnings", authenticatePartner, async (req, res) => {
             }
         } catch (_) {}
 
+        // Calculate tips from ledger entries with entry_type === "delivery_tip"
+        const tipEntries = ledgerItems.filter(e => e.entry_type === "delivery_tip");
+        const tipsTotal = tipEntries.reduce((sum, e) => sum + (Number(e.amount_rupees) || 0), 0);
+
         return res.json({
             success: true,
             earnings: {
@@ -2743,7 +2775,7 @@ router.get("/earnings", authenticatePartner, async (req, res) => {
                 deliveries_today: deliveriesToday,
                 base_payout: Math.round(earningsToday * 100) / 100,
                 incentives: 0,
-                tips: 0,
+                tips: Math.round(tipsTotal * 100) / 100,
                 total_completed_earnings: wallet.lifetime_earned_rupees,
                 pending_earnings: (wallet.pending_settlement_paise || 0) / 100,
                 paid_earnings: wallet.total_settled_rupees,

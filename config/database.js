@@ -193,6 +193,7 @@ async function initializeDatabase() {
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_slot VARCHAR(100)",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_code VARCHAR(50)",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(10,2) DEFAULT 0",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS tip_amount NUMERIC(10,2) DEFAULT 0",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_proof TEXT",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_proof_url TEXT",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_remarks TEXT",

@@ -333,10 +333,75 @@ async function getOrderTip(orderId) {
     return found || null;
 }
 
+/**
+ * Record a tip chosen at checkout when the order is completed/delivered
+ */
+async function recordCheckoutTip({ order, partnerId, partnerName }) {
+    if (!order) return null;
+    const amount = Number(order.tip_amount || order.tipAmount || 0);
+    if (amount <= 0) return null;
+
+    const tips = loadJson(TIPS_FILE, []);
+    const cleanOrderId = String(order.id || "");
+    const cleanOrderNumber = String(order.order_number || order.orderNumber || cleanOrderId);
+
+    const existingTip = tips.find(t => 
+        (String(t.order_id) === cleanOrderId || String(t.order_number) === cleanOrderNumber) &&
+        t.payment_status === "COMPLETED"
+    );
+    if (existingTip) return existingTip;
+
+    const tipRecord = {
+        tip_id: generateTipId(),
+        customer_id: order.user_id ? String(order.user_id) : "guest",
+        customer_name: order.customer_name || "Customer",
+        order_id: cleanOrderId,
+        order_number: cleanOrderNumber,
+        delivery_partner_id: String(partnerId),
+        delivery_partner_name: partnerName || "Assigned Partner",
+        tip_amount: amount,
+        payment_method: order.payment_method || "UPI",
+        transaction_reference: order.transaction_id || `ORD-TIP-${cleanOrderId}`,
+        payment_status: "COMPLETED",
+        settlement_status: "PENDING",
+        created_at: new Date().toISOString(),
+        settled_at: null,
+        settled_by: null
+    };
+
+    tips.unshift(tipRecord);
+    saveJson(TIPS_FILE, tips);
+
+    // Socket Dispatch & Notification
+    try {
+        const io = getIO();
+        if (io) {
+            io.to(`partner_${partnerId}`).emit("tip:received", tipRecord);
+            io.to("admin_channel").emit("tip:new", tipRecord);
+        }
+    } catch (_) {}
+
+    try {
+        await sendNotificationToUser(partnerId, {
+            title: "🎉 You Received a Customer Tip!",
+            body: `₹${amount} tip credited from ${tipRecord.customer_name} for Order #${tipRecord.order_number}.`,
+            data: {
+                type: "tip_received",
+                tip_id: tipRecord.tip_id,
+                order_id: tipRecord.order_id,
+                amount: String(amount)
+            }
+        });
+    } catch (_) {}
+
+    return tipRecord;
+}
+
 module.exports = {
     createTip,
     getPartnerTips,
     getAdminTips,
     settleTip,
-    getOrderTip
+    getOrderTip,
+    recordCheckoutTip
 };
