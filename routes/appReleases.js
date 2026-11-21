@@ -115,6 +115,24 @@ publicRouter.get("/check", async (req, res) => {
 });
 
 /**
+ * Helper to resolve actual APK file path across OS boundaries (Linux VPS vs Windows dev)
+ */
+function resolveApkFilePath(release) {
+    if (!release) return null;
+    const baseDir = path.resolve(__dirname, "..", "public", "uploads", "apks");
+    const filename = release.apk_filename || (release.apk_path ? path.basename(release.apk_path.replace(/\\/g, "/")) : "");
+    const localInApks = path.join(baseDir, filename);
+
+    if (fs.existsSync(localInApks)) {
+        return localInApks;
+    }
+    if (release.apk_path && fs.existsSync(release.apk_path)) {
+        return release.apk_path;
+    }
+    return null;
+}
+
+/**
  * GET /api/app/releases/download
  * Streams the currently published APK directly
  */
@@ -125,10 +143,10 @@ publicRouter.get("/download", async (req, res) => {
             return res.status(404).send("No active published APK available for download.");
         }
 
-        const filePath = latest.apk_path;
-        if (!fs.existsSync(filePath)) {
-            console.error(`[DOWNLOAD ERROR] APK file not found at: ${filePath}`);
-            return res.status(404).send("APK binary file missing from server disk.");
+        const filePath = resolveApkFilePath(latest);
+        if (!filePath) {
+            console.error(`[DOWNLOAD ERROR] APK file not found at: ${latest.apk_path} or uploads/apks/${latest.apk_filename}`);
+            return res.status(404).send("APK binary file not found on server disk. Please upload the APK via the Admin Panel.");
         }
 
         // Increment download counter
@@ -166,9 +184,9 @@ publicRouter.get("/download/:id", async (req, res) => {
             return res.status(404).send("Release record not found.");
         }
 
-        const filePath = release.apk_path;
-        if (!fs.existsSync(filePath)) {
-            return res.status(404).send("APK binary file missing from server disk.");
+        const filePath = resolveApkFilePath(release);
+        if (!filePath) {
+            return res.status(404).send("APK binary file not found on server disk.");
         }
 
         incrementDownloadCount(release.id).catch((e) => console.error(e));
