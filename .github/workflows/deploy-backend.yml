@@ -27,7 +27,7 @@ jobs:
             # Ensure SMTP submission port 587, TLS, and Admin Email are configured in VPS .env
             if [ -f .env ]; then
               sed -i 's/^SMTP_PORT=.*/SMTP_PORT=587/g' .env
-              sed -i 's/^ADMIN_EMAIL=.*/ADMIN_EMAIL=admin@thulirva.com/g' .env
+              sed -i 's/^ADMIN_EMAIL=.*/ADMIN_EMAIL=thulirvaofficial@gmail.com/g' .env
               if ! grep -q "^SMTP_REQUIRE_TLS" .env; then
                 echo "SMTP_REQUIRE_TLS=true" >> .env
               else
@@ -60,6 +60,46 @@ jobs:
             done
 
             (sudo nginx -t && sudo systemctl reload nginx) 2>/dev/null || echo "Nginx verified"
+
+            # Configure Postfix Virtual Alias Forwarding for admin@thulirva.com -> thulirvaofficial@gmail.com
+            if [ -d /etc/postfix ]; then
+              echo "=== CONFIGURING POSTFIX VIRTUAL ALIASES ==="
+              sudo touch /etc/postfix/virtual
+              if ! sudo grep -q "admin@thulirva.com" /etc/postfix/virtual; then
+                echo "admin@thulirva.com thulirvaofficial@gmail.com, kameshsk6512@gmail.com" | sudo tee -a /etc/postfix/virtual
+              else
+                sudo sed -i 's/^admin@thulirva.com.*/admin@thulirva.com thulirvaofficial@gmail.com, kameshsk6512@gmail.com/g' /etc/postfix/virtual
+              fi
+              if ! sudo grep -q "support@thulirva.com" /etc/postfix/virtual; then
+                echo "support@thulirva.com thulirvaofficial@gmail.com, kameshsk6512@gmail.com" | sudo tee -a /etc/postfix/virtual
+              fi
+              sudo postmap /etc/postfix/virtual 2>/dev/null || true
+
+              CURRENT_VAM=$(sudo postconf -h virtual_alias_maps 2>/dev/null || true)
+              if [ -z "$CURRENT_VAM" ]; then
+                sudo postconf -e "virtual_alias_maps = hash:/etc/postfix/virtual"
+              elif ! echo "$CURRENT_VAM" | grep -q "/etc/postfix/virtual"; then
+                sudo postconf -e "virtual_alias_maps = $CURRENT_VAM, hash:/etc/postfix/virtual"
+              fi
+
+              (sudo postfix check && sudo systemctl reload postfix) 2>/dev/null || true
+              echo "Postfix virtual alias mapped: admin@thulirva.com -> thulirvaofficial@gmail.com"
+            fi
+
+            # Check and configure Dovecot accounts if user file exists
+            for pwfile in /etc/dovecot/users /etc/dovecot/passwd /etc/dovecot/dovecot-users; do
+              if [ -f "$pwfile" ]; then
+                echo "Found Dovecot user file: $pwfile"
+                if ! sudo grep -q "admin@thulirva.com" "$pwfile"; then
+                  NOREPLY_HASH=$(sudo grep "noreply@thulirva.com" "$pwfile" | cut -d: -f2 || true)
+                  if [ -n "$NOREPLY_HASH" ]; then
+                    echo "admin@thulirva.com:$NOREPLY_HASH" | sudo tee -a "$pwfile"
+                    echo "Added admin@thulirva.com to $pwfile"
+                  fi
+                fi
+              fi
+            done
+            (sudo doveadm reload 2>/dev/null) || true
 
             pm2 delete backend 2>/dev/null || true
             pm2 start server.js --name backend --update-env
