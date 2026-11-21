@@ -47,6 +47,7 @@ const { addDeviceToken } = require("../services/tokenStore");
 const { uploadDeliveryProof, uploadPartnerPhoto } = require("../middleware/uploadMiddleware");
 const { saveDeliveryProof, completeDelivery, getDeliveryDetails } = require("../services/deliveryProofService");
 const { validateTransition, normalizeStatus, recordStatusHistory, broadcastStatusChange } = require("../utils/deliveryStateMachine");
+const passwordResetService = require("../services/passwordResetService");
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || "THULIRVA_CHANGE_THIS_SECRET_KEY";
@@ -707,20 +708,95 @@ router.post("/heartbeat", authenticatePartner, heartbeatHandler);
 router.post("/auth/heartbeat", authenticatePartner, heartbeatHandler);
 
 /**
- * POST /api/delivery/forgot-password & reset-password
+ * POST /api/delivery/forgot-password & /api/delivery/send-reset-otp
+ * Delivery Partner requests password reset OTP
  */
-router.post("/forgot-password", async (req, res) => {
-    const { identifier, phone, partner_id } = req.body;
-    const key = (identifier || phone || partner_id || "").trim();
-    if (!key) {
-        return res.status(400).json({ success: false, message: "Please provide your registered phone number or Partner ID." });
+router.post(["/forgot-password", "/send-reset-otp"], async (req, res) => {
+    try {
+        const identifier = (req.body.identifier || req.body.partner_id || req.body.partnerId || req.body.phone || req.body.email || "").trim();
+        if (!identifier) {
+            return res.status(400).json({
+                success: false,
+                message: "Please provide your registered Partner ID, Mobile Number, or Email address."
+            });
+        }
+        const reqIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+        const result = await passwordResetService.generateAndSendResetOtp({
+            identifier,
+            method: "email",
+            role: "partner",
+            reqIp
+        });
+        return res.json(result);
+    } catch (err) {
+        console.error("[DELIVERY FORGOT PASSWORD ERROR]", err);
+        return res.status(400).json({ success: false, message: err.message || "Failed to process password reset request." });
     }
-    return res.json({
-        success: true,
-        message: "Password reset request recorded. Operations admin will verify your details and assist with the reset."
-    });
 });
+
+/**
+ * POST /api/delivery/resend-reset-otp
+ */
+router.post("/resend-reset-otp", async (req, res) => {
+    try {
+        const identifier = (req.body.identifier || req.body.partner_id || req.body.partnerId || req.body.phone || req.body.email || "").trim();
+        if (!identifier) {
+            return res.status(400).json({ success: false, message: "Partner ID, Mobile Number, or Email is required." });
+        }
+        const reqIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+        const result = await passwordResetService.generateAndSendResetOtp({
+            identifier,
+            method: "email",
+            role: "partner",
+            reqIp
+        });
+        return res.json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message || "Failed to resend verification code." });
+    }
+});
+
+/**
+ * POST /api/delivery/verify-reset-otp
+ */
+router.post("/verify-reset-otp", async (req, res) => {
+    try {
+        const identifier = (req.body.identifier || req.body.partner_id || req.body.partnerId || req.body.phone || req.body.email || "").trim();
+        const otp = (req.body.otp || req.body.code || "").trim();
+        const reqIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
+        const result = await passwordResetService.verifyResetOtp({
+            identifier,
+            otp,
+            reqIp
+        });
+        return res.json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message || "Failed to verify code." });
+    }
+});
+
+/**
+ * POST /api/delivery/reset-password
+ */
+router.post("/reset-password", async (req, res) => {
+    try {
+        const resetToken = req.body.reset_token || req.body.token || req.headers["x-reset-token"];
+        const newPassword = req.body.new_password || req.body.password;
+        const confirmPassword = req.body.confirm_password || req.body.confirmPassword;
+        const result = await passwordResetService.resetPassword({
+            reset_token: resetToken,
+            new_password: newPassword,
+            confirm_password: confirmPassword
+        });
+        return res.json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, message: err.message || "Failed to reset password." });
+    }
+});
+
 router.post("/auth/forgot-password", (req, res) => res.redirect(307, "../forgot-password"));
+router.post("/auth/verify-reset-otp", (req, res) => res.redirect(307, "../verify-reset-otp"));
+router.post("/auth/reset-password", (req, res) => res.redirect(307, "../reset-password"));
 
 /**
  * GET /api/delivery/profile-fields-config & /api/delivery/profile/fields-config

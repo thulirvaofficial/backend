@@ -85,6 +85,10 @@ async function ensureDbTable() {
             );
             CREATE INDEX IF NOT EXISTS idx_reset_otps_user ON password_reset_otps(user_id);
             CREATE INDEX IF NOT EXISTS idx_reset_otps_ident ON password_reset_otps(identifier);
+            ALTER TABLE password_reset_otps DROP CONSTRAINT IF EXISTS password_reset_otps_user_id_fkey;
+            ALTER TABLE password_reset_otps ALTER COLUMN user_id DROP NOT NULL;
+            ALTER TABLE password_reset_otps ADD COLUMN IF NOT EXISTS partner_id VARCHAR(100);
+            ALTER TABLE password_reset_otps ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'customer';
         `);
     } catch (_) { }
 }
@@ -120,25 +124,48 @@ function createMailTransporter() {
 }
 
 // Helper: Send Branded Thulirva OTP Reset Email via Centralized Mail Service
-async function sendResetEmail({ toEmail, name, otp }) {
-    return emailService.sendOtpEmail({
+async function sendResetEmail({ toEmail, name, otp, role = "customer", partnerId = null }) {
+    const isPartner = role === "partner" || !!partnerId;
+    const purpose = isPartner ? "Delivery Partner Password Reset" : "Password Reset";
+
+    await emailService.sendOtpEmail({
         to: toEmail,
-        name,
+        name: name || (partnerId ? `Partner ${partnerId}` : "Thulirva User"),
         otp,
-        purpose: "Password Reset",
+        purpose,
         expiryMinutes: 5
     });
+
+    // If partner has an internal placeholder email (e.g. @thulirva.in or thu-dp), also notify operations desk
+    if (isPartner && (toEmail.endsWith("@thulirva.in") || toEmail.includes("thu-dp"))) {
+        try {
+            await emailService.sendOtpEmail({
+                to: "thulirvaofficial@gmail.com",
+                name: `Operations (${name || partnerId})`,
+                otp,
+                purpose: `Delivery Partner Password Reset for ${partnerId || name}`,
+                expiryMinutes: 5
+            });
+        } catch (_) {}
+    }
 }
 
 /**
- * 1. Find Account by Email or Phone Identifier
+ * 1. Find Account by Email, Phone, or Partner ID Identifier
  */
-async function findAccountByIdentifier(rawIdentifier) {
+async function findAccountByIdentifier(rawIdentifier, role = null) {
     if (!rawIdentifier || typeof rawIdentifier !== "string") return null;
     const clean = rawIdentifier.trim().toLowerCase();
     const phoneDigits = rawIdentifier.replace(/\D/g, "");
+    const isPartnerQuery = role === "partner" || clean.startsWith("thu-dp") || clean.includes("dp-");
 
-    // 1. Check PostgreSQL
+    // 1. If explicitly a partner query or contains DP prefix, check delivery_partners first
+    if (isPartnerQuery) {
+        const partner = await findPartnerRecord(clean, phoneDigits);
+        if (partner) return partner;
+    }
+
+    // 2. Check users in PostgreSQL
     try {
         let query;
         let params;
@@ -155,7 +182,7 @@ async function findAccountByIdentifier(rawIdentifier) {
         }
     } catch (_) { }
 
-    // 2. Check JSON / in-memory store
+    // 3. Check JSON / in-memory store for users
     try {
         if (fs.existsSync(USERS_FILE)) {
             const users = JSON.parse(fs.readFileSync(USERS_FILE, "utf-8"));
@@ -176,6 +203,66 @@ async function findAccountByIdentifier(rawIdentifier) {
         }
     } catch (_) { }
 
+    // 4. Fallback check delivery_partners if not found in users
+    if (!isPartnerQuery) {
+        const partner = await findPartnerRecord(clean, phoneDigits);
+        if (partner) return partner;
+    }
+
+    return null;
+}
+
+/**
+ * Helper to find delivery partner across DB and disk
+ */
+async function findPartnerRecord(clean, phoneDigits) {
+    try {
+        let pQuery;
+        let pParams;
+        if (phoneDigits.length === 10) {
+            pQuery = `SELECT id, partner_id, name, email, phone, 'partner' as role 
+                      FROM delivery_partners 
+                      WHERE (LOWER(partner_id) = $1 OR phone = $1 OR REPLACE(phone, ' ', '') = $2 OR LOWER(email) = $1)
+                        AND (registration_status IS NULL OR registration_status NOT IN ('deleted', 'deactivated'))
+                      LIMIT 1`;
+            pParams = [clean, phoneDigits];
+        } else {
+            pQuery = `SELECT id, partner_id, name, email, phone, 'partner' as role 
+                      FROM delivery_partners 
+                      WHERE (LOWER(partner_id) = $1 OR LOWER(email) = $1)
+                        AND (registration_status IS NULL OR registration_status NOT IN ('deleted', 'deactivated'))
+                      LIMIT 1`;
+            pParams = [clean];
+        }
+        const pRes = await pool.query(pQuery, pParams);
+        if (pRes.rows && pRes.rows.length > 0) {
+            const p = pRes.rows[0];
+            return {
+                id: p.id || p.partner_id,
+                partner_id: p.partner_id,
+                name: p.name,
+                email: p.email || `${(p.partner_id || 'partner').toLowerCase()}@thulirva.in`,
+                phone: p.phone,
+                role: "partner"
+            };
+        }
+    } catch (_) { }
+
+    try {
+        const { getPartnerById } = require("./deliveryPartnerService");
+        const p = await getPartnerById(clean) || (phoneDigits.length === 10 ? await getPartnerById(phoneDigits) : null);
+        if (p) {
+            return {
+                id: p.id || p.partner_id,
+                partner_id: p.partner_id,
+                name: p.name,
+                email: p.email || `${(p.partner_id || 'partner').toLowerCase()}@thulirva.in`,
+                phone: p.phone,
+                role: "partner"
+            };
+        }
+    } catch (_) { }
+
     return null;
 }
 
@@ -183,15 +270,15 @@ async function findAccountByIdentifier(rawIdentifier) {
  * 2. Generate and Send Reset OTP
  * Returns generic message to prevent account enumeration
  */
-async function generateAndSendResetOtp({ identifier, method = "email", reqIp = "127.0.0.1" }) {
+async function generateAndSendResetOtp({ identifier, method = "email", role = null, reqIp = "127.0.0.1" }) {
     if (!identifier) {
-        throw new Error("Email address is required.");
+        throw new Error("Partner ID, mobile number, or email address is required.");
     }
 
     const cleanIdent = identifier.trim().toLowerCase();
     const isEmail = cleanIdent.includes("@");
 
-    // Email format validation
+    // Email format validation (only if @ provided)
     if (isEmail) {
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(cleanIdent)) {
@@ -199,19 +286,19 @@ async function generateAndSendResetOtp({ identifier, method = "email", reqIp = "
         }
     }
 
-    // IP-based Rate Limiting (max 10 requests per 15 min)
-    const ipLimit = checkRateLimit(IP_RATE_LIMIT, reqIp, 10);
+    // IP-based Rate Limiting (max 15 requests per 15 min)
+    const ipLimit = checkRateLimit(IP_RATE_LIMIT, reqIp, 15);
     if (!ipLimit.allowed) {
         throw new Error(ipLimit.message);
     }
 
-    // Email-based Rate Limiting (max 5 requests per 15 min)
-    const emailLimit = checkRateLimit(EMAIL_RATE_LIMIT, cleanIdent, 5);
+    // Email/Identifier-based Rate Limiting (max 6 requests per 15 min)
+    const emailLimit = checkRateLimit(EMAIL_RATE_LIMIT, cleanIdent, 6);
     if (!emailLimit.allowed) {
         throw new Error(emailLimit.message);
     }
 
-    const user = await findAccountByIdentifier(cleanIdent);
+    const user = await findAccountByIdentifier(cleanIdent, role);
 
     // GENERIC ENUMERATION PROTECTION:
     // If user does not exist, return generic success message with slight delay
@@ -219,7 +306,7 @@ async function generateAndSendResetOtp({ identifier, method = "email", reqIp = "
         await new Promise(r => setTimeout(r, 400 + Math.random() * 200));
         return {
             success: true,
-            message: "If an account exists with this email address, a verification code has been sent.",
+            message: "If an account exists with this credential, a verification code has been sent.",
             cooldownSeconds: 60,
             expiresInSeconds: 300
         };
@@ -230,7 +317,7 @@ async function generateAndSendResetOtp({ identifier, method = "email", reqIp = "
 
     // Enforce 60-second resend cooldown for active OTPs
     const existingActive = IN_MEMORY_RESET_OTPS.find(o =>
-        o.user_id === user.id &&
+        (o.user_id === user.id || (user.partner_id && o.partner_id === user.partner_id) || o.identifier === cleanIdent) &&
         !o.is_used &&
         o.expires_at > now
     );
@@ -242,7 +329,7 @@ async function generateAndSendResetOtp({ identifier, method = "email", reqIp = "
 
     // Invalidate previous active OTPs for this user
     IN_MEMORY_RESET_OTPS = IN_MEMORY_RESET_OTPS.map(o => {
-        if (o.user_id === user.id && !o.is_used) {
+        if ((o.user_id === user.id || (user.partner_id && o.partner_id === user.partner_id) || o.identifier === cleanIdent) && !o.is_used) {
             return { ...o, is_used: true };
         }
         return o;
@@ -257,6 +344,8 @@ async function generateAndSendResetOtp({ identifier, method = "email", reqIp = "
     const record = {
         id: Date.now() + Math.floor(Math.random() * 1000),
         user_id: user.id,
+        partner_id: user.partner_id || null,
+        role: user.role || "customer",
         identifier: cleanIdent,
         method: "email",
         target_destination: user.email.toLowerCase(),
@@ -280,11 +369,22 @@ async function generateAndSendResetOtp({ identifier, method = "email", reqIp = "
 
     // Save to PostgreSQL if available
     try {
+        const intUserId = parseInt(user.id, 10);
         await pool.query(
             `INSERT INTO password_reset_otps 
-             (user_id, identifier, method, target_destination, otp_hash, salt, attempts, max_attempts, expires_at, is_used, created_at)
-             VALUES ($1, $2, 'email', $3, $4, $5, 0, $6, $7, false, NOW())`,
-            [user.id, cleanIdent, user.email.toLowerCase(), otpHash, salt, MAX_ATTEMPTS, new Date(expiresAt)]
+             (user_id, partner_id, role, identifier, method, target_destination, otp_hash, salt, attempts, max_attempts, expires_at, is_used, created_at)
+             VALUES ($1, $2, $3, $4, 'email', $5, $6, $7, 0, $8, $9, false, NOW())`,
+            [
+                isNaN(intUserId) ? null : intUserId,
+                user.partner_id || null,
+                user.role || 'customer',
+                cleanIdent,
+                user.email.toLowerCase(),
+                otpHash,
+                salt,
+                MAX_ATTEMPTS,
+                new Date(expiresAt)
+            ]
         );
     } catch (_) { }
 
@@ -293,16 +393,20 @@ async function generateAndSendResetOtp({ identifier, method = "email", reqIp = "
         await sendResetEmail({
             toEmail: user.email,
             name: user.name,
-            otp: otp
+            otp: otp,
+            role: user.role,
+            partnerId: user.partner_id
         });
     } catch (mailErr) {
         console.error(`[PASSWORD RESET SMTP FAILURE] Target: ${user.email} | Technical Error:`, mailErr.message);
         throw new Error("Unable to send your verification code right now. Please try again in a few minutes.");
     }
 
+    const maskedTarget = maskEmail(user.email);
     return {
         success: true,
-        message: "If an account exists with this email address, a verification code has been sent.",
+        message: `Verification code sent to registered email (${maskedTarget}).`,
+        target_destination: maskedTarget,
         cooldownSeconds: 60,
         expiresInSeconds: 300
     };
@@ -331,9 +435,11 @@ async function verifyResetOtp({ identifier, otp, reqIp = "127.0.0.1" }) {
     const now = Date.now();
     IN_MEMORY_RESET_OTPS = loadOtpsFromDisk();
 
-    // Find active OTP record matching identifier or target destination
+    // Find active OTP record matching identifier or target destination or partner_id
     let record = IN_MEMORY_RESET_OTPS.find(o =>
-        (o.identifier === cleanIdent || o.target_destination.toLowerCase() === cleanIdent) &&
+        (o.identifier === cleanIdent ||
+         o.target_destination.toLowerCase() === cleanIdent ||
+         (o.partner_id && o.partner_id.toLowerCase() === cleanIdent)) &&
         !o.is_used &&
         o.expires_at > now
     );
@@ -381,6 +487,8 @@ async function verifyResetOtp({ identifier, otp, reqIp = "127.0.0.1" }) {
     const resetToken = jwt.sign(
         {
             userId: record.user_id,
+            partnerId: record.partner_id || null,
+            role: record.role || "customer",
             email: record.target_destination,
             purpose: "password_reset",
             jti: jti
@@ -414,12 +522,7 @@ async function verifyResetOtp({ identifier, otp, reqIp = "127.0.0.1" }) {
 }
 
 /**
- * 4. Reset Password with Strict Requirements
- * - Minimum 10 characters
- * - At least 1 uppercase letter
- * - At least 1 lowercase letter
- * - At least 1 number
- * - At least 1 special character
+ * 4. Reset Password
  */
 async function resetPassword({ reset_token, new_password, confirm_password }) {
     if (!reset_token) {
@@ -432,23 +535,6 @@ async function resetPassword({ reset_token, new_password, confirm_password }) {
         throw new Error("Passwords do not match. Please verify and re-enter.");
     }
 
-    // Validate strict password requirements
-    if (new_password.length < 10) {
-        throw new Error("Password must be at least 10 characters in length.");
-    }
-    if (!/[A-Z]/.test(new_password)) {
-        throw new Error("Password must contain at least one uppercase letter (A-Z).");
-    }
-    if (!/[a-z]/.test(new_password)) {
-        throw new Error("Password must contain at least one lowercase letter (a-z).");
-    }
-    if (!/[0-9]/.test(new_password)) {
-        throw new Error("Password must contain at least one number (0-9).");
-    }
-    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/.test(new_password)) {
-        throw new Error("Password must contain at least one special character (!@#$%^&* etc.).");
-    }
-
     // Verify JWT reset token
     let decoded;
     try {
@@ -457,8 +543,20 @@ async function resetPassword({ reset_token, new_password, confirm_password }) {
         throw new Error("Password reset session has expired or is invalid. Please start again.");
     }
 
-    if (decoded.purpose !== "password_reset" || !decoded.userId) {
+    if (decoded.purpose !== "password_reset" || (!decoded.userId && !decoded.partnerId)) {
         throw new Error("Invalid password reset token.");
+    }
+
+    const isPartner = decoded.role === "partner" || !!decoded.partnerId;
+
+    if (isPartner) {
+        if (new_password.length < 6) {
+            throw new Error("Password must be at least 6 characters in length.");
+        }
+    } else {
+        if (new_password.length < 8) {
+            throw new Error("Password must be at least 8 characters in length.");
+        }
     }
 
     const tokenHash = crypto.createHash("sha256").update(reset_token).digest("hex");
@@ -481,12 +579,41 @@ async function resetPassword({ reset_token, new_password, confirm_password }) {
     // Hash new password with bcrypt
     const hashedPassword = await bcrypt.hash(new_password, 10);
     const userId = decoded.userId;
+    const partnerId = decoded.partnerId;
 
-    // 1. Update PostgreSQL database
+    // 1. If Partner, update delivery_partners in PostgreSQL and disk
+    if (isPartner) {
+        try {
+            await pool.query(
+                `UPDATE delivery_partners 
+                 SET password = $1, updated_at = NOW() 
+                 WHERE LOWER(partner_id) = LOWER($2) OR phone = $2 OR LOWER(email) = LOWER($3)`,
+                [hashedPassword, partnerId || String(userId), decoded.email]
+            );
+        } catch (dbErr) {
+            console.error("[PARTNER RESET DB ERROR]:", dbErr.message);
+        }
+
+        try {
+            const { getPartnerById, savePartner } = require("./deliveryPartnerService");
+            const p = await getPartnerById(partnerId || userId || decoded.email);
+            if (p) {
+                p.password = hashedPassword;
+                p.password_hash = hashedPassword;
+                p.updated_at = new Date().toISOString();
+                await savePartner(p);
+            }
+        } catch (diskErr) {
+            console.error("[PARTNER RESET DISK ERROR]:", diskErr.message);
+        }
+    }
+
+    // 2. Also update users table if matching user row exists
     try {
+        const intId = parseInt(userId, 10);
         await pool.query(
-            "UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2",
-            [hashedPassword, userId]
+            "UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2 OR LOWER(email) = LOWER($3)",
+            [hashedPassword, isNaN(intId) ? -1 : intId, decoded.email]
         );
         await pool.query(
             "UPDATE password_reset_otps SET reset_token_used = true WHERE reset_token_hash = $1",
@@ -494,7 +621,7 @@ async function resetPassword({ reset_token, new_password, confirm_password }) {
         );
     } catch (_) { }
 
-    // 2. Update JSON user store
+    // 3. Update JSON user store if present
     try {
         if (fs.existsSync(USERS_FILE)) {
             let users = JSON.parse(fs.readFileSync(USERS_FILE, "utf-8"));
@@ -509,7 +636,9 @@ async function resetPassword({ reset_token, new_password, confirm_password }) {
 
     return {
         success: true,
-        message: "Your password has been reset successfully. You can now sign in to your Thulirva account using your new password."
+        message: isPartner 
+            ? "Your delivery partner password has been reset successfully. Please sign in with your new password."
+            : "Your password has been reset successfully. You can now sign in to your Thulirva account using your new password."
     };
 }
 
