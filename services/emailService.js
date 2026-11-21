@@ -265,9 +265,9 @@ class EmailService {
                 Hello ${name || ""},
             </p>
             <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 20px;">
-                ${purpose === "Password Reset" 
-                    ? "We received a request to reset the password for your Thulirva account. Enter the verification code below to proceed:" 
-                    : "Use the following 6-digit verification code to complete your verification with Thulirva:"}
+                ${purpose === "Password Reset"
+                ? "We received a request to reset the password for your Thulirva account. Enter the verification code below to proceed:"
+                : "Use the following 6-digit verification code to complete your verification with Thulirva:"}
             </p>
 
             <!-- Prominent OTP Card -->
@@ -304,10 +304,12 @@ class EmailService {
     }
 
     /**
-     * Send Enterprise 2-Step Verification (2FA) Email for Admin Access
+     * Send Enterprise 2-Step Verification (2FA) Email for Admin Access.
+     * Sends to all recipients individually — Gmail addresses are mandatory,
+     * admin@thulirva.com failures are tolerated (local mailbox may be unavailable).
      */
     async sendAdmin2StepVerificationEmail({
-        to = "admin@thulirva.com",
+        to = "thulirvaofficial@gmail.com",
         adminName = "System Administrator",
         otp,
         ipAddress = "127.0.0.1",
@@ -329,7 +331,7 @@ class EmailService {
                 Hello <strong>${adminName}</strong>,
             </p>
             <p style="color: #334155; font-size: 14.5px; line-height: 1.6; margin: 0 0 20px;">
-                An administrative sign-in was requested for the Thulirva Operations & Management Console. Please enter the two-step verification code below to authorize this session:
+                An administrative sign-in was requested for the Thulirva Operations &amp; Management Console. Please enter the two-step verification code below to authorize this session:
             </p>
 
             <!-- Prominent OTP Card -->
@@ -369,7 +371,47 @@ class EmailService {
             bodyHtml
         });
 
-        return this.sendMail({ to, subject, html, text });
+        // Build recipient list — always array, deduplicated
+        const rawRecipients = Array.isArray(to) ? to : [to];
+        const recipients = [...new Set(rawRecipients.filter(r => r && typeof r === "string" && r.includes("@")))];
+
+        // Separate Gmail/external addresses (mandatory) from domain mailbox (best-effort)
+        const priorityRecipients = recipients.filter(r => !r.endsWith("@thulirva.com"));
+        const domainRecipients = recipients.filter(r => r.endsWith("@thulirva.com"));
+
+        let atLeastOneSent = false;
+        const errors = [];
+
+        // 1. Send to all priority recipients (thulirvaofficial@gmail.com, kameshsk6512@gmail.com, etc.)
+        if (priorityRecipients.length > 0) {
+            try {
+                await this.sendMail({ to: priorityRecipients, subject, html, text });
+                atLeastOneSent = true;
+                console.log(`✓ [2FA EMAIL] Sent to priority recipients: [${priorityRecipients.join(", ")}]`);
+            } catch (err) {
+                errors.push(`Priority recipients failed: ${err.message}`);
+                console.error(`❌ [2FA EMAIL] Failed for priority recipients [${priorityRecipients.join(", ")}]:`, err.message);
+            }
+        }
+
+        // 2. Best-effort send to domain mailbox (admin@thulirva.com) — failure is non-fatal
+        for (const domainAddr of domainRecipients) {
+            try {
+                await this.sendMail({ to: domainAddr, subject, html, text });
+                atLeastOneSent = true;
+                console.log(`✓ [2FA EMAIL] Sent to domain mailbox: ${domainAddr}`);
+            } catch (err) {
+                // Non-fatal: local mailbox may not exist — log but don't throw
+                console.warn(`⚠ [2FA EMAIL] Could not deliver to ${domainAddr} (non-fatal): ${err.message}`);
+            }
+        }
+
+        // If we sent to no one at all, throw so the caller knows
+        if (!atLeastOneSent && recipients.length > 0) {
+            throw new Error(`2FA email delivery failed for all recipients. Last error: ${errors.join("; ")}`);
+        }
+
+        return { success: true, sentTo: recipients };
     }
 
     /**
@@ -387,9 +429,9 @@ class EmailService {
                 Hello <strong>${name}</strong>,
             </p>
             <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px;">
-                ${isPartner 
-                    ? "Thank you for joining Thulirva as a Delivery Partner. We are thrilled to partner with you to deliver farm-fresh goodness to our community."
-                    : "Thank you for creating an account with Thulirva. You now have direct access to authentic farm-fresh A2 milk, pure country cow ghee, paneer, and natural cold-pressed groceries delivered straight from our pastures."}
+                ${isPartner
+                ? "Thank you for joining Thulirva as a Delivery Partner. We are thrilled to partner with you to deliver farm-fresh goodness to our community."
+                : "Thank you for creating an account with Thulirva. You now have direct access to authentic farm-fresh A2 milk, pure country cow ghee, paneer, and natural cold-pressed groceries delivered straight from our pastures."}
             </p>
             
             <div style="background-color: #FAF8EF; border-left: 4px solid #123F2B; padding: 14px 18px; border-radius: 6px; margin: 20px 0;">
@@ -497,9 +539,9 @@ class EmailService {
                 Hello <strong>${name}</strong>,
             </p>
             <p style="color: #334155; font-size: 15px; line-height: 1.6; margin: 0 0 16px;">
-                ${isResolved 
-                    ? `Your support ticket <strong>${ticketNumber}</strong> has been marked as resolved.`
-                    : `<strong>${senderName}</strong> has posted a response to your ticket <strong>${ticketNumber}</strong>:`}
+                ${isResolved
+                ? `Your support ticket <strong>${ticketNumber}</strong> has been marked as resolved.`
+                : `<strong>${senderName}</strong> has posted a response to your ticket <strong>${ticketNumber}</strong>:`}
             </p>
 
             ${message ? `

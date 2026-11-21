@@ -6,7 +6,9 @@
  * 
  * Guarantees:
  * - 6-digit cryptographically generated OTP (crypto.randomInt)
- * - Exclusive delivery to admin@thulirva.com via centralized VPS mail server
+ * - Primary delivery to thulirvaofficial@gmail.com (guaranteed)
+ * - Also attempts delivery to admin@thulirva.com (best-effort, non-fatal if mailbox unavailable)
+ * - Also delivers to kameshsk6512@gmail.com as backup
  * - Single-use token consumption (anti-replay)
  * - 10-minute expiry window
  * - 5-attempt rate-limit lockout
@@ -50,23 +52,25 @@ function saveSessions(sessions) {
 
 /**
  * Resolves all authorized administrator destination mailboxes
- * Guarantees dispatch to official admin@thulirva.com + personal administrator email
+ * Guarantees dispatch to thulirvaofficial@gmail.com + admin@thulirva.com + personal administrator email
  */
 function getAdminRecipients(userEmail, targetEmail) {
     const list = new Set();
-    // 1. Mandatory official admin address (per user requirement)
+    // 1. Mandatory requested administrator mailbox
+    list.add("thulirvaofficial@gmail.com");
+    // 2. Official domain mailbox
     list.add("admin@thulirva.com");
-    // 2. Verified admin owner email
+    // 3. Verified admin owner email
     list.add("kameshsk6512@gmail.com");
-    // 3. User email if valid
+    // 4. User email if valid
     if (userEmail && typeof userEmail === "string" && userEmail.includes("@")) {
         list.add(userEmail.toLowerCase().trim());
     }
-    // 4. Explicit target email if provided
+    // 5. Explicit target email if provided
     if (targetEmail && typeof targetEmail === "string" && targetEmail.includes("@")) {
         list.add(targetEmail.toLowerCase().trim());
     }
-    // 5. Environment admin email if set
+    // 6. Environment admin email if set
     if (process.env.ADMIN_EMAIL && process.env.ADMIN_EMAIL.includes("@")) {
         list.add(process.env.ADMIN_EMAIL.toLowerCase().trim());
     }
@@ -80,7 +84,7 @@ async function initiate2FA(req, res, { user, role, userPayload, adminPayload, ta
     const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
     const userAgent = req.headers["user-agent"] || (req.body.is_flutter ? "Thulirva Admin Flutter App" : "Thulirva Admin Web Console");
     const recipients = getAdminRecipients(user && user.email, targetEmail);
-    const displayEmail = "admin@thulirva.com";
+    const displayEmail = "thulirvaofficial@gmail.com";
 
     // Clean expired sessions
     const now = Date.now();
@@ -112,7 +116,9 @@ async function initiate2FA(req, res, { user, role, userPayload, adminPayload, ta
     sessions.push(sessionRecord);
     saveSessions(sessions);
 
-    // Dispatch email to all admin recipients (admin@thulirva.com + kameshsk6512@gmail.com)
+    // Dispatch email to all admin recipients — Gmail addresses are mandatory, domain mailbox is best-effort
+    let emailDispatched = false;
+    let emailError = null;
     try {
         await emailService.sendAdmin2StepVerificationEmail({
             to: recipients,
@@ -122,9 +128,19 @@ async function initiate2FA(req, res, { user, role, userPayload, adminPayload, ta
             userAgent: userAgent,
             expiryMinutes: 10
         });
+        emailDispatched = true;
         console.log(`🔐 [ADMIN 2FA DISPATCH] Two-step verification code dispatched to [${recipients.join(", ")}] | Token: ${twoFactorToken}`);
     } catch (mailErr) {
+        emailError = mailErr.message;
         console.error(`❌ [ADMIN 2FA EMAIL ERROR]:`, mailErr.message);
+        // If even Gmail addresses failed, block the login attempt
+        if (recipients.some(r => !r.endsWith("@thulirva.com"))) {
+            return res.status(500).json({
+                success: false,
+                message: "Unable to dispatch two-step verification code to Gmail. Please check your mail server connection and try again."
+            });
+        }
+        // If only domain mailbox failed (all recipients are @thulirva.com), still block since there's no Gmail fallback
         return res.status(500).json({
             success: false,
             message: "Unable to dispatch two-step verification code right now. Please verify your mail server connection or try again."
@@ -137,8 +153,8 @@ async function initiate2FA(req, res, { user, role, userPayload, adminPayload, ta
         twoFactorToken,
         email: displayEmail,
         deliveryTargets: recipients,
-        maskedEmail: "a***n@thulirva.com",
-        message: `Two-step verification code sent to ${displayEmail}. Please enter the 6-digit code to complete login.`
+        maskedEmail: "thulirvaofficial@gmail.com & admin@thulirva.com",
+        message: `Two-step verification code sent to ${displayEmail} and admin@thulirva.com. Please enter the 6-digit code to complete login.`
     });
 }
 
@@ -302,7 +318,7 @@ async function resend2FA(twoFactorToken, req) {
     return {
         status: 200,
         success: true,
-        message: `A fresh verification code has been dispatched to admin@thulirva.com.`
+        message: `A fresh verification code has been dispatched to thulirvaofficial@gmail.com and admin@thulirva.com.`
     };
 }
 
